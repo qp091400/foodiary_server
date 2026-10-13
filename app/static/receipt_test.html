@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>영수증 인식 테스트</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f6f8; --card: #ffffff; --text: #1c1e21; --muted: #667085; --line: #e4e7ec;
+    --accent: #2563eb; --warn-bg: #fff4e5; --warn: #b54708; --err-bg: #fef1f1; --err: #b42318; --dim: #98a2b3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101317; --card: #1a1e24; --text: #e7e9ec; --muted: #98a2b3; --line: #2b313a;
+      --accent: #6aa5ff; --warn-bg: #3a2a14; --warn: #fdb974; --err-bg: #3a1a1a; --err: #fda29b; --dim: #667085;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px 64px; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+  }
+  main { max-width: 1200px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 10px; color: var(--muted); font-weight: 600; }
+  .lead { margin: 0 0 20px; color: var(--muted); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .drop {
+    display: block; text-align: center; padding: 28px 16px; cursor: pointer;
+    border: 2px dashed var(--line); border-radius: 12px; background: var(--card);
+  }
+  .drop:hover, .drop.over { border-color: var(--accent); }
+  .drop strong { display: block; font-size: 16px; }
+  .drop span { color: var(--muted); font-size: 13px; }
+  .drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .drop:focus-within { border-color: var(--accent); }
+  .pick { display: grid; gap: 12px; }
+  /* "사진 찍기"는 손가락으로 쓰는 기기(휴대폰·태블릿)에서만 보인다 */
+  .camera, .for-touch { display: none; }
+  @media (pointer: coarse) {
+    .camera { display: block; border-style: solid; border-color: var(--accent); }
+    .camera strong { color: var(--accent); }
+    .for-mouse { display: none; }
+    .for-touch { display: inline; }
+  }
+  .status { margin: 16px 0 0; color: var(--muted); }
+  .note { margin: 8px 0 0; padding: 10px 12px; border-radius: 8px; }
+  .note.warn { background: var(--warn-bg); color: var(--warn); }
+  .note.error { background: var(--err-bg); color: var(--err); }
+  .layout { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 16px; margin-top: 16px; align-items: start; }
+  @media (max-width: 860px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+  .layout > section, .results > section { min-width: 0; }
+  .results { display: grid; gap: 16px; }
+  #preview { display: block; max-width: 100%; max-height: 70vh; margin: 0 auto; border-radius: 8px; }
+  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  .fact span { display: block; font-size: 12px; color: var(--muted); }
+  .fact strong { font-size: 16px; word-break: break-all; }
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; }
+  td.num, th.num { text-align: right; }
+  td.name { white-space: normal; min-width: 140px; }
+  tr.excluded td { color: var(--dim); }
+  .low { color: var(--warn); font-weight: 600; }
+  .sub { display: block; font-size: 12px; color: var(--muted); }
+  ol.lines { margin: 0; padding-left: 28px; font: 13px/1.6 ui-monospace, Consolas, "D2Coding", monospace; overflow-x: auto; }
+  ol.lines li { white-space: pre; }
+  details summary { cursor: pointer; color: var(--muted); }
+  pre { margin: 10px 0 0; overflow-x: auto; font: 12px/1.5 ui-monospace, Consolas, monospace; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>영수증 인식 테스트</h1>
+  <p class="lead">사진을 올리면 실제 업로드와 같은 방식으로 인식한 결과를 보여 줍니다. 여기서 올린 것은 저장되지 않습니다.</p>
+
+  <div class="pick">
+    <label class="drop camera">
+      <input type="file" id="camera" accept="image/*" capture="environment">
+      <strong>사진 찍기</strong>
+      <span>카메라로 영수증을 바로 찍어 올립니다</span>
+    </label>
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept="image/*">
+      <strong>영수증 사진 선택</strong>
+      <span class="for-mouse">눌러서 고르거나 여기로 끌어다 놓으세요</span>
+      <span class="for-touch">앨범에 있는 사진을 고릅니다</span>
+    </label>
+  </div>
+
+  <p class="status" id="status" hidden></p>
+  <p class="note error" id="error" hidden></p>
+
+  <div class="layout" id="layout" hidden>
+    <section class="card">
+      <h2>올린 사진</h2>
+      <img id="preview" alt="올린 영수증 사진">
+    </section>
+
+    <div class="results" id="result" hidden>
+      <section class="card">
+        <h2>영수증 정보</h2>
+        <div class="facts" id="facts"></div>
+        <div id="notes"></div>
+      </section>
+
+      <section class="card">
+        <h2>읽어낸 품목 <span id="itemCount"></span></h2>
+        <div class="scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th><th>품목</th><th>용량</th><th class="num">수량</th><th class="num">단가</th><th class="num">금액</th>
+                <th class="num">할인</th><th>카테고리</th><th>예상 소비기한</th><th>냉장고</th><th class="num">인식률</th>
+              </tr>
+            </thead>
+            <tbody id="items"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>OCR이 읽은 원문 줄</h2>
+        <ol class="lines" id="lines"></ol>
+      </section>
+
+      <section class="card">
+        <details>
+          <summary>응답 JSON 보기</summary>
+          <pre id="json"></pre>
+        </details>
+      </section>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const SOURCE = { barcode: "바코드 조회", category: "카테고리 추정", manual: "직접 입력" };
+const STORAGE = { fridge: "냉장", freezer: "냉동", room: "실온" };
+
+const won = (value) => (value == null ? "-" : value.toLocaleString("ko-KR") + "원");
+
+function el(tag, text, className) {
+  const node = document.createElement(tag);
+  if (text != null) node.textContent = text;
+  if (className) node.className = className;
+  return node;
+}
+
+const MAX_SIDE = 2000; // 서버도 긴 변 2000px로 줄여서 인식한다
+const EXTENSIONS = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
+const inputs = [$("file"), $("camera")];
+
+function loadImage(file) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = URL.createObjectURL(file);
+  });
+}
+
+// 휴대폰 사진은 크다(수 MB 이상). 서버가 어차피 긴 변 2000px로 줄이므로 미리 줄여서 JPEG로 보낸다.
+// 이미 작고 서버가 받는 형식이면 원본 그대로, 브라우저가 못 여는 형식이어도 원본 그대로 보낸다.
+async function shrink(file) {
+  const extension = EXTENSIONS[file.type];
+  const original = { data: file, name: extension ? "receipt." + extension : file.name };
+  try {
+    const image = await loadImage(file);
+    const scale = Math.min(1, MAX_SIDE / Math.max(image.naturalWidth, image.naturalHeight));
+    if (scale === 1 && extension) return original;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(image.naturalWidth * scale);
+    canvas.height = Math.round(image.naturalHeight * scale);
+    canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
+    return blob ? { data: blob, name: "receipt.jpg" } : original;
+  } catch (error) {
+    return original;
+  }
+}
+
+function showError(message) {
+  $("error").textContent = message;
+  $("error").hidden = false;
+}
+
+function render(data) {
+  const facts = [
+    ["매장", data.store_name || "못 읽음"],
+    ["구매일", data.purchased_on || "못 읽음"],
+    ["영수증 총액", data.total_amount == null ? "못 읽음" : won(data.total_amount)],
+    ["품목 합계", won(data.items_sum)],
+    ["영수증 바코드", data.receipt_barcode || "없음"],
+    ["OCR 시간", data.ocr_seconds + "초"],
+  ];
+  $("facts").replaceChildren(
+    ...facts.map(([label, value]) => {
+      const box = el("div", null, "fact");
+      box.append(el("span", label), el("strong", value));
+      return box;
+    })
+  );
+
+  const notes = [];
+  if (data.ocr_error) notes.push(el("p", "OCR 실패: " + data.ocr_error, "note error"));
+  for (const warning of data.warnings) notes.push(el("p", warning, "note warn"));
+  $("notes").replaceChildren(...notes);
+
+  $("itemCount").textContent = data.draft_items.length + "개";
+  $("items").replaceChildren(
+    ...data.draft_items.map((item) => {
+      const row = el("tr", null, item.include ? "" : "excluded");
+      const name = el("td", item.name, "name");
+      if (item.product_name) name.append(el("span", "제품: " + item.product_name, "sub"));
+      if (item.barcode) name.append(el("span", "상품코드: " + item.barcode, "sub"));
+
+      const size = el("td", item.size_text || "-");
+      if (item.size_unit === "ml" || item.size_unit === "g") {
+        size.append(el("span", item.size_amount.toLocaleString("ko-KR") + item.size_unit, "sub"));
+      }
+
+      const category = el("td", item.category_label);
+      category.append(el("span", STORAGE[item.storage] || item.storage, "sub"));
+
+      const expiry = el("td", item.expiry_date || "-");
+      if (item.expiry_source) expiry.append(el("span", SOURCE[item.expiry_source] || item.expiry_source, "sub"));
+
+      const percent = Math.round(item.confidence * 100);
+      row.append(
+        el("td", item.line_no),
+        name,
+        size,
+        el("td", item.quantity, "num"),
+        el("td", won(item.unit_price), "num"),
+        el("td", won(item.amount), "num"),
+        el("td", item.discount ? "-" + won(item.discount) : "-", "num"),
+        category,
+        expiry,
+        el("td", item.include ? "넣음" : "제외 (비식품)"),
+        el("td", percent + "%", percent < 80 ? "num low" : "num")
+      );
+      return row;
+    })
+  );
+
+  $("lines").replaceChildren(...data.raw_lines.map((line) => el("li", line)));
+  $("json").textContent = JSON.stringify(data, null, 2);
+  $("result").hidden = false;
+}
+
+async function recognize(file) {
+  if (!file) return;
+  for (const input of inputs) input.disabled = true;
+  $("error").hidden = true;
+  $("result").hidden = true;
+  $("preview").src = URL.createObjectURL(file);
+  $("layout").hidden = false;
+
+  $("status").textContent = "사진 준비 중…";
+  $("status").hidden = false;
+  const upload = await shrink(file);
+
+  const started = Date.now();
+  const tick = () => {
+    const seconds = Math.floor((Date.now() - started) / 1000);
+    $("status").textContent = `인식 중… ${seconds}초 (사진 크기에 따라 10~30초 걸립니다)`;
+  };
+  tick();
+  const timer = setInterval(tick, 500);
+
+  try {
+    const body = new FormData();
+    body.append("file", upload.data, upload.name);
+    const response = await fetch("/dev/receipt-test", { method: "POST", body });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) throw new Error((data && data.detail) || `서버 오류 (HTTP ${response.status})`);
+    render(data);
+  } catch (error) {
+    // fetch 자체가 실패하면(TypeError) 서버에 닿지 못한 것이다
+    showError(error instanceof TypeError ? "서버에 연결할 수 없습니다. 서버가 켜져 있는지 확인해 주세요." : error.message);
+  } finally {
+    clearInterval(timer);
+    $("status").hidden = true;
+    for (const input of inputs) {
+      input.disabled = false;
+      input.value = "";
+    }
+  }
+}
+
+for (const input of inputs) {
+  input.addEventListener("change", (event) => recognize(event.target.files[0]));
+}
+
+const drop = $("drop");
+for (const type of ["dragenter", "dragover"]) {
+  drop.addEventListener(type, (event) => { event.preventDefault(); drop.classList.add("over"); });
+}
+for (const type of ["dragleave", "drop"]) {
+  drop.addEventListener(type, (event) => { event.preventDefault(); drop.classList.remove("over"); });
+}
+drop.addEventListener("drop", (event) => {
+  if (!$("file").disabled) recognize(event.dataTransfer.files[0]);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+# 영수증 OCR (로컬 모델, CPU). 서버·테스트만 돌릴 때는 설치하지 않아도 된다.
+# lang="korean"의 PP-OCRv5 인식 모델은 paddleocr 3.1부터 들어 있다.
+# 아래 조합으로 Docker(CPU)에서 동작을 확인했다.
+# paddlepaddle 3.3.x는 CPU 추론에서 "ConvertPirAttribute2RuntimeAttribute not support" 오류가 나므로 올리지 않는다.
+paddlepaddle==3.2.2
+paddleocr==3.7.0
