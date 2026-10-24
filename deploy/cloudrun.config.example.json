@@ -1,0 +1,12 @@
+{
+  "project": "your-project-id",
+  "project_number": "123456789012",
+  "region": "asia-northeast1",
+  "service": "foodiary",
+  "repository": "foodiary",
+  "bucket": "your-project-id-foodiary-uploads",
+  "origins": ["https://foodiary-123456789012.asia-northeast1.run.app"],
+  "smtp_host": "smtp.gmail.com",
+  "smtp_user": "owner@example.com",
+  "mail_from": "owner@example.com"
+}
