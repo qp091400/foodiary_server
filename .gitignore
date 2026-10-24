@@ -4,6 +4,16 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .env
+.env.*
+!.env.example
+!*.env.example
+!deploy/.env.production.example
+backups/
+artifacts/
+.cloudrun/
+*.secrets.json
+*.pem
+*.key
 uploads/
 *.db
 # VS Code Dev Containers 개인 설정
