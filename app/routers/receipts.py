@@ -33,6 +33,7 @@ from app.services import barcode as barcode_service
 from app.services.expiry import classify, estimate
 from app.services.foodsafety import ProductInfo, lookup_barcode
 from app.services.ocr import OcrEngine, get_ocr_engine
+from app.services.ocr.base import OcrBusyError
 from app.services.receipt_parser import ParsedReceipt, parse_receipt
 from app.timeutil import today, utcnow
 
@@ -210,9 +211,17 @@ def upload_receipt(
         # 5. OCR → 파서 → 품목별 카테고리·소비기한 (상품코드가 있으면 C005 조회)
         try:
             boxes = ocr.recognize(str(absolute_path))
+        except OcrBusyError:
+            raise HTTPException(
+                status_code=503,
+                detail="다른 영수증을 분석 중입니다. 잠시 후 다시 시도해 주세요.",
+                headers={"Retry-After": "10"},
+            ) from None
         except Exception:
             # 인식 실패는 "품목 0개" 초안으로 이어 간다. 사용자가 직접 추가할 수 있다.
             logger.exception("영수증 OCR 실패")
+            if settings.ocr_fail_closed:
+                raise HTTPException(status_code=503, detail="영수증 인식 서비스를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요.") from None
             boxes = []
         parsed = parse_receipt(boxes)
         purchased_on = plausible_purchase_date(parsed.purchased_on)

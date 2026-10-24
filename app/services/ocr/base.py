@@ -4,6 +4,10 @@ from dataclasses import dataclass
 from typing import Protocol
 
 
+class OcrBusyError(RuntimeError):
+    """이미 다른 영수증을 처리 중이다."""
+
+
 @dataclass
 class OcrBox:
     text: str

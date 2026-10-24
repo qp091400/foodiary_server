@@ -21,8 +21,8 @@ router = APIRouter(prefix="/fridges/{fridge_id}/items", tags=["식품"])
 _EPSILON = 1e-9  # 수량은 float라서 0.1 + 0.2 같은 오차를 감안한다
 
 
-def _get_item(db: Session, fridge_id: int, item_id: int) -> FoodItem:
-    item = db.get(FoodItem, item_id)
+def _get_item(db: Session, fridge_id: int, item_id: int, *, lock: bool = False) -> FoodItem:
+    item = db.get(FoodItem, item_id, with_for_update=lock)
     if item is None or item.fridge_id != fridge_id:
         raise HTTPException(status_code=404, detail="식품을 찾을 수 없습니다.")
     return item
@@ -122,7 +122,7 @@ def update_item(
     access: FridgeAccess = Depends(get_fridge_access),
     db: Session = Depends(get_db),
 ):
-    item = _get_item(db, access.fridge.id, item_id)
+    item = _get_item(db, access.fridge.id, item_id, lock=True)
     changes = payload.model_dump(exclude_unset=True)
 
     if "quantity" in changes or "remaining_quantity" in changes:
@@ -152,7 +152,7 @@ def update_item(
 
 @router.delete("/{item_id}", status_code=204, summary="잘못 넣은 식품 삭제 (구매 통계에서도 빠짐)")
 def delete_item(item_id: int, access: FridgeAccess = Depends(get_fridge_access), db: Session = Depends(get_db)):
-    db.delete(_get_item(db, access.fridge.id, item_id))
+    db.delete(_get_item(db, access.fridge.id, item_id, lock=True))
     db.commit()
     return Response(status_code=204)
 
@@ -164,7 +164,7 @@ def _finish(
     access: FridgeAccess,
     db: Session,
 ) -> FoodItem:
-    item = _get_item(db, access.fridge.id, item_id)
+    item = _get_item(db, access.fridge.id, item_id, lock=True)
     if item.status != "active":
         raise HTTPException(status_code=400, detail="이미 다 먹었거나 버린 식품입니다.")
     quantity = payload.quantity if payload and payload.quantity is not None else item.remaining_quantity

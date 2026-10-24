@@ -1,12 +1,14 @@
 """PaddleOCR(PP-OCRv5) 엔진. paddle은 처음 호출될 때만 import·로딩한다."""
 
 import logging
+import tempfile
 import threading
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from app.config import settings
-from app.services.ocr.base import OcrBox
+from app.services.ocr.base import OcrBox, OcrBusyError
 
 logger = logging.getLogger(__name__)
 
@@ -89,20 +91,43 @@ class PaddleOcrEngine:
         self._ocr: Any = None
         self._load_lock = threading.Lock()
         self._predict_lock = threading.Lock()  # paddle predictor는 스레드 안전하지 않다
+        self._ready = False
+
+    @property
+    def ready(self) -> bool:
+        return self._ready
 
     def _load(self) -> Any:
         if self._ocr is None:
             with self._load_lock:
                 if self._ocr is None:
-                    from paddleocr import PaddleOCR  # 지연 import: 설치 안 된 환경에서도 서버·테스트가 뜬다
-
                     logger.info("PaddleOCR 모델 로딩 (lang=%s) - 처음 한 번은 모델을 내려받느라 오래 걸립니다", self._lang)
                     options = {}
                     if self._det_max_side > 0:
                         # 검출만 줄인 해상도로 한다. 글자 인식은 원본 해상도에서 잘라 쓰므로 품질 손실이 작다.
                         options = {"text_det_limit_side_len": self._det_max_side, "text_det_limit_type": "max"}
+                    if settings.ocr_models_dir:
+                        from app.services.ocr.manifest import verify_model_files
+
+                        # 이미지 내 모델이 없거나 바뀌면 원격 다운로드로 대체하지 않는다.
+                        verify_model_files()
+                        root = Path(settings.ocr_models_dir)
+                        options.update(
+                            text_detection_model_dir=str(root / settings.ocr_detection_model),
+                            text_recognition_model_dir=str(root / settings.ocr_recognition_model),
+                            textline_orientation_model_dir=str(root / settings.ocr_textline_model),
+                        )
+                    from paddleocr import PaddleOCR  # 지연 import: 설치 안 된 환경에서도 서버·테스트가 뜬다
+
                     self._ocr = PaddleOCR(
                         lang=self._lang,
+                        ocr_version=settings.ocr_version,
+                        text_detection_model_name=settings.ocr_detection_model,
+                        text_recognition_model_name=settings.ocr_recognition_model,
+                        textline_orientation_model_name=settings.ocr_textline_model,
+                        device="cpu",
+                        cpu_threads=settings.ocr_cpu_threads,
+                        enable_mkldnn=False,
                         use_doc_orientation_classify=False,
                         use_doc_unwarping=False,
                         use_textline_orientation=True,
@@ -114,13 +139,43 @@ class PaddleOcrEngine:
         import numpy as np
         from PIL import Image
 
-        ocr = self._load()
-        # 경로 대신 배열을 넘긴다: OpenCV는 Windows에서 한글 등 비ASCII 경로를 읽지 못한다.
-        with Image.open(image_path) as image:
-            bgr = np.ascontiguousarray(np.asarray(image.convert("RGB"))[:, :, ::-1])
-        with self._predict_lock:
+        if not self._predict_lock.acquire(blocking=False):
+            raise OcrBusyError("OCR is busy")
+        try:
+            ocr = self._load()
+            # 경로 대신 배열: Windows의 비ASCII 경로도 지원한다.
+            with Image.open(image_path) as image:
+                bgr = np.ascontiguousarray(np.asarray(image.convert("RGB"))[:, :, ::-1])
             results = list(ocr.predict(bgr))
-        return boxes_from_results(results)
+            boxes = boxes_from_results(results)
+            self._ready = True
+            return boxes
+        except Exception:
+            self._ready = False
+            raise
+        finally:
+            self._predict_lock.release()
+
+    def warmup(self) -> None:
+        """설치 여부뿐 아니라 검출·방향·인식 모델의 실제 추론을 검사한다."""
+        from PIL import Image, ImageDraw, ImageFont
+
+        with tempfile.TemporaryDirectory(prefix="foodiary-ocr-") as folder:
+            path = Path(folder) / "warmup.jpg"
+            image = Image.new("RGB", (900, 220), "white")
+            ImageDraw.Draw(image).text((40, 70), "FOODIARY OCR 12345", fill="black", font=ImageFont.load_default(size=48))
+            image.save(path, "JPEG", quality=95)
+            if not self.recognize(str(path)):
+                self._ready = False
+                raise RuntimeError("OCR warmup returned no text")
+            if settings.app_env == "production":
+                from app.services.ocr.manifest import verify_model_files
+
+                try:
+                    verify_model_files()
+                except Exception:
+                    self._ready = False
+                    raise
 
 
 _engine: PaddleOcrEngine | None = None

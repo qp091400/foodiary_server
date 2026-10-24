@@ -13,6 +13,13 @@ os.environ.update(
         "MAX_UPLOAD_MB": "10",
         "DEV_TOOLS": "false",
         "OCR_DET_MAX_SIDE": "0",
+        "APP_ENV": "test",
+        "OCR_WARMUP": "false",
+        "OCR_FAIL_CLOSED": "false",
+        "OCR_MODELS_DIR": "",
+        "RATE_LIMIT_ENABLED": "false",
+        "RATE_LIMIT_SCOPE": "ip",
+        "TRUSTED_HOSTS": "*",
     }
 )
 
@@ -23,6 +30,7 @@ from app import security  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.database import Base, engine  # noqa: E402
 from app.main import app  # noqa: E402
+from app.middleware import request_limiter  # noqa: E402
 from app.services import email  # noqa: E402
 
 security.BCRYPT_ROUNDS = 4  # 테스트 속도용 (운영 기본값은 12)
@@ -35,6 +43,7 @@ def client(tmp_path, monkeypatch):
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     email.OUTBOX.clear()
+    request_limiter.clear()
     app.dependency_overrides.clear()
     with TestClient(app) as test_client:
         yield test_client

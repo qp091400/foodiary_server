@@ -89,6 +89,13 @@ def test_engine_loads_lazily_once_with_requested_options(fake_paddleocr, tmp_pat
     assert fake_paddleocr == [  # 두 번 불러도 모델은 한 번만 만든다
         {
             "lang": "korean",
+            "ocr_version": "PP-OCRv5",
+            "text_detection_model_name": "PP-OCRv5_server_det",
+            "text_recognition_model_name": "korean_PP-OCRv5_mobile_rec",
+            "textline_orientation_model_name": "PP-LCNet_x1_0_textline_ori",
+            "device": "cpu",
+            "cpu_threads": 2,
+            "enable_mkldnn": False,
             "use_doc_orientation_classify": False,
             "use_doc_unwarping": False,
             "use_textline_orientation": True,

@@ -261,6 +261,8 @@ class JoinRequest(BaseModel):
 
 
 class ItemCreate(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
+
     name: ItemName
     quantity: float = Field(1, gt=0)
     category: CategoryKey = None
@@ -275,6 +277,8 @@ class ItemCreate(BaseModel):
 
 class ItemUpdate(BaseModel):
     """보낸 필드만 수정한다. 가격·소비기한·메모는 null을 보내면 비운다."""
+
+    model_config = ConfigDict(allow_inf_nan=False)
 
     name: ItemName | None = None
     category: CategoryKey = None
@@ -295,6 +299,8 @@ class ItemUpdate(BaseModel):
 
 
 class ConsumeRequest(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
+
     quantity: float | None = Field(None, gt=0, description="비우면 남은 양 전부")
 
 
@@ -407,6 +413,8 @@ class ReceiptDetail(BaseModel):
 
 
 class ConfirmItem(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
+
     line_no: int | None = Field(None, description="초안의 line_no. 보내면 초안과 대조해 소비기한 출처를 유지한다")
     name: ItemName
     quantity: float = Field(gt=0)
