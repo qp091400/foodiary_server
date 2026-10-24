@@ -6,3 +6,6 @@ __pycache__/
 .env
 uploads/
 *.db
+# VS Code Dev Containers 개인 설정
+.devcontainer/
+.devcontainer.json
