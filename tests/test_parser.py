@@ -304,6 +304,10 @@ def test_purchase_date():
     assert find_purchase_date(["[구매]2026-10-13 14:22"]) == date(2026, 10, 13)
     assert find_purchase_date(["거래일시 20261013"]) == date(2026, 10, 13)
     assert find_purchase_date(["2026-13-45", "2026.02.30", "2026.10.13"]) == date(2026, 10, 13)  # 잘못된 날짜 무시
+    # OCR이 날짜와 시각 사이의 공백을 빼먹은 경우
+    assert find_purchase_date(["Tel.02-123-4567/2026-10-1214:22:05"]) == date(2026, 10, 12)
+    assert find_purchase_date(["2026-10-0511:40(월) POS:01"]) == date(2026, 10, 5)
+    assert find_purchase_date(["2026-10-131 2,000"]) is None
     # 날짜처럼 보이는 숫자들
     assert find_purchase_date(["콜라 2000 1 2000"]) is None
     assert find_purchase_date(["TEL 031-2020-1105"]) is None
@@ -324,3 +328,5 @@ def test_store_name_fallback():
     )
     assert parse_receipt([]).store_name is None
     assert parse_receipt([]).items == []
+    # 주문번호 줄은 매장명이 아니고, "가게/사업자번호/대표자" 줄에서는 가게 이름만 쓴다
+    assert parse_receipt(make_boxes([["[주문번호]0011"], ["행복식당/1234567890/홍길동"]])).store_name == "행복식당"

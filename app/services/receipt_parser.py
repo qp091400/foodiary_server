@@ -56,8 +56,12 @@ HEADER_WORDS = {"상품명", "품명", "품목", "상품코드", "코드", "바�
 STORE_RE = re.compile(
     r"마트|편의점|GS25|CU|세븐일레븐|이마트|홈플러스|롯데마트|코스트코|하나로|노브랜드|슈퍼|마켓|점$"
 )
+STORE_TAIL_RE = re.compile(r"\s*/\s*\d.*$")
 # 구분자가 공백뿐인 형태는 받지 않는다: "2000 1 2000" 같은 가격 줄이 2000-01-20으로 읽히기 때문.
-DATE_RE = re.compile(r"(?<![\d-])(20\d{2})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})(?!\d)")
+# 날짜 바로 뒤에 시각이 붙어 있어도 읽는다: OCR이 공백을 빼먹은 "2026-10-1214:22:05"
+DATE_RE = re.compile(
+    r"(?<![\d-])(20\d{2})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})(?:(?!\d)|(?=\d{1,2}:\d{2}))"
+)
 COMPACT_DATE_RE = re.compile(r"(?<![\d-])(20\d{2})(\d{2})(\d{2})(?!\d)")
 # 시각, 전화번호, 사업자번호가 있는 줄은 품목이 아니다.
 META_RE = re.compile(r"\d{1,2}:\d{2}|\d{2,4}-\d{3,4}-\d{4}|\d{3}-\d{2}-\d{5}")
@@ -331,9 +335,11 @@ def find_store_name(lines: list[str]) -> str | None:
             len(HANGUL_RE.findall(line)) >= 2
             and not NOISE_RE.search(line)
             and not ADDRESS_RE.search(line)
+            and "번호" not in line  # 주문번호·대기번호
             and not _is_header_only(line)
         ):
-            return line
+            # "가게이름/사업자번호/대표자"처럼 한 줄에 찍히면 가게 이름만
+            return STORE_TAIL_RE.sub("", line) or line
     return None
 
 
