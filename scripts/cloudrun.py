@@ -93,6 +93,7 @@ def environment(config: dict) -> dict[str, str]:
         TRUSTED_HOSTS=f"{urlsplit(service_url(config)).hostname},localhost,127.0.0.1",
         CORS_ORIGINS=",".join(config["origins"]), UPLOAD_DIR="/app/uploads", MAX_UPLOAD_MB="10",
         OCR_ENGINE="paddle", OCR_LANG="korean", OCR_DET_MAX_SIDE="1280", OCR_CPU_THREADS="2",
+        OCR_ORIENTATION_MODEL="PP-LCNet_x1_0_doc_ori",
         OCR_WARMUP="true", OCR_FAIL_CLOSED="true", RATE_LIMIT_ENABLED="true", RATE_LIMIT_SCOPE="global",
         AUTH_REQUESTS_PER_MINUTE="30", OCR_REQUESTS_PER_MINUTE="10", EMAIL_BACKEND="smtp",
         SMTP_HOST=config["smtp_host"], SMTP_PORT="587", SMTP_USER=config["smtp_user"], MAIL_FROM=config["mail_from"],

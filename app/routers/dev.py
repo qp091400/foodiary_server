@@ -26,6 +26,7 @@ from app.routers.receipts import (
     draft_warnings,
     load_image,
     plausible_purchase_date,
+    read_receipt,
     read_upload,
 )
 from app.services import barcode as barcode_service
@@ -73,7 +74,7 @@ def _recognize(file: UploadFile, db: Session, ocr: OcrEngine, *, show_errors: bo
         image.save(path, "JPEG", quality=90)
         started = time.perf_counter()
         try:
-            boxes = ocr.recognize(path)
+            boxes = read_receipt(ocr, path, landscape=image.width > image.height)
         except OcrBusyError:
             raise HTTPException(status_code=503, detail=OCR_BUSY, headers={"Retry-After": "10"}) from None
         except Exception as exc:

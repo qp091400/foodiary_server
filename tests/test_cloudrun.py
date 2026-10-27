@@ -53,6 +53,7 @@ def test_plan_is_offline_and_contains_no_secret_values(tmp_path, monkeypatch):
     env = cloudrun.environment(config())
     assert not set(cloudrun.SECRET_KEYS) & env.keys()
     assert "*" not in env["TRUSTED_HOSTS"] and env["RATE_LIMIT_SCOPE"] == "global"
+    assert env["OCR_ORIENTATION_MODEL"] == "PP-LCNet_x1_0_doc_ori"
 
 
 def test_setup_checks_project_number_before_any_mutation(tmp_path, monkeypatch):

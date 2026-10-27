@@ -1,5 +1,6 @@
 """운영 시 조용한 OCR 실패, 기본 비밀키, 무제한 요청을 허용하지 않는다."""
 
+from pathlib import Path
 from types import SimpleNamespace
 import hashlib
 import json
@@ -155,11 +156,12 @@ def test_non_finite_quantities_are_rejected_before_saving(client, quantity):
     assert client.get(f"/fridges/{fridge_id}/items", headers=auth(tokens)).json() == []
 
 
-def test_changed_model_files_are_rejected(tmp_path):
+def test_changed_model_files_are_rejected(tmp_path, monkeypatch):
     from app.services.ocr.manifest import verify_model_files
 
     expected = {}
-    for model in (settings.ocr_detection_model, settings.ocr_recognition_model, settings.ocr_textline_model):
+    orientation = settings.ocr_orientation_model
+    for model in (orientation, settings.ocr_detection_model, settings.ocr_recognition_model, settings.ocr_textline_model):
         path = tmp_path / model / "inference.pdiparams"
         path.parent.mkdir()
         path.write_bytes(b"verified model")
@@ -167,6 +169,24 @@ def test_changed_model_files_are_rejected(tmp_path):
     manifest = tmp_path / "manifest.json"
     manifest.write_text(json.dumps({"sha256": expected}), encoding="utf-8")
     assert verify_model_files(cache=tmp_path, manifest=manifest) == expected
+    # 방향 판별을 끄면 그 파일은 검사하지 않고, 목록에 없는 모델을 쓰면 거부한다
+    monkeypatch.setattr(settings, "ocr_orientation_model", "")
+    assert orientation not in str(verify_model_files(cache=tmp_path, manifest=manifest))
+    monkeypatch.setattr(settings, "ocr_orientation_model", "PP-LCNet_unverified_ori")
+    with pytest.raises(RuntimeError, match="names differ"):
+        verify_model_files(cache=tmp_path, manifest=manifest)
+    monkeypatch.setattr(settings, "ocr_orientation_model", orientation)
     path.write_bytes(b"different model")
     with pytest.raises(RuntimeError, match="checksum differs"):
         verify_model_files(cache=tmp_path, manifest=manifest)
+
+
+def test_deployment_manifest_lists_every_configured_model():
+    manifest = Path(__file__).resolve().parents[1] / "deploy" / "model-manifest.json"
+    names = {name.split("/", 1)[0] for name in json.loads(manifest.read_text(encoding="utf-8"))["sha256"]}
+    assert names == {
+        settings.ocr_detection_model,
+        settings.ocr_recognition_model,
+        settings.ocr_textline_model,
+        settings.ocr_orientation_model,
+    }

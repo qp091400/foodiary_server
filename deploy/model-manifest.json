@@ -8,6 +8,9 @@
     "korean_PP-OCRv5_mobile_rec/inference.yml": "f757fa1c40e99edcf27e9cce879b93eb2a51fa46f5ef39095689b8c37dd75998",
     "PP-LCNet_x1_0_textline_ori/inference.json": "b81929eeaff8e52db0fafb49c9fbfc5bc0572f81641fe0179cc52096323fb4d4",
     "PP-LCNet_x1_0_textline_ori/inference.pdiparams": "0de2bcf996cf553e2b848dd7b1769dafffc6917b1ccdf55c1d8efe7909fbf743",
-    "PP-LCNet_x1_0_textline_ori/inference.yml": "8d5120d0e1a30a9df7ed46aa9119da3796ed066777089d1c1d705f132d5e90f9"
+    "PP-LCNet_x1_0_textline_ori/inference.yml": "8d5120d0e1a30a9df7ed46aa9119da3796ed066777089d1c1d705f132d5e90f9",
+    "PP-LCNet_x1_0_doc_ori/inference.json": "3580978602f309c3554508dd85d4fe09b73a7e0d80d7f9e63258f5b72c390c69",
+    "PP-LCNet_x1_0_doc_ori/inference.pdiparams": "e8d6e7c5d264507e40e58a655779059d616b20d7441ea22047d829eb3931989c",
+    "PP-LCNet_x1_0_doc_ori/inference.yml": "9e195eb729a8173588cd0e8a852c8b373aa606e79e77b4ac7d8346f5426caf26"
   }
 }

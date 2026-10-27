@@ -12,6 +12,7 @@ from app.models import FoodItem, Receipt, ReceiptItem
 from app.services import barcode as barcode_service
 from app.services.foodsafety import BarcodeLookup, ProductInfo
 from app.services.ocr import get_ocr_engine
+from app.services.receipt_parser import parse_receipt
 from app.timeutil import today
 from tests.helpers import FakeOcrEngine, auth, default_fridge_id, image_bytes, make_boxes, signup
 
@@ -274,6 +275,42 @@ def test_sum_mismatch_warning(client, fridge):
     assert draft["items_sum"] == 2980
     assert draft["warnings"] == ["일부 품목을 못 읽었을 수 있어요"]
     assert draft["purchased_on"] is None
+
+
+class RotatingOcrEngine:
+    """사진을 돌려 다시 읽을 수 있는 엔진 흉내. 업로드가 넘긴 accept로 결과를 판정해 기록한다."""
+
+    can_rotate = True
+
+    def __init__(self, rows):
+        self.boxes = make_boxes(rows)
+        self.verdicts = []
+        self.ranks = []
+
+    def recognize(self, image_path, *, accept=None, rank=None):
+        self.verdicts.append(accept(self.boxes))
+        self.ranks.append(rank(self.boxes))
+        return self.boxes
+
+
+@pytest.mark.parametrize(
+    ("rows", "size", "upright"),
+    [
+        (RECEIPT_ROWS, (600, 900), True),  # 합계가 맞으면 방향이 맞다
+        (RECEIPT_ROWS, (900, 600), True),  # 가로 사진이어도
+        (RECEIPT_ROWS[:-1], (600, 900), True),  # 총액이 없어도 세로 사진에서 품목을 3개 이상 읽음
+        (RECEIPT_ROWS[:-1], (900, 600), False),  # 가로 사진에서 합계가 안 맞으면 돌려 읽는다
+        ([["ㄷㄷ"], ["2,980"]], (600, 900), False),  # 품목을 거의 못 읽음
+    ],
+    ids=["adds-up", "adds-up-landscape", "no-total-portrait", "no-total-landscape", "nothing-read"],
+)
+def test_upload_asks_the_engine_to_rotate_only_when_the_reading_looks_sideways(client, fridge, rows, size, upright):
+    engine = RotatingOcrEngine(rows)
+    app.dependency_overrides[get_ocr_engine] = lambda: engine
+    assert upload(client, fridge, data=image_bytes(size=size)).status_code == 201
+    assert engine.verdicts == [upright]
+    # 어느 방향도 받아들여지지 않으면 품목을 가장 많이 읽은 방향을 고른다
+    assert engine.ranks[0][0] == len(parse_receipt(engine.boxes).items)
 
 
 def test_missing_total_warning(client, fridge):

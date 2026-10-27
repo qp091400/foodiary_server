@@ -14,8 +14,15 @@ def verify_model_files(*, cache: Path | None = None, manifest: Path | None = Non
         Path(os.environ.get("PADDLE_PDX_CACHE_HOME", str(Path.home() / ".paddlex"))) / "official_models"
     )
     manifest = manifest or Path(__file__).resolve().parents[3] / "deploy" / "model-manifest.json"
-    expected = json.loads(manifest.read_text(encoding="utf-8"))["sha256"]
     models = {settings.ocr_detection_model, settings.ocr_recognition_model, settings.ocr_textline_model}
+    if settings.ocr_orientation_model:
+        models.add(settings.ocr_orientation_model)
+    # Only the configured models are checked, so orientation can be switched off without editing the manifest.
+    expected = {
+        name: value
+        for name, value in json.loads(manifest.read_text(encoding="utf-8"))["sha256"].items()
+        if name.split("/", 1)[0] in models
+    }
     if {name.split("/", 1)[0] for name in expected} != models:
         raise RuntimeError("OCR model names differ from the verified deployment manifest")
     actual = {}

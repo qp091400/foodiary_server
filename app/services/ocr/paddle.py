@@ -3,7 +3,7 @@
 import logging
 import tempfile
 import threading
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -84,6 +84,11 @@ def boxes_from_results(results: Any) -> list[OcrBox]:
     return boxes
 
 
+def text_weight(boxes: list[OcrBox]) -> float:
+    """읽은 글자 수를 확신도로 곱해 더한 값. 방향이 맞는 사진일수록 크다."""
+    return sum(box.score * len(box.text) for box in boxes)
+
+
 class PaddleOcrEngine:
     def __init__(self, lang: str, det_max_side: int = 0) -> None:
         self._lang = lang
@@ -96,6 +101,11 @@ class PaddleOcrEngine:
     @property
     def ready(self) -> bool:
         return self._ready
+
+    @property
+    def can_rotate(self) -> bool:
+        """recognize(accept=...)로 사진을 돌려 다시 읽을 수 있다."""
+        return True
 
     def _load(self) -> Any:
         if self._ocr is None:
@@ -117,6 +127,11 @@ class PaddleOcrEngine:
                             text_recognition_model_dir=str(root / settings.ocr_recognition_model),
                             textline_orientation_model_dir=str(root / settings.ocr_textline_model),
                         )
+                        if settings.ocr_orientation_model:
+                            options["doc_orientation_classify_model_dir"] = str(root / settings.ocr_orientation_model)
+                    if settings.ocr_orientation_model:
+                        # 가로로 찍거나 뒤집어 찍은 사진을 먼저 바로 세운다 (0·90·180·270°)
+                        options["doc_orientation_classify_model_name"] = settings.ocr_orientation_model
                     from paddleocr import PaddleOCR  # 지연 import: 설치 안 된 환경에서도 서버·테스트가 뜬다
 
                     self._ocr = PaddleOCR(
@@ -128,14 +143,26 @@ class PaddleOcrEngine:
                         device="cpu",
                         cpu_threads=settings.ocr_cpu_threads,
                         enable_mkldnn=settings.ocr_enable_mkldnn,
-                        use_doc_orientation_classify=False,
+                        use_doc_orientation_classify=bool(settings.ocr_orientation_model),
                         use_doc_unwarping=False,
                         use_textline_orientation=True,
                         **options,
                     )
         return self._ocr
 
-    def recognize(self, image_path: str) -> list[OcrBox]:
+    def recognize(
+        self,
+        image_path: str,
+        *,
+        accept: Callable[[list[OcrBox]], bool] | None = None,
+        rank: Callable[[list[OcrBox]], Any] | None = None,
+    ) -> list[OcrBox]:
+        """사진을 읽는다. 방향 판별 모델이 사진을 먼저 바로 세운다.
+
+        accept가 있는데 결과를 받아들이지 않으면 방향 판별이 틀렸을 수 있다. 그때는 사진을 90°, 270°, 180° 돌려
+        (판별 없이) 다시 읽고, 받아들여지는 첫 결과를 쓴다. 끝내 없으면 rank가 가장 큰 결과를 쓴다
+        (rank가 없으면 글자를 가장 많이·확실하게 읽은 결과).
+        """
         import numpy as np
         from PIL import Image
 
@@ -146,8 +173,18 @@ class PaddleOcrEngine:
             # 경로 대신 배열: Windows의 비ASCII 경로도 지원한다.
             with Image.open(image_path) as image:
                 bgr = np.ascontiguousarray(np.asarray(image.convert("RGB"))[:, :, ::-1])
-            results = list(ocr.predict(bgr))
-            boxes = boxes_from_results(results)
+            boxes = boxes_from_results(list(ocr.predict(bgr)))
+            if accept is not None and not accept(boxes):
+                candidates = [boxes]
+                for turns in (1, 3, 2):  # 반시계 방향으로 90°씩: 90°, 270°, 180°
+                    rotated = np.ascontiguousarray(np.rot90(bgr, turns))
+                    candidate = boxes_from_results(list(ocr.predict(rotated, use_doc_orientation_classify=False)))
+                    if accept(candidate):
+                        boxes = candidate
+                        break
+                    candidates.append(candidate)
+                else:
+                    boxes = max(candidates, key=rank or text_weight)
             self._ready = True
             return boxes
         except Exception:

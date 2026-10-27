@@ -33,7 +33,8 @@ from app.services import barcode as barcode_service
 from app.services.expiry import classify, estimate
 from app.services.foodsafety import ProductInfo, lookup_barcode
 from app.services.ocr import OcrEngine, get_ocr_engine
-from app.services.ocr.base import OcrBusyError
+from app.services.ocr.base import OcrBox, OcrBusyError
+from app.services.ocr.paddle import text_weight
 from app.services.receipt_parser import ParsedReceipt, parse_receipt
 from app.timeutil import today, utcnow
 
@@ -48,6 +49,8 @@ WARN_SUM_MISMATCH = "일부 품목을 못 읽었을 수 있어요"
 WARN_NO_ITEMS = "품목을 찾지 못했어요. 직접 추가해 주세요"
 WARN_NO_TOTAL = "영수증 총액을 찾지 못했어요. 빠진 품목이 없는지 확인해 주세요"
 OCR_BUSY = "다른 영수증을 분석 중입니다. 잠시 후 다시 시도해 주세요."
+# 합계가 맞지 않아도 세로 사진에서 이만큼 품목을 읽었으면 사진 방향은 맞다고 본다
+UPRIGHT_MIN_ITEMS = 3  # TODO: balance
 
 
 class _ProductLookup:
@@ -128,6 +131,35 @@ def build_draft(db: Session, parsed: ParsedReceipt, purchased_on: date) -> list[
 def plausible_purchase_date(purchased_on: date | None) -> date | None:
     """미래 날짜는 오인식으로 보고 버린다."""
     return purchased_on if purchased_on and purchased_on <= today() else None
+
+
+def checks_out(parsed: ParsedReceipt) -> bool:
+    """품목이 있고, 총액을 읽었고, 품목 합계(금액 - 할인)가 총액과 맞는다. 곧 초안에 경고가 없다."""
+    items_sum = sum(item.amount - item.discount for item in parsed.items)
+    return not draft_warnings(len(parsed.items), items_sum, parsed.total_amount)
+
+
+def looks_upright(parsed: ParsedReceipt, *, landscape: bool) -> bool:
+    """방향이 맞게 읽혔다고 볼 수 있는가. 합계가 맞으면 그렇다.
+
+    합계가 안 맞아도 세로 사진에서 품목을 몇 개 이상 읽었으면 방향은 맞다(총액 줄이 없는 영수증도 있다).
+    가로 사진이거나 품목을 거의 못 읽었으면 사진이 돌아가 있을 수 있다.
+    """
+    return checks_out(parsed) or (not landscape and len(parsed.items) >= UPRIGHT_MIN_ITEMS)
+
+
+def read_receipt(ocr: OcrEngine, image_path: str, *, landscape: bool) -> list[OcrBox]:
+    """OCR. 방향이 틀린 것 같으면 엔진이 사진을 돌려 다시 읽는다 (돌릴 수 있는 엔진만).
+
+    어느 방향도 합계가 맞지 않으면(총액 줄이 없는 영수증) 품목을 가장 많이 읽은 방향을 고른다.
+    """
+    if not getattr(ocr, "can_rotate", False):
+        return ocr.recognize(image_path)
+    return ocr.recognize(
+        image_path,
+        accept=lambda boxes: looks_upright(parse_receipt(boxes), landscape=landscape),
+        rank=lambda boxes: (len(parse_receipt(boxes).items), text_weight(boxes)),
+    )
 
 
 def draft_warnings(item_count: int, items_sum: int, total_amount: int | None) -> list[str]:
@@ -214,7 +246,7 @@ def upload_receipt(
 
         # 5. OCR → 파서 → 품목별 카테고리·소비기한 (상품코드가 있으면 C005 조회)
         try:
-            boxes = ocr.recognize(str(absolute_path))
+            boxes = read_receipt(ocr, str(absolute_path), landscape=image.width > image.height)
         except OcrBusyError:
             raise HTTPException(status_code=503, detail=OCR_BUSY, headers={"Retry-After": "10"}) from None
         except Exception:
