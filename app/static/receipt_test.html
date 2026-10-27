@@ -232,8 +232,7 @@ function render(data) {
     ["영수증 총액", data.total_amount == null ? "못 읽음" : won(data.total_amount)],
     ["품목 합계", won(data.items_sum)],
     ["영수증 바코드", data.receipt_barcode || "없음"],
-    ["분석 방식", data.ocr_model === "fast" ? "빠른 분석" : data.fast_seconds == null ? "정밀 분석" : "빠른 분석 → 정밀 분석"],
-    ["OCR 시간", data.fast_seconds == null ? data.ocr_seconds + "초" : `${data.fast_seconds}초 + ${data.ocr_seconds}초`],
+    ["OCR 시간", data.ocr_seconds + "초"],
   ];
   $("facts").replaceChildren(
     ...facts.map(([label, value]) => {
@@ -316,37 +315,22 @@ async function recognize(file) {
   $("status").hidden = false;
   const upload = await shrink(file);
 
-  // 빠른 모델로 먼저 읽고, 결과가 맞아떨어지지 않으면 정밀 모델로 다시 읽는다 (실제 업로드와 같은 순서)
-  let phase = "빠르게 읽는 중…";
-  let started = Date.now();
+  const started = Date.now();
   const tick = () => {
     const seconds = Math.floor((Date.now() - started) / 1000);
-    $("status").textContent = `${phase} ${seconds}초`;
+    $("status").textContent = `인식 중… ${seconds}초 (사진 크기에 따라 10~30초 걸립니다)`;
   };
   tick();
   const timer = setInterval(tick, 500);
 
-  const send = async (step) => {
+  try {
     const body = new FormData();
     body.append("file", upload.data, upload.name);
-    const response = await fetch(`${ENDPOINT}?step=${step}`, { method: "POST", body, headers });
+    const response = await fetch(ENDPOINT, { method: "POST", body, headers });
     const data = await response.json().catch(() => null);
     if (NEEDS_PASSWORD && response.status === 401) remember("");
     if (!response.ok) throw new Error((data && data.detail) || `서버 오류 (HTTP ${response.status})`);
     if (NEEDS_PASSWORD) remember(password);
-    return data;
-  };
-
-  try {
-    let data = await send("fast");
-    if (data.retry_with_full) {
-      const fastSeconds = data.ocr_seconds;
-      phase = "합계가 맞지 않아서 정밀 분석으로 다시 분석하는 중이에요… (30초쯤 걸려요)";
-      started = Date.now();
-      tick();
-      data = await send("full");
-      data.fast_seconds = fastSeconds;
-    }
     render(data);
   } catch (error) {
     // fetch 자체가 실패하면(TypeError) 서버에 닿지 못한 것이다

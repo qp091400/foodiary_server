@@ -79,24 +79,6 @@ class FakeOcrEngine:
         return self.boxes
 
 
-class TwoModelOcrEngine:
-    """빠른 모델 → 정밀 모델 엔진 흉내. 결과 대신 예외를 주면 그 모델이 그 예외를 던진다."""
-
-    has_fast_model = True
-
-    def __init__(self, fast: list[OcrBox] | Exception, full: list[OcrBox] | Exception) -> None:
-        self.results = {"fast": fast, "full": full}
-        self.calls: list[tuple[str, float]] = []
-
-    def recognize(self, image_path: str, *, fast: bool = False, wait: float = 0) -> list[OcrBox]:
-        model = "fast" if fast else "full"
-        self.calls.append((model, wait))
-        result = self.results[model]
-        if isinstance(result, Exception):
-            raise result
-        return result
-
-
 def image_bytes(fmt: str = "JPEG", size: tuple[int, int] = (600, 900)) -> bytes:
     buffer = io.BytesIO()
     Image.new("RGB", size, "white").save(buffer, fmt)

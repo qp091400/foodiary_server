@@ -36,7 +36,7 @@ docker compose up --build
 - 첫 빌드는 PaddleOCR 설치 때문에 5~10분 걸립니다.
 - **첫 영수증 업로드는 모델을 내려받느라 느립니다** (인터넷 필요, Hugging Face에서 받습니다). 모델은 `paddle_models` 볼륨에 남아 재시작해도 다시 받지 않습니다.
 - 볼륨: `pgdata`(DB), `uploads`(영수증 이미지), `paddle_models`(OCR 모델 캐시)
-- **PaddleOCR 모델 캐시 경로**: 컨테이너(root)의 `/root/.paddlex/official_models/` (= `~/.paddlex`). 실제 실행 로그로 확인했고, 받는 모델은 `PP-OCRv5_server_det`, `PP-OCRv5_mobile_det`(빠른 검출), `korean_PP-OCRv5_mobile_rec`, `PP-LCNet_x1_0_textline_ori` 네 개입니다.
+- **PaddleOCR 모델 캐시 경로**: 컨테이너(root)의 `/root/.paddlex/official_models/` (= `~/.paddlex`). 실제 실행 로그로 확인했고, 받는 모델은 `PP-OCRv5_server_det`, `korean_PP-OCRv5_mobile_rec`, `PP-LCNet_x1_0_textline_ori` 세 개입니다.
 - 확인한 버전: Python 3.11, `paddlepaddle==3.2.2`, `paddleocr==3.7.0`. paddlepaddle 3.3.1은 CPU 추론에서 오류가 나서 3.2.2로 고정했습니다 ([requirements-ocr.txt](requirements-ocr.txt)).
 
 ### 로컬 (venv)
@@ -102,7 +102,6 @@ SQLite 인메모리 DB, console 메일, `OCR_ENGINE=none`으로 돌기 때문에
 | `UPLOAD_DIR` / `MAX_UPLOAD_MB` | `uploads` / 10 | 영수증 이미지 저장 위치와 크기 제한 |
 | `OCR_ENGINE` / `OCR_LANG` | `paddle` / `korean` | `none`이면 OCR 없이 빈 초안만 만듭니다 |
 | `OCR_DET_MAX_SIDE` | 0 | 글자 위치 검출 해상도(긴 변 px). 0이면 원본 해상도(가장 느림). 아래 "OCR 속도" 참고 |
-| `OCR_FAST_DETECTION_MODEL` | `PP-OCRv5_mobile_det` | 먼저 써 보는 빠른 검출 모델. 품목이 있고 총액을 읽었고 품목 합계가 총액과 1% 안으로 맞으면 그 결과를 쓰고, 아니면 `OCR_DETECTION_MODEL`로 다시 읽습니다. 비우면 정밀 모델로만 읽습니다 |
 | `FOODSAFETY_API_KEY` | (빈 값) | 비우면 바코드 조회를 끄고 카테고리 추정만 합니다 |
 | `CORS_ORIGINS` | `*` | 쉼표로 여러 개 |
 | `AUTO_CREATE_TABLES` | `true` | 시작할 때 `create_all` |
@@ -263,7 +262,6 @@ curl -X POST $API/fridges/join -H "Authorization: Bearer $다른사람토큰" \
 | C005 응답 구조 | `{"C005": {"total_count": "1", "row": [...], "RESULT": {"CODE": "...", "MSG": "..."}}}` | 공개 샘플 JSON에서 확인 |
 | 실제 영수증 사진 인식 | 한글 폰트로 그린 합성 영수증 이미지로만 확인 (품목·합계·바코드 인식됨) | 실제 사진으로 업로드 → 초안 확인 |
 | OCR 속도와 `OCR_DET_MAX_SIDE` | 개발 PC의 Docker(CPU)에서 휴대폰 사진 크기(긴 변 2000px) 한 장에 기본값 0은 17~24초, 1280은 7~11초, 960은 6~8초. 합성 영수증 2장에서는 세 설정 모두 품목 인식 결과가 같았음. 서버 시작 후 첫 장은 모델 로딩으로 10~15초 더 걸림 | 실제 영수증 사진 여러 장으로 0과 1280의 인식 결과를 비교한 뒤 운영 값을 정하기. 작은 서버에서는 더 느림 |
-| 빠른 모델 먼저 읽기 (`OCR_FAST_DETECTION_MODEL`) | CPU 2개·메모리 8GB·1280 조건, 실제 식당 영수증 사진 4장: 빠른 모델 3~5초, 정밀 모델 17~27초. 3장은 빠른 결과가 총액과 맞아 그대로 쓰였고, 품목이 많은 1장은 정밀 모델로 다시 읽음. 프로세스 최대 메모리는 정밀 모델만 6.85GB, 둘 다 6.98GB | 마트·편의점 영수증에서 빠른 결과가 얼마나 채택되는지, 채택된 결과가 정밀 결과와 같은지 확인 |
 
 ```
 http://openapi.foodsafetykorea.go.kr/api/{KEY}/C005/json/1/5/BAR_CD=8801234567890

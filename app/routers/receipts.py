@@ -3,7 +3,6 @@
 import io
 import logging
 import math
-import time
 import uuid
 from datetime import date
 from pathlib import Path
@@ -34,7 +33,7 @@ from app.services import barcode as barcode_service
 from app.services.expiry import classify, estimate
 from app.services.foodsafety import ProductInfo, lookup_barcode
 from app.services.ocr import OcrEngine, get_ocr_engine
-from app.services.ocr.base import OcrBox, OcrBusyError
+from app.services.ocr.base import OcrBusyError
 from app.services.receipt_parser import ParsedReceipt, parse_receipt
 from app.timeutil import today, utcnow
 
@@ -49,8 +48,6 @@ WARN_SUM_MISMATCH = "일부 품목을 못 읽었을 수 있어요"
 WARN_NO_ITEMS = "품목을 찾지 못했어요. 직접 추가해 주세요"
 WARN_NO_TOTAL = "영수증 총액을 찾지 못했어요. 빠진 품목이 없는지 확인해 주세요"
 OCR_BUSY = "다른 영수증을 분석 중입니다. 잠시 후 다시 시도해 주세요."
-# 빠른 결과가 맞지 않아 정밀 모델로 다시 읽을 때, 그 사이 들어온 다른 영수증이 끝나길 기다리는 최대 시간(초)
-FULL_PASS_WAIT_SECONDS = 60  # TODO: balance
 
 
 class _ProductLookup:
@@ -131,36 +128,6 @@ def build_draft(db: Session, parsed: ParsedReceipt, purchased_on: date) -> list[
 def plausible_purchase_date(purchased_on: date | None) -> date | None:
     """미래 날짜는 오인식으로 보고 버린다."""
     return purchased_on if purchased_on and purchased_on <= today() else None
-
-
-def checks_out(parsed: ParsedReceipt) -> bool:
-    """품목이 있고, 총액을 읽었고, 품목 합계(금액 - 할인)가 총액과 맞는다. 곧 초안에 경고가 없다."""
-    items_sum = sum(item.amount - item.discount for item in parsed.items)
-    return not draft_warnings(len(parsed.items), items_sum, parsed.total_amount)
-
-
-def read_receipt(ocr: OcrEngine, image_path: str) -> list[OcrBox]:
-    """빠른 모델이 있으면 먼저 읽고, 결과가 맞아떨어지면 그대로 쓴다. 아니면 정밀 모델로 다시 읽는다."""
-    if not getattr(ocr, "has_fast_model", False):
-        return ocr.recognize(image_path)
-    started = time.perf_counter()
-    try:
-        boxes = ocr.recognize(image_path, fast=True)
-        if checks_out(parse_receipt(boxes)):
-            logger.info("영수증 OCR: 빠른 모델로 끝남 (%.1f초)", time.perf_counter() - started)
-            return boxes
-    except OcrBusyError:
-        raise
-    except Exception:
-        logger.exception("빠른 모델 OCR 실패. 정밀 모델로 다시 읽는다")
-    fast_seconds = time.perf_counter() - started
-    boxes = ocr.recognize(image_path, wait=FULL_PASS_WAIT_SECONDS)
-    logger.info(
-        "영수증 OCR: 빠른 모델 결과가 맞지 않아 정밀 모델로 다시 읽음 (빠른 %.1f초 + 정밀 %.1f초)",
-        fast_seconds,
-        time.perf_counter() - started - fast_seconds,
-    )
-    return boxes
 
 
 def draft_warnings(item_count: int, items_sum: int, total_amount: int | None) -> list[str]:
@@ -245,9 +212,9 @@ def upload_receipt(
                     status_code=409, content={"detail": DUPLICATE_RECEIPT, "receipt_id": existing_id}
                 )
 
-        # 5. OCR(빠른 모델 → 필요하면 정밀 모델) → 파서 → 품목별 카테고리·소비기한 (상품코드가 있으면 C005 조회)
+        # 5. OCR → 파서 → 품목별 카테고리·소비기한 (상품코드가 있으면 C005 조회)
         try:
-            boxes = read_receipt(ocr, str(absolute_path))
+            boxes = ocr.recognize(str(absolute_path))
         except OcrBusyError:
             raise HTTPException(status_code=503, detail=OCR_BUSY, headers={"Retry-After": "10"}) from None
         except Exception:

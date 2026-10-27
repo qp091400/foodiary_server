@@ -9,7 +9,7 @@ from app.main import app
 from app.models import Receipt
 from app.services.ocr import get_ocr_engine
 from app.services.ocr.base import OcrBusyError
-from tests.helpers import FakeOcrEngine, TwoModelOcrEngine, image_bytes, make_boxes
+from tests.helpers import FakeOcrEngine, image_bytes, make_boxes
 
 URL = "/dev/receipt-test"
 ROWS = [
@@ -27,10 +27,10 @@ TEST_URL = "/receipt-test"
 PASSWORD = "test-page-pass-1234"
 
 
-def post(client, name="receipt.jpg", data=None, url=URL, password=None, step=None):
+def post(client, name="receipt.jpg", data=None, url=URL, password=None):
     headers = {"X-Test-Password": password} if password is not None else {}
     files = {"file": (name, data if data is not None else image_bytes(), "image/jpeg")}
-    return client.post(url, files=files, headers=headers, params={"step": step} if step else None)
+    return client.post(url, files=files, headers=headers)
 
 
 @pytest.fixture
@@ -110,35 +110,6 @@ def test_busy_ocr_is_503_like_the_real_upload(client, dev_tools):
     assert response.status_code == 503
     assert response.headers["Retry-After"] == "10"
     assert response.json()["detail"] == "다른 영수증을 분석 중입니다. 잠시 후 다시 시도해 주세요."
-
-
-def test_fast_step_asks_for_a_full_read_when_the_result_does_not_add_up(client, dev_tools):
-    without_wipes = [row for row in ROWS if row[0] != "물티슈 100매"]
-    engine = TwoModelOcrEngine(make_boxes(without_wipes), make_boxes(ROWS))
-    app.dependency_overrides[get_ocr_engine] = lambda: engine
-    first = post(client, step="fast").json()
-    assert (first["ocr_model"], first["retry_with_full"], first["items_sum"]) == ("fast", True, 2480)
-    second = post(client, step="full").json()
-    assert (second["ocr_model"], second["retry_with_full"], second["items_sum"]) == ("full", False, 3480)
-    assert [model for model, _ in engine.calls] == ["fast", "full"]
-
-    # 맞아떨어지면 다시 읽으라고 하지 않는다
-    engine = TwoModelOcrEngine(make_boxes(ROWS), RuntimeError("unused"))
-    app.dependency_overrides[get_ocr_engine] = lambda: engine
-    result = post(client, step="fast").json()
-    assert (result["ocr_model"], result["retry_with_full"], result["warnings"]) == ("fast", False, [])
-
-    # 빠른 모델이 실패하면 다시 읽게 한다
-    engine = TwoModelOcrEngine(RuntimeError("fast model crashed"), make_boxes(ROWS))
-    app.dependency_overrides[get_ocr_engine] = lambda: engine
-    result = post(client, step="fast").json()
-    assert (result["retry_with_full"], result["ocr_error"]) == (True, "RuntimeError: fast model crashed")
-
-    # 빠른 모델이 없는 엔진은 step=fast여도 정밀 모델로 한 번에 읽는다
-    app.dependency_overrides[get_ocr_engine] = lambda: FakeOcrEngine(make_boxes(ROWS))
-    result = post(client, step="fast").json()
-    assert (result["ocr_model"], result["retry_with_full"]) == ("full", False)
-    assert post(client, step="slow").status_code == 422
 
 
 # ── 운영용 /receipt-test: 테스트 비밀번호 ──────────────────────────────────
