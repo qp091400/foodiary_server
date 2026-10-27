@@ -22,6 +22,7 @@ services:
       # 컨테이너 안에서는 항상 compose의 db 서비스와 볼륨 경로를 쓴다
       DATABASE_URL: postgresql+psycopg://fridge:fridge@db:5432/fridge
       UPLOAD_DIR: /app/uploads
+      RECIPE_DATA_DIR: /app/recipe_data
     depends_on:
       db:
         condition: service_healthy
@@ -29,10 +30,12 @@ services:
       - "8000:8000"
     volumes:
       - uploads:/app/uploads
+      - recipe_data:/app/recipe_data
       # PaddleOCR 모델 캐시: 재시작할 때 다시 내려받지 않는다
       - paddle_models:/root/.paddlex
 
 volumes:
   pgdata:
   uploads:
+  recipe_data:
   paddle_models:

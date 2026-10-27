@@ -23,5 +23,6 @@ artifacts
 **/*.pyc
 *.zip
 uploads
+recipe_data
 *.db
 fridge-receipt-backend-prompt.md

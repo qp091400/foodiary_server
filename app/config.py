@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     ocr_requests_per_minute: int = Field(10, ge=1, le=100)
 
     foodsafety_api_key: str = ""  # 비우면 바코드 조회 비활성
+    recipe_data_dir: str = "recipe_data"  # 별도 볼륨; 원본/색인은 Git에 넣지 않는다
     cors_origins: str = "*"
     auto_create_tables: bool = True
     timezone: str = "Asia/Seoul"

@@ -15,7 +15,7 @@ from app.config import DEFAULT_JWT_SECRET, settings
 from app.database import Base, engine
 from app.errors import register_error_handlers
 from app.middleware import SecurityMiddleware
-from app.routers import auth, dev, fridges, items, products, receipts, stats, users
+from app.routers import auth, dev, fridges, items, products, receipts, recipes, stats, users
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ register_error_handlers(app)
 app.add_middleware(SecurityMiddleware)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_host_list)
 
-for module in (auth, users, fridges, items, receipts, products, stats, dev):
+for module in (auth, users, fridges, items, receipts, recipes, products, stats, dev):
     app.include_router(module.router)
 app.include_router(dev.test_router)
 
