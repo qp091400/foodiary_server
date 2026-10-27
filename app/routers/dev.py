@@ -64,6 +64,7 @@ def _page() -> HTMLResponse:
 
 
 def _recognize(file: UploadFile, db: Session, ocr: OcrEngine, *, show_errors: bool) -> dict:
+    received = time.perf_counter()  # 사진을 다 받은 뒤부터. 페이지가 전체 시간과 비교해 업로드·대기 시간을 가늠한다
     image = load_image(read_upload(file))
     handle, path = tempfile.mkstemp(suffix=".jpg")
     os.close(handle)
@@ -87,16 +88,18 @@ def _recognize(file: UploadFile, db: Session, ocr: OcrEngine, *, show_errors: bo
     purchased_on = plausible_purchase_date(parsed.purchased_on)
     draft_items = build_draft(db, parsed, purchased_on or today())
     items_sum = sum(item["amount"] - item["discount"] for item in draft_items)
+    receipt_barcode = barcode_service.decode_receipt_barcode(image)
     return {
         "store_name": parsed.store_name,
         "purchased_on": purchased_on,
         "total_amount": parsed.total_amount,
-        "receipt_barcode": barcode_service.decode_receipt_barcode(image),
+        "receipt_barcode": receipt_barcode,
         "draft_items": draft_items,
         "items_sum": items_sum,
         "warnings": draft_warnings(len(draft_items), items_sum, parsed.total_amount),
         "raw_lines": parsed.lines,
         "ocr_seconds": ocr_seconds,
+        "server_seconds": round(time.perf_counter() - received, 1),
         "ocr_error": ocr_error,
     }
 

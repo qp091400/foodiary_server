@@ -127,7 +127,7 @@ class PaddleOcrEngine:
                         textline_orientation_model_name=settings.ocr_textline_model,
                         device="cpu",
                         cpu_threads=settings.ocr_cpu_threads,
-                        enable_mkldnn=False,
+                        enable_mkldnn=settings.ocr_enable_mkldnn,
                         use_doc_orientation_classify=False,
                         use_doc_unwarping=False,
                         use_textline_orientation=True,

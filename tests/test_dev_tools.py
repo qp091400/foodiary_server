@@ -68,7 +68,7 @@ def test_recognizes_without_login_and_saves_nothing(client, dev_tools):
     assert result["store_name"] == "이마트 성수점"
     assert result["purchased_on"] == "2026-10-10"
     assert (result["total_amount"], result["items_sum"], result["warnings"]) == (3480, 3480, [])
-    assert result["ocr_error"] is None and result["ocr_seconds"] >= 0
+    assert result["ocr_error"] is None and result["server_seconds"] >= result["ocr_seconds"] >= 0
     assert "서울우유 1L 2,980 1 2,980" in result["raw_lines"]
     milk, wipes = result["draft_items"]
     assert (milk["name"], milk["discount"], milk["category"], milk["expiry_date"]) == ("서울우유 1L", 500, "milk", "2026-10-20")

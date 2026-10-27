@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     ocr_textline_model: str = "PP-LCNet_x1_0_textline_ori"
     ocr_models_dir: str = ""  # Cloud Run: 검증한 모델을 이미지에 포함한 디렉터리
     ocr_cpu_threads: int = Field(2, ge=1, le=16)
+    # 인텔 CPU 가속(oneDNN). 실제 영수증 6장에서 결과는 줄 단위로 같고 한 장 18~29초 → 1.4~2.8초, 최대 메모리 6.9GB → 1.9GB
+    ocr_enable_mkldnn: bool = True
     ocr_warmup: bool = False
     ocr_fail_closed: bool = False
     rate_limit_enabled: bool = False

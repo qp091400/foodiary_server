@@ -85,6 +85,7 @@ def test_migrate_and_deploy_use_pinned_secrets_and_separate_identities(tmp_path,
     command = calls[-1]
     assert "--image=" + image in command
     assert "--no-allow-unauthenticated" in command and "--cpu-throttling" in command
+    assert "--cpu-boost" in command  # 잠든 서버가 깨어날 때(모델 로딩) CPU를 더 받는다
     assert "--memory=8Gi" in command and "--max=1" in command and "--min=0" in command
     assert "--service-account=foodiary-run@example-project.iam.gserviceaccount.com" in command
     assert any("mount-options=uid=10001;gid=10001" in argument for argument in command)

@@ -95,7 +95,7 @@ def test_engine_loads_lazily_once_with_requested_options(fake_paddleocr, tmp_pat
             "textline_orientation_model_name": "PP-LCNet_x1_0_textline_ori",
             "device": "cpu",
             "cpu_threads": 2,
-            "enable_mkldnn": False,
+            "enable_mkldnn": True,
             "use_doc_orientation_classify": False,
             "use_doc_unwarping": False,
             "use_textline_orientation": True,

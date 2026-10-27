@@ -283,7 +283,7 @@ class Deployment:
         save_private(env_file, json.dumps(environment(self.config)))
         self.gcloud("run", "deploy", self.service, f"--region={self.region}", f"--image={self.image()}",
                     f"--service-account={self.account('run')}", "--execution-environment=gen2", "--port=8080",
-                    "--cpu=2", "--memory=8Gi", "--cpu-throttling", "--no-cpu-boost", "--concurrency=4",
+                    "--cpu=2", "--memory=8Gi", "--cpu-throttling", "--cpu-boost", "--concurrency=4",
                     "--min=0", "--max=1", "--min-instances=0", "--max-instances=1", "--timeout=180s",
                     "--no-allow-unauthenticated", f"--env-vars-file={env_file.resolve()}",
                     f"--set-secrets={self.secret_bindings(self.runtime_secret_keys())}",

@@ -25,6 +25,7 @@
   h1 { font-size: 22px; margin: 0 0 4px; }
   h2 { font-size: 15px; margin: 0 0 10px; color: var(--muted); font-weight: 600; }
   .lead { margin: 0 0 20px; color: var(--muted); }
+  .wake { margin: -12px 0 16px; color: var(--muted); font-size: 13px; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
   .drop {
     display: block; text-align: center; padding: 28px 16px; cursor: pointer;
@@ -83,6 +84,7 @@
 <main>
   <h1>영수증 인식 테스트</h1>
   <p class="lead">사진을 올리면 실제 업로드와 같은 방식으로 인식한 결과를 보여 줍니다. 여기서 올린 것은 저장되지 않습니다.</p>
+  <p class="wake" id="wake" hidden></p>
 
   <div class="card password" id="passwordBox" hidden>
     <label for="password">테스트 비밀번호</label>
@@ -191,6 +193,20 @@ if (NEEDS_PASSWORD) {
   }
 }
 
+// 페이지를 열자마자 서버를 깨운다. 서버가 쉬고 있었으면 영수증을 찍는 동안 준비된다.
+const wakeStarted = Date.now();
+$("wake").textContent = "서버 준비 중…";
+$("wake").hidden = false;
+fetch("/health", { cache: "no-store" })
+  .then((response) => {
+    const seconds = Math.round((Date.now() - wakeStarted) / 1000);
+    $("wake").textContent = !response.ok ? "서버 상태를 확인하지 못했습니다."
+      : seconds >= 3 ? `서버 준비됨 (쉬고 있던 서버를 깨우는 데 ${seconds}초 걸렸습니다)` : "서버 준비됨";
+  })
+  .catch(() => {
+    $("wake").textContent = "서버에 연결할 수 없습니다.";
+  });
+
 function loadImage(file) {
   return new Promise((resolve, reject) => {
     const image = new Image();
@@ -232,7 +248,10 @@ function render(data) {
     ["영수증 총액", data.total_amount == null ? "못 읽음" : won(data.total_amount)],
     ["품목 합계", won(data.items_sum)],
     ["영수증 바코드", data.receipt_barcode || "없음"],
-    ["OCR 시간", data.ocr_seconds + "초"],
+    // 전체 = 사진 준비·올리기·서버 대기 + 서버 처리. 서버 처리 중 대부분이 OCR이다.
+    ["전체 걸린 시간", data.total_seconds + "초"],
+    ["서버 처리", `${data.server_seconds}초 (그중 OCR ${data.ocr_seconds}초)`],
+    ["올리기·대기", Math.max(0, data.total_seconds - data.server_seconds).toFixed(1) + "초"],
   ];
   $("facts").replaceChildren(
     ...facts.map(([label, value]) => {
@@ -311,14 +330,14 @@ async function recognize(file) {
   $("preview").src = URL.createObjectURL(file);
   $("layout").hidden = false;
 
+  const started = Date.now();
   $("status").textContent = "사진 준비 중…";
   $("status").hidden = false;
   const upload = await shrink(file);
 
-  const started = Date.now();
   const tick = () => {
     const seconds = Math.floor((Date.now() - started) / 1000);
-    $("status").textContent = `인식 중… ${seconds}초 (사진 크기에 따라 10~30초 걸립니다)`;
+    $("status").textContent = `인식 중… ${seconds}초 (30~60초 걸릴 수 있습니다)`;
   };
   tick();
   const timer = setInterval(tick, 500);
@@ -331,6 +350,7 @@ async function recognize(file) {
     if (NEEDS_PASSWORD && response.status === 401) remember("");
     if (!response.ok) throw new Error((data && data.detail) || `서버 오류 (HTTP ${response.status})`);
     if (NEEDS_PASSWORD) remember(password);
+    data.total_seconds = Math.round((Date.now() - started) / 100) / 10;
     render(data);
   } catch (error) {
     // fetch 자체가 실패하면(TypeError) 서버에 닿지 못한 것이다

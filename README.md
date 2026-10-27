@@ -102,6 +102,7 @@ SQLite 인메모리 DB, console 메일, `OCR_ENGINE=none`으로 돌기 때문에
 | `UPLOAD_DIR` / `MAX_UPLOAD_MB` | `uploads` / 10 | 영수증 이미지 저장 위치와 크기 제한 |
 | `OCR_ENGINE` / `OCR_LANG` | `paddle` / `korean` | `none`이면 OCR 없이 빈 초안만 만듭니다 |
 | `OCR_DET_MAX_SIDE` | 0 | 글자 위치 검출 해상도(긴 변 px). 0이면 원본 해상도(가장 느림). 아래 "OCR 속도" 참고 |
+| `OCR_ENABLE_MKLDNN` | `true` | 인텔 CPU 가속(oneDNN). 결과는 같고 10배쯤 빨라지며 메모리도 적게 씁니다. 문제가 생기는 CPU에서만 끕니다 |
 | `FOODSAFETY_API_KEY` | (빈 값) | 비우면 바코드 조회를 끄고 카테고리 추정만 합니다 |
 | `CORS_ORIGINS` | `*` | 쉼표로 여러 개 |
 | `AUTO_CREATE_TABLES` | `true` | 시작할 때 `create_all` |
@@ -262,6 +263,7 @@ curl -X POST $API/fridges/join -H "Authorization: Bearer $다른사람토큰" \
 | C005 응답 구조 | `{"C005": {"total_count": "1", "row": [...], "RESULT": {"CODE": "...", "MSG": "..."}}}` | 공개 샘플 JSON에서 확인 |
 | 실제 영수증 사진 인식 | 한글 폰트로 그린 합성 영수증 이미지로만 확인 (품목·합계·바코드 인식됨) | 실제 사진으로 업로드 → 초안 확인 |
 | OCR 속도와 `OCR_DET_MAX_SIDE` | 개발 PC의 Docker(CPU)에서 휴대폰 사진 크기(긴 변 2000px) 한 장에 기본값 0은 17~24초, 1280은 7~11초, 960은 6~8초. 합성 영수증 2장에서는 세 설정 모두 품목 인식 결과가 같았음. 서버 시작 후 첫 장은 모델 로딩으로 10~15초 더 걸림 | 실제 영수증 사진 여러 장으로 0과 1280의 인식 결과를 비교한 뒤 운영 값을 정하기. 작은 서버에서는 더 느림 |
+| `OCR_ENABLE_MKLDNN` (oneDNN) | CPU 2개·메모리 8GB·1280 조건, 실제 영수증 6장: 끄면 한 장 18~29초·최대 6.9GB, 켜면 1.4~2.8초·최대 1.9GB. OCR 원문 줄이 6장 모두 한 줄도 다르지 않았음. 크기가 다른 사진 90장을 연속으로 읽어도 메모리가 1.5~1.6GB로 유지됨(최대 2.2GB) | Cloud Run CPU에서의 실제 시간과 메모리 |
 
 ```
 http://openapi.foodsafetykorea.go.kr/api/{KEY}/C005/json/1/5/BAR_CD=8801234567890
