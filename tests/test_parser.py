@@ -176,6 +176,9 @@ def test_group_lines_uses_median_height_tolerance():
         ("000017 * 제로콜라 1 0 0", "제로콜라 1 0 0"),
         ("0123 두부 1,500", "두부 1,500"),
         ("2080 치약 3,000", "2080 치약 3,000"),  # 0으로 시작하지 않는 네 자리는 상품명의 일부
+        ("203250 14,582 1 14,582", "14,582 1 14,582"),  # 숫자 줄 앞의 저울·매장 상품코드
+        ("이13스니커즈미니스 90g", "스니커즈미니스 90g"),  # 순번 013의 0을 "이"로 읽음
+        ("테라(500m7) 4 27,600", "테라(500ml) 4 27,600"),  # 용량 단위 오인식
     ],
 )
 def test_normalize_line(raw, expected):
@@ -275,6 +278,68 @@ def test_amounts_below_minimum_are_not_items():
     assert [_summary(item) for item in items] == [("[세트]치즈버거", 1.0, 7000, 7000, 100)]
 
 
+def test_mart_two_line_receipt_with_ocr_slips():
+    receipt = parse_receipt(
+        make_boxes(
+            [
+                ["행복마트"],
+                ["판매일:26-10-2211:05,목요일 계산대:001"],
+                ["NO.상품명", "단가", "수량", "금액"],
+                ["001 배달봉투(회수용"],
+                ["2900000000438", "300", "1", "300"],
+                ["002 청정원고기전용삼장 170g"],  # 쌈장을 "삼장"으로 읽음
+                ["8801052736945", "2,450", "1", "2,450"],
+                ["003 보리먹인생목살"],
+                ["203250", "14,582", "14,582"],  # 저울 상품코드, 수량 "1"을 놓침
+                ["004 나랑드사이다 1.5L"],
+                ["8801097235212", "1,950", "-1,950"],  # 수량 "1"을 "-"로 읽음
+                ["이05 깨잎 1봉"],  # 순번 005를 "이05", 깻잎을 "깨잎"으로 읽음
+                ["22000385", "1,980", "1", "1,980"],
+                ["(*)할인금액 : -2,540"],  # 이미 각 금액에 반영된 할인의 합계
+                ["(#)면세물품 : 16,562"],
+                ["합 계: 21,262"],
+            ]
+        )
+    )
+    assert (receipt.store_name, receipt.purchased_on, receipt.total_amount) == ("행복마트", date(2026, 10, 22), 21262)
+    assert [_summary(item) for item in receipt.items] == [
+        ("배달봉투(회수용", 1.0, 300, 300, 0),
+        ("청정원고기전용쌈장 170g", 1.0, 2450, 2450, 0),
+        ("보리먹인생목살", 1.0, 14582, 14582, 0),
+        ("나랑드사이다 1.5L", 1.0, 1950, 1950, 0),
+        ("깻잎 1봉", 1.0, 1980, 1980, 0),
+    ]
+    assert [item.barcode for item in receipt.items] == ["2900000000438", "8801052736945", None, "8801097235212", "22000385"]
+    assert [classify(item.name) for item in receipt.items] == ["non_food", "sauce", "pork", "drink", "leafy_veg"]
+    assert sum(item.amount - item.discount for item in receipt.items) == receipt.total_amount
+    # 할인 낱말이 있는 이름 뒤의 음수 줄은 여전히 할인이다
+    items = _items("우유 2,980 1 2,980", "쿠폰할인", "8801115114109 500 -500")
+    assert [_summary(item) for item in items] == [("우유", 1.0, 2980, 2980, 500)]
+
+
+def test_store_label_and_misread_total():
+    receipt = parse_receipt(
+        make_boxes(
+            [
+                ["매장명:(주)행복주점-역삼점", "[영수 증]"],
+                ["판매일자 : 2026-10-19(월)"],
+                ["[품명]", "[수량]", "[금액]"],
+                ["모듬전", "1", "34,900"],
+                ["테라(500m7)", "4", "27,600"],
+                ["-애플망고하이볼", "1", "0"],
+                ["압계금액", "62,500"],  # 합계를 "압계"로 읽음
+                ["카드결제", "62,500원"],
+            ]
+        )
+    )
+    assert (receipt.store_name, receipt.total_amount) == ("(주)행복주점-역삼점", 62500)
+    assert [(item.name, item.quantity, item.amount) for item in receipt.items] == [
+        ("모듬전", 1.0, 34900),
+        ("테라(500ml)", 4.0, 27600),
+    ]
+    assert classify("테라(500ml)") == "drink"
+
+
 def test_misread_names_are_fixed():
     (item,) = _items("서울우규 1L 2,980 1 2,980")
     assert item.name == "서울우유 1L"
@@ -308,6 +373,10 @@ def test_purchase_date():
     assert find_purchase_date(["Tel.02-123-4567/2026-10-1214:22:05"]) == date(2026, 10, 12)
     assert find_purchase_date(["2026-10-0511:40(월) POS:01"]) == date(2026, 10, 5)
     assert find_purchase_date(["2026-10-131 2,000"]) is None
+    # 연도가 두 자리인 날짜는 날짜 이름표가 있을 때만
+    assert find_purchase_date(["판매일:26-10-22 11:05"]) == date(2026, 10, 22)
+    assert find_purchase_date(["26-10-24", "TEL 02-123-4567"]) is None
+    assert find_purchase_date(["거래일시 26-13-45"]) is None
     # 날짜처럼 보이는 숫자들
     assert find_purchase_date(["콜라 2000 1 2000"]) is None
     assert find_purchase_date(["TEL 031-2020-1105"]) is None
@@ -319,6 +388,7 @@ def test_total_amount():
     assert find_total(["합계 5,480", "받을금액 4,980"]) == 4980
     assert find_total(["과세물품 합계 4,000", "부가세 400", "합 계 4,400"]) == 4400
     assert find_total(["판매총액 12,000원"]) == 12000
+    assert find_total(["압계금액 165,000"]) == 165000  # OCR이 "합계"를 "압계"로 읽음
     assert find_total(["우유 2,980"]) is None
 
 

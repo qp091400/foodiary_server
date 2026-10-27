@@ -36,9 +36,10 @@ class ParsedReceipt:
 # ── 패턴 ────────────────────────────────────────────────────────────────
 
 HEADER_RE = re.compile(r"상품명|품명|품\s*목")
+# "압계"는 OCR이 "합계"를 잘못 읽은 것. "할인금액 :"은 품목 아래에 붙는 할인 합계(이미 각 금액에 반영됨)다.
 END_RE = re.compile(
-    r"합\s*계|총\s*액|총\s*금액|과세\s*물품|면세\s*물품|부\s*가\s*세|받을\s*금액|결제\s*금액"
-    r"|판매\s*총액|공급가|카드\s*승인|신용\s*카드|총\s*구매"
+    r"[합압]\s*계|총\s*액|총\s*금액|과세\s*물품|면세\s*물품|부\s*가\s*세|받을\s*금액|결제\s*금액"
+    r"|판매\s*총액|공급가|카드\s*승인|신용\s*카드|총\s*구매|할인\s*금액\s*:|총\s*할인|할인\s*합계"
 )
 DISCOUNT_RE = re.compile(r"할인|행사|쿠폰|D/?C|에누리", re.IGNORECASE)
 # 주소·대표·전화·TEL·POS는 낱말 첫머리에 올 때만 본다. ("맥주소시지"의 "주소" 같은 오매칭 방지)
@@ -57,16 +58,21 @@ STORE_RE = re.compile(
     r"마트|편의점|GS25|CU|세븐일레븐|이마트|홈플러스|롯데마트|코스트코|하나로|노브랜드|슈퍼|마켓|점$"
 )
 STORE_TAIL_RE = re.compile(r"\s*/\s*\d.*$")
+STORE_LABEL_RE = re.compile(r"(?:매장명|상호명?|가맹점명)\s*[:：]\s*(.+)")
+RECEIPT_WORD_RE = re.compile(r"\[?\s*영\s*수?\s*증\s*\]?")
 # 구분자가 공백뿐인 형태는 받지 않는다: "2000 1 2000" 같은 가격 줄이 2000-01-20으로 읽히기 때문.
 # 날짜 바로 뒤에 시각이 붙어 있어도 읽는다: OCR이 공백을 빼먹은 "2026-10-1214:22:05"
 DATE_RE = re.compile(
     r"(?<![\d-])(20\d{2})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})(?:(?!\d)|(?=\d{1,2}:\d{2}))"
 )
 COMPACT_DATE_RE = re.compile(r"(?<![\d-])(20\d{2})(\d{2})(\d{2})(?!\d)")
+# 연도가 두 자리인 날짜("판매일:26-10-24 16:51")는 날짜 이름표가 있는 줄에서만 읽는다. 전화번호 등과 헷갈리기 쉽다.
+SHORT_DATE_RE = re.compile(r"(?<![\d-])(\d{2})[-./](\d{1,2})[-./](\d{1,2})(?:(?!\d)|(?=\d{1,2}:\d{2}))")
+DATE_LABEL_RE = re.compile(r"판매|거래|구매|일시|일자|날짜")
 # 시각, 전화번호, 사업자번호가 있는 줄은 품목이 아니다.
 META_RE = re.compile(r"\d{1,2}:\d{2}|\d{2,4}-\d{3,4}-\d{4}|\d{3}-\d{2}-\d{5}")
 PAY_TOTAL_RE = re.compile(r"받을\s*금액|결제\s*금액")
-SUM_TOTAL_RE = re.compile(r"합\s*계|총\s*액|총\s*금액|판매\s*총액")
+SUM_TOTAL_RE = re.compile(r"[합압]\s*계|총\s*액|총\s*금액|판매\s*총액")
 SUBTOTAL_RE = re.compile(r"과세|면세|부\s*가\s*세|할인|에누리|수량")
 CODE_RE = re.compile(r"\d{8,14}")
 GROUPED_NUMBER_RE = re.compile(r"[1-9]\d{0,2}(?:[,.]\d{3})+")  # OCR이 쉼표를 마침표로 읽는 경우 포함
@@ -80,7 +86,14 @@ _FULLWIDTH[0xFFE6] = ord("₩")
 
 _MARKS_RE = re.compile(r"^(?:[*#★☆]+\s*|[(\[]\s*면세\s*[)\]]\s*|P\s+(?=\S))+")
 # 순번(1, 001)과 POS 상품코드(0004, 000123). 8자리 이상은 바코드로 따로 읽는다. "2080 치약"의 2080은 상품명이다.
-_SEQUENCE_RE = re.compile(r"^(?:(?:\d{1,3}|0\d{3}|\d{5,7})\s+(?=[^\d\s,.\-])|0\d{1,2}(?=[^\d\s,.\-]))")
+# "이13", "O13"은 OCR이 순번 013의 0을 잘못 읽은 것이다.
+_SEQUENCE_RE = re.compile(
+    r"^(?:(?:\d{1,3}|0\d{3}|\d{5,7})\s+(?=[^\d\s,.\-])|0\d{1,2}(?=[^\d\s,.\-])|[이Oo]\d{2}\s*(?=[^\d\s,.\-]))"
+)
+# 숫자만 있는 줄 맨 앞의 저울·매장 상품코드("203250 14,582 1 14,582"). 금액으로 세지 않는다.
+_PLU_RE = re.compile(r"^(?:0\d{3,4}|\d{6,7})\s+(?=-?[\d,.]+(?:\s|$))")
+# 용량 단위를 잘못 읽은 것: "500m7", "500mI" → "500ml"
+_ML_RE = re.compile(r"(?<=\d)\s?m[l7I1|](?![A-Za-z0-9])")
 _TRAILING_MARKS_RE = re.compile(r"\s*[*#★☆]+$")
 
 
@@ -127,6 +140,8 @@ def normalize_line(text: str) -> str:
     text = _MARKS_RE.sub("", text)
     text = _SEQUENCE_RE.sub("", text, count=1)
     text = _MARKS_RE.sub("", text)
+    text = _PLU_RE.sub("", text, count=1)
+    text = _ML_RE.sub("ml", text)
     return _TRAILING_MARKS_RE.sub("", text).strip()
 
 
@@ -291,6 +306,13 @@ def parse_items(lines: list[tuple[str, float]]) -> list[ParsedItem]:
                 waiting = None
             continue
 
+        # 2줄형에서 OCR이 수량 "1"을 "-"로 읽은 경우: 상품명 다음 줄 "8801097235212 1,950 -1,950".
+        # 할인 줄은 할인 낱말이 있는 이름 뒤에 오므로, 보통 상품명 뒤의 줄은 부호를 떼면 맞아떨어지는 품목이다.
+        if not named and waiting and not waiting.is_discount and line.numbers[-1] < 0:
+            values = [abs(number) for number in line.numbers]
+            if len(values) >= 2 and (values[-1] == values[-2] or _is_triplet(values)):
+                line.numbers = values
+
         # (d) 할인 줄: 음수 금액이거나 할인 낱말이 있는 줄 → 직전 품목의 discount에 더한다
         is_discount = line.numbers[-1] < 0
         if named:
@@ -328,6 +350,10 @@ def parse_items(lines: list[tuple[str, float]]) -> list[ParsedItem]:
 def find_store_name(lines: list[str]) -> str | None:
     top = [line for line in lines[:5] if line]
     for line in top:
+        # "매장명:(주)행복주점-역삼점 [영수증]"처럼 이름표가 있으면 그 뒤가 매장명이다
+        if (match := STORE_LABEL_RE.search(line)) and (name := RECEIPT_WORD_RE.sub("", match.group(1)).strip()):
+            return name
+    for line in top:
         if STORE_RE.search(line) and not META_RE.search(line):
             return line
     for line in top:
@@ -351,6 +377,13 @@ def find_purchase_date(lines: list[str]) -> date | None:
                     return date(int(year), int(month), int(day))
                 except ValueError:
                     continue  # 13월 45일 같은 잘못된 날짜는 무시
+    for line in lines:
+        if DATE_LABEL_RE.search(line):
+            for year, month, day in SHORT_DATE_RE.findall(line):
+                try:
+                    return date(2000 + int(year), int(month), int(day))
+                except ValueError:
+                    continue
     return None
 
 
