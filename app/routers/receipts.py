@@ -47,6 +47,7 @@ DUPLICATE_RECEIPT = "이미 등록된 영수증입니다."
 WARN_SUM_MISMATCH = "일부 품목을 못 읽었을 수 있어요"
 WARN_NO_ITEMS = "품목을 찾지 못했어요. 직접 추가해 주세요"
 WARN_NO_TOTAL = "영수증 총액을 찾지 못했어요. 빠진 품목이 없는지 확인해 주세요"
+OCR_BUSY = "다른 영수증을 분석 중입니다. 잠시 후 다시 시도해 주세요."
 
 
 class _ProductLookup:
@@ -215,11 +216,7 @@ def upload_receipt(
         try:
             boxes = ocr.recognize(str(absolute_path))
         except OcrBusyError:
-            raise HTTPException(
-                status_code=503,
-                detail="다른 영수증을 분석 중입니다. 잠시 후 다시 시도해 주세요.",
-                headers={"Retry-After": "10"},
-            ) from None
+            raise HTTPException(status_code=503, detail=OCR_BUSY, headers={"Retry-After": "10"}) from None
         except Exception:
             # 인식 실패는 "품목 0개" 초안으로 이어 간다. 사용자가 직접 추가할 수 있다.
             logger.exception("영수증 OCR 실패")

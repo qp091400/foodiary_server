@@ -21,6 +21,8 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 SECRET_KEYS = ("DATABASE_URL", "JWT_SECRET", "SMTP_PASSWORD")
+# Optional: when a version is recorded, the password-protected /receipt-test page is deployed.
+TEST_PASSWORD_KEY = "RECEIPT_TEST_PASSWORD"
 APIS = ("run.googleapis.com", "cloudbuild.googleapis.com", "artifactregistry.googleapis.com",
         "secretmanager.googleapis.com", "iam.googleapis.com", "storage.googleapis.com")
 
@@ -188,7 +190,8 @@ class Deployment:
         if len(values["JWT_SECRET"]) < 48 or not values["SMTP_PASSWORD"]:
             raise ValueError("Private secret files are incomplete")
         save_private(paths["DATABASE_URL"], values["DATABASE_URL"])
-        versions = {}
+        # The optional test password keeps its own version; test-password manages it.
+        versions = {key: value for key, value in self.versions().items() if key == TEST_PASSWORD_KEY}
         for key, path in paths.items():
             name = self.gcloud("secrets", "versions", "add", self.secret_name(key),
                                f"--data-file={path.resolve()}", "--format=value(name)", capture=True)
@@ -196,11 +199,48 @@ class Deployment:
         save_private(self.folder / "versions.json", json.dumps(versions))
         print("Uploaded three secrets; recorded immutable version numbers without printing their values.")
 
+    def versions(self) -> dict[str, str]:
+        path = self.folder / "versions.json"
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+    @property
+    def test_page(self) -> bool:
+        return TEST_PASSWORD_KEY in self.versions()
+
+    def runtime_secret_keys(self) -> tuple[str, ...]:
+        return SECRET_KEYS + ((TEST_PASSWORD_KEY,) if self.test_page else ())
+
     def secret_bindings(self, keys=SECRET_KEYS) -> str:
-        versions = json.loads((self.folder / "versions.json").read_text(encoding="utf-8"))
+        versions = self.versions()
         if any(not str(versions.get(key, "")).isdigit() for key in keys):
             raise ValueError("Upload secrets before deploying")
         return ",".join(f"{key}={self.secret_name(key)}:{versions[key]}" for key in keys)
+
+    def set_test_password(self, *, disable: bool = False) -> None:
+        versions = self.versions()
+        if disable:
+            versions.pop(TEST_PASSWORD_KEY, None)
+            save_private(self.folder / "versions.json", json.dumps(versions))
+            print("The next deploy turns the test page off. Run deploy, verify and publish.")
+            return
+        # Typed on a phone, sent in an HTTP header: printable ASCII without spaces.
+        password = getpass.getpass("New receipt test page password (hidden, 12+ characters): ").strip()
+        if not re.fullmatch(r"[\x21-\x7e]{12,}", password):
+            raise ValueError("Use at least 12 English letters, digits or symbols without spaces. Nothing was changed.")
+        if getpass.getpass("Repeat the password (hidden): ").strip() != password:
+            raise ValueError("The two passwords differ. Nothing was changed.")
+        path = self.folder / "secrets" / TEST_PASSWORD_KEY
+        save_private(path, password)
+        name = self.secret_name(TEST_PASSWORD_KEY)
+        if self.gcloud("secrets", "describe", name, capture=True, missing_ok=True) is None:
+            self.gcloud("secrets", "create", name, "--replication-policy=automatic")
+        self.gcloud("secrets", "add-iam-policy-binding", name, f"--member=serviceAccount:{self.account('run')}",
+                    "--role=roles/secretmanager.secretAccessor")
+        version = self.gcloud("secrets", "versions", "add", name, f"--data-file={path.resolve()}",
+                              "--format=value(name)", capture=True)
+        versions[TEST_PASSWORD_KEY] = version.rsplit("/", 1)[-1]
+        save_private(self.folder / "versions.json", json.dumps(versions))
+        print("Stored the test password as a new secret version without printing it. Run deploy, verify and publish.")
 
     def build(self) -> None:
         tag = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
@@ -246,7 +286,7 @@ class Deployment:
                     "--cpu=2", "--memory=8Gi", "--cpu-throttling", "--no-cpu-boost", "--concurrency=4",
                     "--min=0", "--max=1", "--min-instances=0", "--max-instances=1", "--timeout=180s",
                     "--no-allow-unauthenticated", f"--env-vars-file={env_file.resolve()}",
-                    f"--set-secrets={self.secret_bindings()}",
+                    f"--set-secrets={self.secret_bindings(self.runtime_secret_keys())}",
                     f"--add-volume=name=receipts,type=cloud-storage,bucket={self.config['bucket']},mount-options=uid=10001;gid=10001;file-mode=0600;dir-mode=0700",
                     "--add-volume-mount=volume=receipts,mount-path=/app/uploads",
                     "--startup-probe=tcpSocket.port=8080,periodSeconds=5,timeoutSeconds=5,failureThreshold=48")
@@ -254,22 +294,28 @@ class Deployment:
     def verify(self, *, private: bool = True) -> None:
         token = self.gcloud("auth", "print-identity-token", capture=True) if private else None
         headers = {"X-Serverless-Authorization": f"Bearer {token}"} if private else {}
-        for path, expected in (("/ready", 200), ("/fridges", 401), ("/docs", 404), ("/redoc", 404),
-                               ("/openapi.json", 404), ("/dev/receipt-test", 404)):
-            request = Request(service_url(self.config) + path, headers=headers)
+        # The test page exists only with a test password, and must refuse recognition without it.
+        test_page = self.test_page
+        checks = (("GET", "/ready", 200), ("GET", "/fridges", 401), ("GET", "/docs", 404), ("GET", "/redoc", 404),
+                  ("GET", "/openapi.json", 404), ("GET", "/dev/receipt-test", 404),
+                  ("GET", "/receipt-test", 200 if test_page else 404),
+                  ("POST", "/receipt-test", 401 if test_page else 404))
+        for method, path, expected in checks:
+            request = Request(service_url(self.config) + path, headers=headers, method=method,
+                              data=b"" if method == "POST" else None)
             try:
                 response = urlopen(request, timeout=180)
             except HTTPError as error:
                 response = error
             with response:
                 if response.status != expected:
-                    raise RuntimeError(f"{path}: expected HTTP {expected}, received {response.status}")
+                    raise RuntimeError(f"{method} {path}: expected HTTP {expected}, received {response.status}")
                 if response.headers.get("X-Content-Type-Options") != "nosniff":
                     raise RuntimeError("Application security headers missing")
                 if path == "/ready":
                     if json.load(response).get("ocr") != "ready" or not response.headers.get("Strict-Transport-Security"):
                         raise RuntimeError("OCR readiness or HTTPS security headers missing")
-            print(f"{path}: HTTP {expected}")
+            print(f"{method} {path}: HTTP {expected}")
         print("Read-only checks passed. Test actual signup email and an authenticated receipt upload before launch.")
 
     def publish(self) -> None:
@@ -313,6 +359,8 @@ def main() -> None:
     init.add_argument("--origin", action="append", help="Frontend HTTPS origin; can be specified multiple times")
     for action in ("plan", "setup", "secrets", "build", "migrate", "deploy", "verify", "publish"):
         commands.add_parser(action)
+    test_password = commands.add_parser("test-password", help="Set (or --disable) the /receipt-test page password")
+    test_password.add_argument("--disable", action="store_true", help="Turn the test page off at the next deploy")
     args = parser.parse_args()
     try:
         if args.action == "init":
@@ -321,6 +369,8 @@ def main() -> None:
         deployment = Deployment(json.loads(args.config.read_text(encoding="utf-8")), args.config.parent)
         if args.action == "plan":
             print(json.dumps(deployment.plan(), indent=2, ensure_ascii=False))
+        elif args.action == "test-password":
+            deployment.set_test_password(disable=args.disable)
         else:
             action = deployment.upload_secrets if args.action == "secrets" else getattr(deployment, args.action)
             action()

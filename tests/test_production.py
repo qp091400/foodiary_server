@@ -42,6 +42,9 @@ def production_settings(**overrides):
     [
         {"jwt_secret": "change-me"},
         {"dev_tools": True},
+        {"receipt_test_password": "short-pass"},
+        {"receipt_test_password": "with spaces inside"},
+        {"receipt_test_password": "한글비밀번호한글비밀번호"},
         {"auto_create_tables": True},
         {"cors_origins": "*"},
         {"trusted_hosts": "*"},
@@ -62,6 +65,7 @@ def test_production_rejects_unsafe_configuration(override):
 
 def test_production_accepts_complete_configuration():
     production_settings().validate_for_startup()
+    production_settings(receipt_test_password="k7xq-2mfa-9rtz").validate_for_startup()
 
 
 def test_startup_stops_if_actual_ocr_check_fails(monkeypatch, tmp_path):

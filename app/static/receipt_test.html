@@ -36,6 +36,13 @@
   .drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
   .drop:focus-within { border-color: var(--accent); }
   .pick { display: grid; gap: 12px; }
+  .password { display: grid; gap: 6px; margin-bottom: 12px; }
+  .password label { font-weight: 600; }
+  .password input {
+    font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--bg); color: var(--text); width: 100%; max-width: 360px;
+  }
+  .password span { color: var(--muted); font-size: 13px; }
   /* "사진 찍기"는 손가락으로 쓰는 기기(휴대폰·태블릿)에서만 보인다 */
   .camera, .for-touch { display: none; }
   @media (pointer: coarse) {
@@ -76,6 +83,12 @@
 <main>
   <h1>영수증 인식 테스트</h1>
   <p class="lead">사진을 올리면 실제 업로드와 같은 방식으로 인식한 결과를 보여 줍니다. 여기서 올린 것은 저장되지 않습니다.</p>
+
+  <div class="card password" id="passwordBox" hidden>
+    <label for="password">테스트 비밀번호</label>
+    <input type="password" id="password" autocomplete="current-password" autocapitalize="off" spellcheck="false">
+    <span>맞는 비밀번호는 이 기기에 기억해 둡니다.</span>
+  </div>
 
   <div class="pick">
     <label class="drop camera">
@@ -154,6 +167,29 @@ function el(tag, text, className) {
 const MAX_SIDE = 2000; // 서버도 긴 변 2000px로 줄여서 인식한다
 const EXTENSIONS = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 const inputs = [$("file"), $("camera")];
+
+// 같은 페이지를 두 주소에서 쓴다: /dev/receipt-test(개발, 비밀번호 없음)와 /receipt-test(운영, 테스트 비밀번호)
+const ENDPOINT = location.pathname.startsWith("/dev/") ? "/dev/receipt-test" : "/receipt-test";
+const NEEDS_PASSWORD = ENDPOINT === "/receipt-test";
+const PASSWORD_KEY = "receipt-test-password";
+
+function remember(password) {
+  try {
+    if (password) localStorage.setItem(PASSWORD_KEY, password);
+    else localStorage.removeItem(PASSWORD_KEY);
+  } catch (error) {
+    // 저장소를 못 쓰는 브라우저면 매번 입력한다
+  }
+}
+
+if (NEEDS_PASSWORD) {
+  $("passwordBox").hidden = false;
+  try {
+    $("password").value = localStorage.getItem(PASSWORD_KEY) || "";
+  } catch (error) {
+    // 위와 같다
+  }
+}
 
 function loadImage(file) {
   return new Promise((resolve, reject) => {
@@ -255,8 +291,22 @@ function render(data) {
 
 async function recognize(file) {
   if (!file) return;
-  for (const input of inputs) input.disabled = true;
   $("error").hidden = true;
+  const headers = {};
+  const password = $("password").value.trim();
+  if (NEEDS_PASSWORD) {
+    // 헤더에는 영문·숫자·기호만 실을 수 있다
+    const problem = !password ? "테스트 비밀번호를 먼저 입력해 주세요."
+      : /[^\x21-\x7e]/.test(password) ? "비밀번호는 영문, 숫자, 기호로만 입력해 주세요." : null;
+    if (problem) {
+      showError(problem);
+      for (const input of inputs) input.value = "";
+      $("password").focus();
+      return;
+    }
+    headers["X-Test-Password"] = password;
+  }
+  for (const input of inputs) input.disabled = true;
   $("result").hidden = true;
   $("preview").src = URL.createObjectURL(file);
   $("layout").hidden = false;
@@ -276,9 +326,11 @@ async function recognize(file) {
   try {
     const body = new FormData();
     body.append("file", upload.data, upload.name);
-    const response = await fetch("/dev/receipt-test", { method: "POST", body });
+    const response = await fetch(ENDPOINT, { method: "POST", body, headers });
     const data = await response.json().catch(() => null);
+    if (NEEDS_PASSWORD && response.status === 401) remember("");
     if (!response.ok) throw new Error((data && data.detail) || `서버 오류 (HTTP ${response.status})`);
+    if (NEEDS_PASSWORD) remember(password);
     render(data);
   } catch (error) {
     // fetch 자체가 실패하면(TypeError) 서버에 닿지 못한 것이다

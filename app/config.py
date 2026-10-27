@@ -1,5 +1,6 @@
 """환경 변수(.env) 기반 설정."""
 
+import re
 from typing import Literal
 
 from pydantic import Field
@@ -51,6 +52,8 @@ class Settings(BaseSettings):
     auto_create_tables: bool = True
     timezone: str = "Asia/Seoul"
     dev_tools: bool = False  # true면 로그인 없는 테스트 페이지(/dev/receipt-test)를 연다. 운영에서는 끈다
+    # 설정하면 운영에서도 /receipt-test 페이지가 열린다. 인식 요청마다 이 비밀번호가 있어야 한다. 비우면 404
+    receipt_test_password: str = ""
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -75,6 +78,8 @@ class Settings(BaseSettings):
             errors.append("JWT_SECRET must contain at least 48 characters")
         if self.dev_tools:
             errors.append("DEV_TOOLS must be false")
+        if self.receipt_test_password and not re.fullmatch(r"[\x21-\x7e]{12,}", self.receipt_test_password):
+            errors.append("RECEIPT_TEST_PASSWORD must be at least 12 ASCII characters without spaces")
         if self.auto_create_tables:
             errors.append("AUTO_CREATE_TABLES must be false; use Alembic")
         if "*" in self.cors_origin_list:

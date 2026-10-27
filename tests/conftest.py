@@ -12,6 +12,7 @@ os.environ.update(
         "TIMEZONE": "Asia/Seoul",
         "MAX_UPLOAD_MB": "10",
         "DEV_TOOLS": "false",
+        "RECEIPT_TEST_PASSWORD": "",
         "OCR_DET_MAX_SIDE": "0",
         "APP_ENV": "test",
         "OCR_WARMUP": "false",

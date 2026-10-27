@@ -12,7 +12,8 @@ from starlette.responses import JSONResponse
 
 from app.config import settings
 
-_OCR_PATH = re.compile(r"^/fridges/\d+/receipts/?$")
+# 영수증 업로드와 인식 테스트. 테스트 비밀번호를 틀린 요청도 센다(비밀번호 맞히기 방지).
+_OCR_PATH = re.compile(r"^/(?:fridges/\d+/receipts|(?:dev/)?receipt-test)/?$")
 
 
 class RequestLimiter:
@@ -71,6 +72,6 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         response.headers["Referrer-Policy"] = "no-referrer"
         if settings.app_env == "production":
             response.headers["Strict-Transport-Security"] = "max-age=31536000"
-        if request.url.path.startswith(("/auth/", "/users/", "/fridges")):
+        if request.url.path.startswith(("/auth/", "/users/", "/fridges", "/receipt-test", "/dev/")):
             response.headers["Cache-Control"] = "no-store"
         return response

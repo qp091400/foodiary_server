@@ -1,3 +1,4 @@
+import io
 import json
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -108,6 +109,79 @@ def test_changing_database_secret_requires_migrating_that_database(tmp_path, mon
     (tmp_path / "versions.json").write_text(json.dumps(versions))
     with pytest.raises(ValueError, match="migration job"):
         deployment.deploy()
+
+
+def test_test_password_is_optional_and_only_bound_when_set(tmp_path, monkeypatch):
+    deployment, _ = prepare_deployment(tmp_path)
+    calls = []
+    def fake(*args, **kwargs):
+        calls.append(args)
+        if args[:2] == ("secrets", "describe"):
+            return None  # the secret does not exist yet
+        return "projects/123456789012/secrets/foodiary-receipt-test-password/versions/7"
+    monkeypatch.setattr(deployment, "gcloud", fake)
+    deployment.migrate()
+    deployment.deploy()
+    assert not any("RECEIPT_TEST_PASSWORD" in argument for argument in calls[-1])
+
+    # Too short, or the repeat differs: nothing is created or recorded.
+    calls.clear()
+    for answers in (["too-short"], ["long-enough-pass", "different-pass!"]):
+        replies = iter(answers)
+        monkeypatch.setattr(cloudrun.getpass, "getpass", lambda prompt: next(replies))
+        with pytest.raises(ValueError, match="Nothing was changed"):
+            deployment.set_test_password()
+    assert calls == [] and not deployment.test_page
+
+    replies = iter(["long-enough-pass", "long-enough-pass"])
+    monkeypatch.setattr(cloudrun.getpass, "getpass", lambda prompt: next(replies))
+    deployment.set_test_password()
+    assert (tmp_path / "secrets" / "RECEIPT_TEST_PASSWORD").read_text() == "long-enough-pass"
+    assert ("secrets", "create", "foodiary-receipt-test-password", "--replication-policy=automatic") in calls
+    assert any(c[:2] == ("secrets", "add-iam-policy-binding")
+               and "--member=serviceAccount:foodiary-run@example-project.iam.gserviceaccount.com" in c for c in calls)
+    assert not any("long-enough-pass" in argument for call in calls for argument in call)
+    deployment.deploy()
+    assert any(argument.endswith(",RECEIPT_TEST_PASSWORD=foodiary-receipt-test-password:7") for argument in calls[-1])
+
+    # Re-uploading the required secrets keeps the test password; --disable drops it at the next deploy.
+    for key in cloudrun.SECRET_KEYS:
+        (tmp_path / "secrets" / key).write_text("x" * 48)
+    monkeypatch.setattr(cloudrun, "normalize_database_url", lambda value: value)
+    deployment.upload_secrets()
+    assert deployment.versions()["RECEIPT_TEST_PASSWORD"] == "7"
+    deployment.set_test_password(disable=True)
+    assert not deployment.test_page
+
+
+class FakeResponse(io.BytesIO):
+    def __init__(self, status):
+        super().__init__(b'{"ocr": "ready"}')
+        self.status = status
+        self.headers = {"X-Content-Type-Options": "nosniff", "Strict-Transport-Security": "max-age=31536000"}
+
+
+def test_verify_expects_the_test_page_only_with_a_test_password(tmp_path, monkeypatch):
+    deployment, _ = prepare_deployment(tmp_path)
+    monkeypatch.setattr(deployment, "gcloud", lambda *a, **k: "identity-token")
+    served = {"/ready": 200, "/fridges": 401}
+    requests = []
+    def fake_urlopen(request, timeout):
+        path = urlsplit(request.full_url).path
+        requests.append((request.get_method(), path))
+        return FakeResponse(served.get(path, 404))
+    monkeypatch.setattr(cloudrun, "urlopen", fake_urlopen)
+
+    deployment.verify()  # no test password: the page must be missing
+    assert ("GET", "/receipt-test") in requests and ("POST", "/receipt-test") in requests
+
+    versions = deployment.versions() | {"RECEIPT_TEST_PASSWORD": "1"}
+    (tmp_path / "versions.json").write_text(json.dumps(versions))
+    with pytest.raises(RuntimeError, match="GET /receipt-test: expected HTTP 200, received 404"):
+        deployment.verify()
+    served["/receipt-test"] = 200  # a page that answered POST without a password with 200 would fail too
+    with pytest.raises(RuntimeError, match="POST /receipt-test: expected HTTP 401, received 200"):
+        deployment.verify()
 
 
 def test_publish_stops_if_private_checks_fail(tmp_path, monkeypatch):

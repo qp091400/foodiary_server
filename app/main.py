@@ -64,6 +64,7 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_host_li
 
 for module in (auth, users, fridges, items, receipts, products, stats, dev):
     app.include_router(module.router)
+app.include_router(dev.test_router)
 
 
 @app.get("/health", tags=["상태"], summary="서버 상태 확인")

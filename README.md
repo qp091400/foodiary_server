@@ -71,6 +71,17 @@ SQLite 인메모리 DB, console 메일, `OCR_ENGINE=none`으로 돌기 때문에
 - 같은 Wi-Fi의 휴대폰에서 `http://PC의IP:8000/dev/receipt-test`로 열면 **사진 찍기** 버튼으로 바로 찍어서 올릴 수 있습니다. 큰 사진은 올리기 전에 브라우저에서 긴 변 2000px로 줄여 보냅니다.
 - **로그인 없이 OCR을 돌리는 경로라서 운영에서는 반드시 `DEV_TOOLS=false`(기본값)로 둡니다.** 꺼져 있으면 404입니다.
 
+### 영수증 인식 테스트 페이지 (운영 서버, 테스트 비밀번호)
+
+같은 페이지를 운영 서버에서도 `/receipt-test` 주소로 열 수 있습니다. `RECEIPT_TEST_PASSWORD`를 설정했을 때만 열리고,
+비우면(기본값) 404입니다. 페이지에서 비밀번호를 입력해야 인식하며, 틀린 비밀번호는 401이고 OCR을 돌리지 않습니다.
+
+- 비밀번호는 영문·숫자·기호 12자 이상, 공백 없이. 운영 시작 검사가 짧거나 한글이 섞인 값을 거부합니다.
+- 맞는 비밀번호는 그 기기의 브라우저에 기억합니다. 틀리면 지웁니다.
+- 틀린 요청도 영수증 업로드와 같은 분당 한도(`OCR_REQUESTS_PER_MINUTE`)에 들어갑니다.
+- OCR 오류의 자세한 내용은 보여 주지 않습니다(개발용 페이지는 보여 줍니다). 아무것도 저장하지 않는 것은 같습니다.
+- Cloud Run에서는 `python3 scripts/cloudrun.py test-password`로 설정합니다. `deploy/CLOUD_RUN.md` 4절을 보세요.
+
 ### DB 마이그레이션
 
 - 개발: `AUTO_CREATE_TABLES=true`(기본)면 시작할 때 테이블을 만듭니다.
@@ -96,6 +107,7 @@ SQLite 인메모리 DB, console 메일, `OCR_ENGINE=none`으로 돌기 때문에
 | `AUTO_CREATE_TABLES` | `true` | 시작할 때 `create_all` |
 | `TIMEZONE` | `Asia/Seoul` | "오늘", 구매일, 통계 월 경계의 기준 |
 | `DEV_TOOLS` | `false` | `true`면 로그인 없는 영수증 인식 테스트 페이지(`/dev/receipt-test`)를 엽니다. 운영에서는 `false` |
+| `RECEIPT_TEST_PASSWORD` | (빈 값) | 설정하면 비밀번호로 보호한 테스트 페이지(`/receipt-test`)를 엽니다. 운영에서도 쓸 수 있습니다 |
 
 `.env`에서는 값 뒤에 `# 주석`을 붙이지 마세요. 주석은 윗줄에 따로 씁니다.
 `JWT_SECRET`이 기본값인 채로 `EMAIL_BACKEND=smtp`이면 시작할 때 경고 로그가 남습니다.
