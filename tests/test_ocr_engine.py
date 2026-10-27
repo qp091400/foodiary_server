@@ -1,5 +1,6 @@
 """PaddleOCR 엔진: paddle 없이도 돌도록 가짜 paddleocr 모듈을 끼워서 확인한다."""
 
+import math
 import sys
 import types
 
@@ -50,7 +51,10 @@ def test_boxes_fall_back_to_polygons_and_json_res():
         }
 
     (box,) = boxes_from_results([ResultObject()])
-    assert box == OcrBox("두부", 0.9, 9.0, 100.0, 80.0, 130.0)  # 꼭짓점의 최소·최대, 좌표 없는 글자는 제외
+    # 꼭짓점의 최소·최대, 좌표 없는 글자는 제외. 꼭짓점 4개로 기울기와 실제 높이도 잰다
+    assert (box.text, box.score, box.x0, box.y0, box.x1, box.y1) == ("두부", 0.9, 9.0, 100.0, 80.0, 130.0)
+    assert box.angle == pytest.approx(math.atan2(4, 70), abs=1e-3)
+    assert box.height == pytest.approx(26.0, abs=0.1)
 
 
 def test_boxes_from_unexpected_results():

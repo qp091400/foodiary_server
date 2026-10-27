@@ -3,6 +3,7 @@
 처리 순서: 줄 묶기 → 정규화 → 품목 구간 찾기 → 줄 해석 → 메타 정보(매장명·구매일·총액)
 """
 
+import math
 import re
 import statistics
 from dataclasses import dataclass, field
@@ -79,6 +80,9 @@ GROUPED_NUMBER_RE = re.compile(r"[1-9]\d{0,2}(?:[,.]\d{3})+")  # OCR이 쉼표�
 HANGUL_RE = re.compile(r"[가-힣]")
 # 이보다 작은 금액은 품목으로 보지 않는다: 세트 구성품(0원), 주소 번지나 안내 문구에서 떨어져 나온 숫자.
 MIN_ITEM_AMOUNT = 100  # TODO: balance
+# 사진 기울기 보정: 이보다 작으면 보정하지 않고, 이보다 큰 상자는 세로 글자 등으로 보고 빼고 잰다
+MIN_SKEW = math.radians(1)  # TODO: balance
+MAX_SKEW = math.radians(30)
 
 _FULLWIDTH = {code: code - 0xFEE0 for code in range(0xFF01, 0xFF5F)}
 _FULLWIDTH[0x3000] = 0x20
@@ -95,21 +99,52 @@ _PLU_RE = re.compile(r"^(?:0\d{3,4}|\d{6,7})\s+(?=-?[\d,.]+(?:\s|$))")
 # 용량 단위를 잘못 읽은 것: "500m7", "500mI" → "500ml"
 _ML_RE = re.compile(r"(?<=\d)\s?m[l7I1|](?![A-Za-z0-9])")
 _TRAILING_MARKS_RE = re.compile(r"\s*[*#★☆]+$")
+# 금액 모양("1,5OO", "l2,000원")인데 숫자 자리에 비슷한 글자가 섞인 토큰. 쉼표 자리 모양이 있을 때만 고친다.
+_LOOKALIKE_AMOUNT_RE = re.compile(r"(?<!\S)(-?)([\dOolI|]{1,3}(?:[,.][\dOolI|]{3})+)(원?)(?!\S)")
+_DIGIT_LOOKALIKES = str.maketrans({"O": "0", "o": "0", "l": "1", "I": "1", "|": "1"})
+
+
+def _fix_lookalike_amount(match: re.Match) -> str:
+    sign, number, won = match.groups()
+    if not re.search(r"\d", number):
+        return match.group()
+    return sign + number.translate(_DIGIT_LOOKALIKES) + won
 
 
 # ── 1. 줄 묶기 ───────────────────────────────────────────────────────────
 
 
+def estimate_skew(boxes: list[OcrBox]) -> float:
+    """사진이 기운 각도(라디안). 가로로 긴 글자 상자들의 기울기 중앙값. 1° 미만이면 0으로 본다."""
+    angles = [
+        box.angle
+        for box in boxes
+        if abs(box.angle) < MAX_SKEW and (box.x1 - box.x0) > 2 * (box.height or (box.y1 - box.y0))
+    ]
+    if len(angles) < 3:
+        return 0.0
+    skew = statistics.median(angles)
+    return skew if abs(skew) >= MIN_SKEW else 0.0
+
+
 def group_lines(boxes: list[OcrBox]) -> list[tuple[str, float]]:
-    """박스를 줄 단위로 묶어 (줄 텍스트, 평균 score) 목록으로 돌려준다."""
+    """박스를 줄 단위로 묶어 (줄 텍스트, 평균 score) 목록으로 돌려준다.
+
+    사진이 기울었으면 그만큼 좌표를 되돌려서 묶는다. 기운 채로 묶으면 오른쪽 끝의 가격이 아래 줄로 넘어간다.
+    """
     boxes = [box for box in boxes if box.text and box.text.strip()]
     if not boxes:
         return []
+    skew = estimate_skew(boxes)
+    cos, sin = math.cos(skew), math.sin(skew)
 
     def center_y(box: OcrBox) -> float:
-        return (box.y0 + box.y1) / 2
+        return (box.y0 + box.y1) / 2 * cos - (box.x0 + box.x1) / 2 * sin
 
-    tolerance = statistics.median(abs(box.y1 - box.y0) for box in boxes) * 0.5
+    def left_x(box: OcrBox) -> float:
+        return box.x0 * cos + (box.y0 + box.y1) / 2 * sin
+
+    tolerance = statistics.median(abs(box.height or (box.y1 - box.y0)) for box in boxes) * 0.5
     rows: list[list[OcrBox]] = []
     for box in sorted(boxes, key=center_y):
         if rows:
@@ -122,7 +157,7 @@ def group_lines(boxes: list[OcrBox]) -> list[tuple[str, float]]:
 
     lines = []
     for row in rows:
-        row.sort(key=lambda b: b.x0)
+        row.sort(key=left_x)
         text = " ".join(b.text.strip() for b in row)
         lines.append((text, sum(b.score for b in row) / len(row)))
     return lines
@@ -135,6 +170,7 @@ def normalize_line(text: str) -> str:
     text = text.translate(_FULLWIDTH)
     text = re.sub(r"\s+", " ", text).strip()
     text = re.sub(r"(\d)\s*,\s*(\d{3})(?!\d)", r"\1,\2", text)  # "2, 980" → "2,980"
+    text = _LOOKALIKE_AMOUNT_RE.sub(_fix_lookalike_amount, text)  # "1,5OO" → "1,500"
     text = re.sub(r"-\s+(?=\d)", "-", text)  # "- 500" → "-500"
     # 줄 앞의 순번(001, 01), POS 상품코드와 면세·행사 표시(*, #, ★, (면세), P)
     text = _MARKS_RE.sub("", text)

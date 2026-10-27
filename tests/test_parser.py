@@ -1,5 +1,6 @@
 """영수증 파서: 가짜 OcrBox로 만든 4가지 레이아웃 + 규칙별 사례."""
 
+import math
 from datetime import date
 
 import pytest
@@ -7,6 +8,7 @@ import pytest
 from app.services.expiry import classify
 from app.services.ocr.base import OcrBox
 from app.services.receipt_parser import (
+    estimate_skew,
     find_purchase_date,
     find_total,
     group_lines,
@@ -158,6 +160,24 @@ def test_group_lines_uses_median_height_tolerance():
     assert group_lines([]) == []
 
 
+def tilted_box(text, x0, x1, base, degrees=6.0, height=28.0):
+    """기운 사진의 글자 상자: 줄이 오른쪽으로 갈수록 내려간다."""
+    slope = math.tan(math.radians(degrees))
+    top, bottom = base + x0 * slope - height / 2, base + x1 * slope + height / 2
+    return OcrBox(text, 0.9, x0, top, x1, bottom, math.radians(degrees), height)
+
+
+def test_tilted_photo_is_grouped_into_the_right_lines():
+    rows = [("서울우유 1L", "2,980", 100), ("두부", "1,500", 140), ("합계", "4,480", 180)]
+    boxes = [box for name, price, base in rows for box in (tilted_box(name, 10, 130, base), tilted_box(price, 400, 480, base))]
+    assert [text for text, _ in group_lines(boxes)] == ["서울우유 1L 2,980", "두부 1,500", "합계 4,480"]
+    # 기울기를 모르면 오른쪽 끝의 가격이 아래 줄 상품명과 묶인다 (보정이 없을 때의 문제)
+    flat = [OcrBox(b.text, b.score, b.x0, b.y0, b.x1, b.y1) for b in boxes]
+    assert [text for text, _ in group_lines(flat)] != ["서울우유 1L 2,980", "두부 1,500", "합계 4,480"]
+    # 1°보다 덜 기울었으면 보정하지 않는다
+    assert estimate_skew([tilted_box("우유 1,000", 10, 400, 100 + 40 * n, degrees=0.5) for n in range(5)]) == 0.0
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
@@ -179,6 +199,12 @@ def test_group_lines_uses_median_height_tolerance():
         ("203250 14,582 1 14,582", "14,582 1 14,582"),  # 숫자 줄 앞의 저울·매장 상품코드
         ("이13스니커즈미니스 90g", "스니커즈미니스 90g"),  # 순번 013의 0을 "이"로 읽음
         ("테라(500m7) 4 27,600", "테라(500ml) 4 27,600"),  # 용량 단위 오인식
+        # 금액 모양 토큰에 섞인 비슷한 글자: O·o → 0, l·I·| → 1
+        ("두부 1,5OO", "두부 1,500"),
+        ("우유 l2,000원", "우유 12,000원"),
+        ("행사할인 -1,5O0", "행사할인 -1,500"),
+        ("COOL 1,OOO", "COOL 1,000"),  # 상품명은 그대로
+        ("OO,OOO", "OO,OOO"),  # 숫자가 하나도 없으면 고치지 않는다
     ],
 )
 def test_normalize_line(raw, expected):

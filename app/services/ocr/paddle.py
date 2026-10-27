@@ -1,6 +1,7 @@
 """PaddleOCR(PP-OCRv5) 엔진. paddle은 처음 호출될 때만 import·로딩한다."""
 
 import logging
+import math
 import tempfile
 import threading
 from collections.abc import Callable, Mapping
@@ -55,6 +56,19 @@ def _rect(box: Any, poly: Any) -> tuple[float, float, float, float] | None:
     return None
 
 
+def _slant(poly: Any) -> tuple[float, float]:
+    """꼭짓점 4개(왼쪽 위부터 시계 방향)로 글자 줄의 기울기와 실제 높이를 잰다. 못 재면 (0, 0)."""
+    try:
+        if poly is None or len(poly) != 4:
+            return 0.0, 0.0
+        (ax, ay), (bx, by), (cx, cy), (dx, dy) = ((float(p[0]), float(p[1])) for p in poly)
+    except (TypeError, ValueError, IndexError):
+        return 0.0, 0.0
+    angle = math.atan2((by - ay + cy - dy) / 2, (bx - ax + cx - dx) / 2)  # 윗변과 아랫변의 평균 방향
+    height = (math.hypot(dx - ax, dy - ay) + math.hypot(cx - bx, cy - by)) / 2
+    return angle, height
+
+
 def boxes_from_results(results: Any) -> list[OcrBox]:
     """`PaddleOCR.predict()` 결과에서 OcrBox 목록을 꺼낸다. 형식이 달라도 죽지 않게 방어적으로 읽는다."""
     boxes: list[OcrBox] = []
@@ -71,17 +85,15 @@ def boxes_from_results(results: Any) -> list[OcrBox]:
             text = str(text).strip()
             if not text:
                 continue
-            rect = _rect(
-                rects[index] if index < len(rects) else None,
-                polys[index] if index < len(polys) else None,
-            )
+            poly = polys[index] if index < len(polys) else None
+            rect = _rect(rects[index] if index < len(rects) else None, poly)
             if rect is None:
                 continue  # 좌표가 없으면 줄을 묶을 수 없다
             try:
                 score = float(scores[index]) if index < len(scores) else 0.0
             except (TypeError, ValueError):
                 score = 0.0
-            boxes.append(OcrBox(text, score, *rect))
+            boxes.append(OcrBox(text, score, *rect, *_slant(poly)))
     return boxes
 
 

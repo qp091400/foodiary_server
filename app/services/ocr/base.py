@@ -12,10 +12,12 @@ class OcrBusyError(RuntimeError):
 class OcrBox:
     text: str
     score: float
-    x0: float
+    x0: float  # 글자 상자를 감싸는 수평 사각형
     y0: float
     x1: float
     y1: float
+    angle: float = 0.0  # 글자 줄의 기울기(라디안, 오른쪽이 아래로 내려가면 +). 꼭짓점 4개가 있을 때만 잰다
+    height: float = 0.0  # 기울기를 뺀 실제 글자 높이. 0이면 y1 - y0을 쓴다
 
 
 class OcrEngine(Protocol):
