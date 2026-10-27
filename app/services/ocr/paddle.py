@@ -85,10 +85,12 @@ def boxes_from_results(results: Any) -> list[OcrBox]:
 
 
 class PaddleOcrEngine:
+    """검출 모델마다 PaddleOCR 파이프라인을 하나씩 둔다(정밀, 빠른). 추론은 둘을 합쳐 한 번에 하나만 한다."""
+
     def __init__(self, lang: str, det_max_side: int = 0) -> None:
         self._lang = lang
         self._det_max_side = det_max_side
-        self._ocr: Any = None
+        self._pipelines: dict[str, Any] = {}  # 검출 모델 이름 → PaddleOCR
         self._load_lock = threading.Lock()
         self._predict_lock = threading.Lock()  # paddle predictor는 스레드 안전하지 않다
         self._ready = False
@@ -97,11 +99,20 @@ class PaddleOcrEngine:
     def ready(self) -> bool:
         return self._ready
 
-    def _load(self) -> Any:
-        if self._ocr is None:
+    @property
+    def has_fast_model(self) -> bool:
+        return bool(settings.ocr_fast_detection_model)
+
+    def _load(self, detection_model: str | None = None) -> Any:
+        model = detection_model or settings.ocr_detection_model
+        if model not in self._pipelines:
             with self._load_lock:
-                if self._ocr is None:
-                    logger.info("PaddleOCR 모델 로딩 (lang=%s) - 처음 한 번은 모델을 내려받느라 오래 걸립니다", self._lang)
+                if model not in self._pipelines:
+                    logger.info(
+                        "PaddleOCR 모델 로딩 (lang=%s, det=%s) - 처음 한 번은 모델을 내려받느라 오래 걸립니다",
+                        self._lang,
+                        model,
+                    )
                     options = {}
                     if self._det_max_side > 0:
                         # 검출만 줄인 해상도로 한다. 글자 인식은 원본 해상도에서 잘라 쓰므로 품질 손실이 작다.
@@ -113,16 +124,16 @@ class PaddleOcrEngine:
                         verify_model_files()
                         root = Path(settings.ocr_models_dir)
                         options.update(
-                            text_detection_model_dir=str(root / settings.ocr_detection_model),
+                            text_detection_model_dir=str(root / model),
                             text_recognition_model_dir=str(root / settings.ocr_recognition_model),
                             textline_orientation_model_dir=str(root / settings.ocr_textline_model),
                         )
                     from paddleocr import PaddleOCR  # 지연 import: 설치 안 된 환경에서도 서버·테스트가 뜬다
 
-                    self._ocr = PaddleOCR(
+                    self._pipelines[model] = PaddleOCR(
                         lang=self._lang,
                         ocr_version=settings.ocr_version,
-                        text_detection_model_name=settings.ocr_detection_model,
+                        text_detection_model_name=model,
                         text_recognition_model_name=settings.ocr_recognition_model,
                         textline_orientation_model_name=settings.ocr_textline_model,
                         device="cpu",
@@ -133,16 +144,22 @@ class PaddleOcrEngine:
                         use_textline_orientation=True,
                         **options,
                     )
-        return self._ocr
+        return self._pipelines[model]
 
-    def recognize(self, image_path: str) -> list[OcrBox]:
+    def recognize(self, image_path: str, *, fast: bool = False, wait: float = 0) -> list[OcrBox]:
+        """fast=True면 빠른 검출 모델로 읽는다.
+
+        다른 영수증을 읽는 중이면 wait초까지 기다리고, 그래도 바쁘면 OcrBusyError. (0이면 기다리지 않는다)
+        """
         import numpy as np
         from PIL import Image
 
-        if not self._predict_lock.acquire(blocking=False):
+        acquired = self._predict_lock.acquire(timeout=wait) if wait > 0 else self._predict_lock.acquire(blocking=False)
+        if not acquired:
             raise OcrBusyError("OCR is busy")
+        fast = fast and self.has_fast_model
         try:
-            ocr = self._load()
+            ocr = self._load(settings.ocr_fast_detection_model if fast else None)
             # 경로 대신 배열: Windows의 비ASCII 경로도 지원한다.
             with Image.open(image_path) as image:
                 bgr = np.ascontiguousarray(np.asarray(image.convert("RGB"))[:, :, ::-1])
@@ -151,7 +168,8 @@ class PaddleOcrEngine:
             self._ready = True
             return boxes
         except Exception:
-            self._ready = False
+            if not fast:  # 빠른 모델이 실패해도 정밀 모델로 다시 읽으므로 준비 상태는 정밀 모델로만 정한다
+                self._ready = False
             raise
         finally:
             self._predict_lock.release()
@@ -168,6 +186,9 @@ class PaddleOcrEngine:
             if not self.recognize(str(path)):
                 self._ready = False
                 raise RuntimeError("OCR warmup returned no text")
+            if self.has_fast_model and not self.recognize(str(path), fast=True):
+                self._ready = False
+                raise RuntimeError("OCR warmup with the fast detection model returned no text")
             if settings.app_env == "production":
                 from app.services.ocr.manifest import verify_model_files
 

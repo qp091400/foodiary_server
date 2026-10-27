@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     ocr_det_max_side: int = 0
     ocr_version: str = "PP-OCRv5"
     ocr_detection_model: str = "PP-OCRv5_server_det"
+    # 먼저 써 보는 빠른 검출 모델. 결과가 맞아떨어지면(품목 합계 = 총액) 그대로 쓰고, 아니면 위 모델로 다시 읽는다. 비우면 끈다
+    ocr_fast_detection_model: str = "PP-OCRv5_mobile_det"
     ocr_recognition_model: str = "korean_PP-OCRv5_mobile_rec"
     ocr_textline_model: str = "PP-LCNet_x1_0_textline_ori"
     ocr_models_dir: str = ""  # Cloud Run: 검증한 모델을 이미지에 포함한 디렉터리

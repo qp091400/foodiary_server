@@ -1,13 +1,15 @@
 """PaddleOCR 엔진: paddle 없이도 돌도록 가짜 paddleocr 모듈을 끼워서 확인한다."""
 
 import sys
+import threading
 import types
 
 import pytest
 from PIL import Image
 
+from app.config import settings
 from app.services.ocr import NullOcrEngine, get_ocr_engine
-from app.services.ocr.base import OcrBox
+from app.services.ocr.base import OcrBox, OcrBusyError
 from app.services.ocr.paddle import PaddleOcrEngine, boxes_from_results
 
 
@@ -111,6 +113,58 @@ def test_engine_detection_size_option(fake_paddleocr, tmp_path):
     PaddleOcrEngine("korean", det_max_side=1280).recognize(str(path))
     assert fake_paddleocr[0]["text_det_limit_side_len"] == 1280
     assert fake_paddleocr[0]["text_det_limit_type"] == "max"
+
+
+def test_fast_model_has_its_own_pipeline_and_shares_one_lock(fake_paddleocr, tmp_path, monkeypatch):
+    pytest.importorskip("numpy")
+    path = tmp_path / "receipt.jpg"
+    Image.new("RGB", (40, 30), "white").save(path)
+
+    engine = PaddleOcrEngine("korean")
+    assert engine.has_fast_model
+    engine.recognize(str(path), fast=True)
+    engine.recognize(str(path))
+    engine.recognize(str(path), fast=True)
+    assert [options["text_detection_model_name"] for options in fake_paddleocr] == [
+        "PP-OCRv5_mobile_det",
+        "PP-OCRv5_server_det",
+    ]
+
+    engine._predict_lock.acquire()  # 다른 영수증을 읽는 중: 두 모델이 한 잠금을 함께 쓴다
+    with pytest.raises(OcrBusyError):
+        engine.recognize(str(path), fast=True)
+    with pytest.raises(OcrBusyError):
+        engine.recognize(str(path), wait=0.05)
+    threading.Timer(0.1, engine._predict_lock.release).start()
+    assert engine.recognize(str(path), wait=5)  # 앞 영수증이 끝나길 기다렸다가 읽는다
+
+    monkeypatch.setattr(settings, "ocr_fast_detection_model", "")
+    engine = PaddleOcrEngine("korean")
+    assert not engine.has_fast_model
+    engine.recognize(str(path), fast=True)  # 빠른 모델을 끄면 정밀 모델로 읽는다
+    assert fake_paddleocr[-1]["text_detection_model_name"] == "PP-OCRv5_server_det"
+
+
+def test_fast_model_failure_keeps_readiness(monkeypatch, tmp_path):
+    pytest.importorskip("numpy")
+    path = tmp_path / "receipt.jpg"
+    Image.new("RGB", (40, 30), "white").save(path)
+
+    class FastFails:
+        def __init__(self, **kwargs):
+            self.fast = kwargs["text_detection_model_name"] == "PP-OCRv5_mobile_det"
+
+        def predict(self, image):
+            if self.fast:
+                raise RuntimeError("fast model crashed")
+            return [{"rec_texts": ["우유"], "rec_scores": [0.9], "rec_boxes": [[1, 2, 3, 4]]}]
+
+    monkeypatch.setitem(sys.modules, "paddleocr", types.SimpleNamespace(PaddleOCR=FastFails))
+    engine = PaddleOcrEngine("korean")
+    engine.recognize(str(path))
+    with pytest.raises(RuntimeError):
+        engine.recognize(str(path), fast=True)
+    assert engine.ready  # 정밀 모델이 살아 있으면 준비 상태는 그대로다
 
 
 def test_engine_selection(client):

@@ -11,9 +11,11 @@ from app.main import app
 from app.models import FoodItem, Receipt, ReceiptItem
 from app.services import barcode as barcode_service
 from app.services.foodsafety import BarcodeLookup, ProductInfo
+from app.routers.receipts import FULL_PASS_WAIT_SECONDS
 from app.services.ocr import get_ocr_engine
+from app.services.ocr.base import OcrBusyError
 from app.timeutil import today
-from tests.helpers import FakeOcrEngine, auth, default_fridge_id, image_bytes, make_boxes, signup
+from tests.helpers import FakeOcrEngine, TwoModelOcrEngine, auth, default_fridge_id, image_bytes, make_boxes, signup
 
 RECEIPT_ROWS = [
     ["이마트 성수점"],
@@ -274,6 +276,42 @@ def test_sum_mismatch_warning(client, fridge):
     assert draft["items_sum"] == 2980
     assert draft["warnings"] == ["일부 품목을 못 읽었을 수 있어요"]
     assert draft["purchased_on"] is None
+
+
+MISSING_TOFU = [row for row in RECEIPT_ROWS if row[0] != "풀무원 두부"]  # 빠른 모델이 한 줄을 놓친 결과
+
+
+def use_two_models(fast, full) -> TwoModelOcrEngine:
+    engine = TwoModelOcrEngine(fast, full)
+    app.dependency_overrides[get_ocr_engine] = lambda: engine
+    return engine
+
+
+def test_fast_model_result_is_kept_when_it_adds_up(client, fridge):
+    engine = use_two_models(make_boxes(RECEIPT_ROWS), RuntimeError("the full model must not run"))
+    draft = upload(client, fridge).json()
+    assert engine.calls == [("fast", 0)]
+    assert (len(draft["draft_items"]), draft["items_sum"], draft["warnings"]) == (4, 6970, [])
+
+
+@pytest.mark.parametrize(
+    "fast", [make_boxes(MISSING_TOFU), make_boxes([]), RuntimeError("fast model crashed")], ids=["mismatch", "empty", "error"]
+)
+def test_full_model_reads_again_when_the_fast_result_does_not_add_up(client, fridge, fast):
+    engine = use_two_models(fast, make_boxes(RECEIPT_ROWS))
+    response = upload(client, fridge)
+    assert response.status_code == 201, response.text
+    # 그 사이 다른 영수증이 들어와 있으면 끝나길 기다렸다가 다시 읽는다
+    assert engine.calls == [("fast", 0), ("full", FULL_PASS_WAIT_SECONDS)]
+    draft = response.json()
+    assert (len(draft["draft_items"]), draft["items_sum"], draft["warnings"]) == (4, 6970, [])
+
+
+def test_busy_fast_pass_is_503_without_a_second_read(client, fridge):
+    engine = use_two_models(OcrBusyError("busy"), make_boxes(RECEIPT_ROWS))
+    assert upload(client, fridge).status_code == 503
+    assert engine.calls == [("fast", 0)]
+    assert uploaded_files() == []
 
 
 def test_missing_total_warning(client, fridge):

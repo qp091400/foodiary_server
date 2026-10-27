@@ -13,6 +13,7 @@ import secrets
 import tempfile
 import time
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
@@ -23,6 +24,7 @@ from app.database import get_db
 from app.routers.receipts import (
     OCR_BUSY,
     build_draft,
+    checks_out,
     draft_warnings,
     load_image,
     plausible_purchase_date,
@@ -38,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 PAGE_PATH = Path(__file__).resolve().parent.parent / "static" / "receipt_test.html"
 NOT_FOUND = "요청한 경로를 찾을 수 없습니다."
+Step = Literal["fast", "full"]
 
 
 def require_dev_tools() -> None:
@@ -63,7 +66,12 @@ def _page() -> HTMLResponse:
     return HTMLResponse(PAGE_PATH.read_text(encoding="utf-8"))
 
 
-def _recognize(file: UploadFile, db: Session, ocr: OcrEngine, *, show_errors: bool) -> dict:
+def _recognize(file: UploadFile, db: Session, ocr: OcrEngine, step: Step, *, show_errors: bool) -> dict:
+    """업로드의 "빠른 모델 → 정밀 모델"을 페이지가 두 번에 나눠 부른다. 그래야 다시 읽는 중임을 보여 줄 수 있다.
+
+    step=fast의 결과가 맞아떨어지지 않으면 retry_with_full=true를 돌려주고, 페이지가 step=full로 다시 보낸다.
+    """
+    fast = step == "fast" and getattr(ocr, "has_fast_model", False)
     image = load_image(read_upload(file))
     handle, path = tempfile.mkstemp(suffix=".jpg")
     os.close(handle)
@@ -72,7 +80,7 @@ def _recognize(file: UploadFile, db: Session, ocr: OcrEngine, *, show_errors: bo
         image.save(path, "JPEG", quality=90)
         started = time.perf_counter()
         try:
-            boxes = ocr.recognize(path)
+            boxes = ocr.recognize(path, fast=True) if fast else ocr.recognize(path)
         except OcrBusyError:
             raise HTTPException(status_code=503, detail=OCR_BUSY, headers={"Retry-After": "10"}) from None
         except Exception as exc:
@@ -98,6 +106,8 @@ def _recognize(file: UploadFile, db: Session, ocr: OcrEngine, *, show_errors: bo
         "raw_lines": parsed.lines,
         "ocr_seconds": ocr_seconds,
         "ocr_error": ocr_error,
+        "ocr_model": "fast" if fast else "full",
+        "retry_with_full": fast and not checks_out(parsed),
     }
 
 
@@ -109,11 +119,12 @@ def receipt_test_page():
 @router.post("/receipt-test")
 def receipt_test(
     file: UploadFile = File(),
+    step: Step = "full",
     db: Session = Depends(get_db),
     ocr: OcrEngine = Depends(get_ocr_engine),
 ):
     """로그인 없이 인식만 해 본다. 영수증도 이미지도 저장하지 않는다."""
-    return _recognize(file, db, ocr, show_errors=True)
+    return _recognize(file, db, ocr, step, show_errors=True)
 
 
 @test_router.get("", response_class=HTMLResponse)
@@ -124,8 +135,9 @@ def password_receipt_test_page():
 @test_router.post("", dependencies=[Depends(require_test_password)])
 def password_receipt_test(
     file: UploadFile = File(),
+    step: Step = "full",
     db: Session = Depends(get_db),
     ocr: OcrEngine = Depends(get_ocr_engine),
 ):
     """테스트 비밀번호로 인식만 해 본다. 영수증도 이미지도 저장하지 않는다."""
-    return _recognize(file, db, ocr, show_errors=False)
+    return _recognize(file, db, ocr, step, show_errors=False)
