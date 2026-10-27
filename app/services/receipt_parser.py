@@ -8,6 +8,7 @@ import statistics
 from dataclasses import dataclass, field
 from datetime import date
 
+from app.services.name_fix import fix_name
 from app.services.ocr.base import OcrBox
 
 
@@ -45,6 +46,12 @@ NOISE_RE = re.compile(
     r"영\s*수\s*증|사업자|계산원|캐셔|교환|환불|(?:^|[\s\[(])(?:주소|대표|전화|(?:TEL|POS)(?![A-Za-z]))",
     re.IGNORECASE,
 )
+# 주소 줄. OCR이 "주소"를 잘못 읽어도("추소") 시·도, 시·군·구 이름으로 알아본다.
+ADDRESS_RE = re.compile(
+    r"(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|충북|충남|전라|전북|전남|경상|경북|경남|제주)[가-힣]{0,5}"
+    r"\s+[가-힣]{1,6}[시군구](?![가-힣])"
+    r"|[가-힣]{1,6}시\s+[가-힣]{1,6}[구읍](?![가-힣])|[가-힣]{1,6}군\s+[가-힣]{1,6}[읍면](?![가-힣])"
+)
 HEADER_WORDS = {"상품명", "품명", "품목", "상품코드", "코드", "바코드", "단가", "수량", "금액"}
 STORE_RE = re.compile(
     r"마트|편의점|GS25|CU|세븐일레븐|이마트|홈플러스|롯데마트|코스트코|하나로|노브랜드|슈퍼|마켓|점$"
@@ -60,13 +67,16 @@ SUBTOTAL_RE = re.compile(r"과세|면세|부\s*가\s*세|할인|에누리|수량
 CODE_RE = re.compile(r"\d{8,14}")
 GROUPED_NUMBER_RE = re.compile(r"[1-9]\d{0,2}(?:[,.]\d{3})+")  # OCR이 쉼표를 마침표로 읽는 경우 포함
 HANGUL_RE = re.compile(r"[가-힣]")
+# 이보다 작은 금액은 품목으로 보지 않는다: 세트 구성품(0원), 주소 번지나 안내 문구에서 떨어져 나온 숫자.
+MIN_ITEM_AMOUNT = 100  # TODO: balance
 
 _FULLWIDTH = {code: code - 0xFEE0 for code in range(0xFF01, 0xFF5F)}
 _FULLWIDTH[0x3000] = 0x20
 _FULLWIDTH[0xFFE6] = ord("₩")
 
 _MARKS_RE = re.compile(r"^(?:[*#★☆]+\s*|[(\[]\s*면세\s*[)\]]\s*|P\s+(?=\S))+")
-_SEQUENCE_RE = re.compile(r"^(?:\d{1,3}\s+(?=[^\d\s,.\-])|0\d{1,2}(?=[^\d\s,.\-]))")
+# 순번(1, 001)과 POS 상품코드(0004, 000123). 8자리 이상은 바코드로 따로 읽는다. "2080 치약"의 2080은 상품명이다.
+_SEQUENCE_RE = re.compile(r"^(?:(?:\d{1,3}|0\d{3}|\d{5,7})\s+(?=[^\d\s,.\-])|0\d{1,2}(?=[^\d\s,.\-]))")
 _TRAILING_MARKS_RE = re.compile(r"\s*[*#★☆]+$")
 
 
@@ -109,7 +119,7 @@ def normalize_line(text: str) -> str:
     text = re.sub(r"\s+", " ", text).strip()
     text = re.sub(r"(\d)\s*,\s*(\d{3})(?!\d)", r"\1,\2", text)  # "2, 980" → "2,980"
     text = re.sub(r"-\s+(?=\d)", "-", text)  # "- 500" → "-500"
-    # 줄 앞의 순번(001, 01)과 면세·행사 표시(*, #, ★, (면세), P)
+    # 줄 앞의 순번(001, 01), POS 상품코드와 면세·행사 표시(*, #, ★, (면세), P)
     text = _MARKS_RE.sub("", text)
     text = _SEQUENCE_RE.sub("", text, count=1)
     text = _MARKS_RE.sub("", text)
@@ -252,14 +262,16 @@ def parse_items(lines: list[tuple[str, float]]) -> list[ParsedItem]:
 
     def add_item(name: str, numbers: list[int], barcode: str | None, confidence: float) -> None:
         quantity, unit_price, amount = _assign_numbers(numbers, waiting.quantity if waiting else None)
+        if amount < MIN_ITEM_AMOUNT:
+            return
         items.append(
-            ParsedItem(len(items) + 1, name, quantity, unit_price, amount, 0, barcode, round(confidence, 3))
+            ParsedItem(len(items) + 1, fix_name(name), quantity, unit_price, amount, 0, barcode, round(confidence, 3))
         )
 
     for text, confidence in lines:
         if not text:
             continue
-        if NOISE_RE.search(text) or META_RE.search(text) or DATE_RE.search(text):
+        if NOISE_RE.search(text) or ADDRESS_RE.search(text) or META_RE.search(text) or DATE_RE.search(text):
             waiting = None
             continue
 
@@ -315,7 +327,12 @@ def find_store_name(lines: list[str]) -> str | None:
         if STORE_RE.search(line) and not META_RE.search(line):
             return line
     for line in top:
-        if len(HANGUL_RE.findall(line)) >= 2 and not NOISE_RE.search(line) and not _is_header_only(line):
+        if (
+            len(HANGUL_RE.findall(line)) >= 2
+            and not NOISE_RE.search(line)
+            and not ADDRESS_RE.search(line)
+            and not _is_header_only(line)
+        ):
             return line
     return None
 

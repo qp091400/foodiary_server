@@ -276,6 +276,13 @@ def test_sum_mismatch_warning(client, fridge):
     assert draft["purchased_on"] is None
 
 
+def test_missing_total_warning(client, fridge):
+    use_ocr([["하나로마트"], ["상품명", "단가", "수량", "금액"], ["서울우유 1L", "2,980", "1", "2,980"]])
+    draft = upload(client, fridge).json()
+    assert draft["total_amount"] is None
+    assert draft["warnings"] == ["영수증 총액을 찾지 못했어요. 빠진 품목이 없는지 확인해 주세요"]
+
+
 def test_future_date_is_treated_as_misread(client, fridge):
     future = today() + timedelta(days=30)
     use_ocr([["CU 역삼점"], [future.strftime("%Y-%m-%d")], ["상품명"], ["우유", "2,980"], ["합계", "2,980"]])

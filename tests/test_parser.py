@@ -172,6 +172,10 @@ def test_group_lines_uses_median_height_tolerance():
         ("8801114123456 1,500 2 3,000", "8801114123456 1,500 2 3,000"),  # 상품코드는 순번이 아니다
         ("1 2,980", "1 2,980"),  # 숫자뿐인 줄의 수량은 지우지 않는다
         ("행사할인 - 500", "행사할인 -500"),
+        ("000004 [세트]더블버거 0 14,900", "[세트]더블버거 0 14,900"),  # POS 상품코드
+        ("000017 * 제로콜라 1 0 0", "제로콜라 1 0 0"),
+        ("0123 두부 1,500", "두부 1,500"),
+        ("2080 치약 3,000", "2080 치약 3,000"),  # 0으로 시작하지 않는 네 자리는 상품명의 일부
     ],
 )
 def test_normalize_line(raw, expected):
@@ -236,6 +240,45 @@ def test_lines_that_are_not_items():
     assert _items("2026-10-13 14:22 0034") == []
     # "주소"가 들어 있어도 낱말 첫머리가 아니면 상품이다
     assert [item.name for item in _items("맥주소시지 3,000 1 3,000")] == ["맥주소시지"]
+
+
+def test_address_lines_are_not_items():
+    # "주소"를 "추소"로 잘못 읽고, 주소가 두 줄로 나뉘어 끝 번지만 다음 줄에 남은 경우
+    assert _items("매장추소:경기도 수원시 팔달구 행궁로1", "로 13") == []
+    assert _items("경기 수원시 팔달구 행궁로 11 (남창동)") == []
+    assert _items("서울특별시 중구 세종대로 110") == []
+    assert _items("수원시 팔달구 행궁로 11") == []  # 시·도를 못 읽어도
+    assert _items("가평군 청평면 강변로 1") == []
+    # 지명이 들어간 상품명은 상품이다
+    assert [item.name for item in _items("제주 한라봉 3kg 19,900", "서울우유 1L 2,980 1 2,980")] == [
+        "제주 한라봉 3kg",
+        "서울우유 1L",
+    ]
+    assert parse_receipt(make_boxes([["[영 수 증]"], ["경기도 수원시 팔달구 행궁로 11"], ["행복한 식당"]])).store_name == (
+        "행복한 식당"
+    )
+
+
+def test_amounts_below_minimum_are_not_items():
+    # 세트 구성품(0원), 따로 떨어진 금액 줄, 안내 문구 끝의 숫자
+    items = _items(
+        "[세트]더블버거 0 14,900",
+        "14,900",
+        "ㄴ빵추가 0",
+        "프렌치프라이 1 0 0",
+        "제로콜라 1 0 0",
+        "다음에 또 만나요 10",
+    )
+    assert [_summary(item) for item in items] == [("[세트]더블버거", 1.0, None, 14900, 0)]
+    # 0원 구성품을 건너뛰어도 그 뒤의 할인은 세트에 붙는다
+    items = _items("[세트]치즈버거 7,000", "ㄴ감자튀김 0", "행사12월버거할인 250 -100")
+    assert [_summary(item) for item in items] == [("[세트]치즈버거", 1.0, 7000, 7000, 100)]
+
+
+def test_misread_names_are_fixed():
+    (item,) = _items("서울우규 1L 2,980 1 2,980")
+    assert item.name == "서울우유 1L"
+    assert classify(item.name) == "milk"
 
 
 def test_no_header_starts_from_first_line():

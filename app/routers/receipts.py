@@ -46,6 +46,7 @@ MAX_SIDE = 2000
 DUPLICATE_RECEIPT = "이미 등록된 영수증입니다."
 WARN_SUM_MISMATCH = "일부 품목을 못 읽었을 수 있어요"
 WARN_NO_ITEMS = "품목을 찾지 못했어요. 직접 추가해 주세요"
+WARN_NO_TOTAL = "영수증 총액을 찾지 못했어요. 빠진 품목이 없는지 확인해 주세요"
 
 
 class _ProductLookup:
@@ -131,7 +132,9 @@ def plausible_purchase_date(purchased_on: date | None) -> date | None:
 def draft_warnings(item_count: int, items_sum: int, total_amount: int | None) -> list[str]:
     if item_count == 0:
         return [WARN_NO_ITEMS]
-    if total_amount and abs(items_sum - total_amount) > total_amount * 0.01:
+    if not total_amount:  # 합계를 못 읽으면 빠진 품목이 있어도 알 수 없다
+        return [WARN_NO_TOTAL]
+    if abs(items_sum - total_amount) > total_amount * 0.01:
         return [WARN_SUM_MISMATCH]
     return []
 
