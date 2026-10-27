@@ -4,6 +4,7 @@ import logging
 import tempfile
 import threading
 from collections.abc import Callable, Mapping
+from enum import IntEnum
 from pathlib import Path
 from typing import Any
 
@@ -89,6 +90,26 @@ def text_weight(boxes: list[OcrBox]) -> float:
     return sum(box.score * len(box.text) for box in boxes)
 
 
+class Verdict(IntEnum):
+    """호출한 쪽이 읽은 결과를 판정한 값."""
+
+    DOUBTFUL = 0  # 사진이 돌아갔거나 거의 못 읽었을 수 있다
+    UPRIGHT = 1  # 방향은 맞아 보이지만 합계가 맞지 않는다
+    GOOD = 2  # 합계까지 맞는다
+
+
+def enhance_contrast(bgr: Any) -> Any:
+    """흑백으로 바꾸고 구역별 히스토그램 평활화(CLAHE)를 한다. 어둡거나 흐린 사진용.
+
+    실제 영수증 6장을 어둡게 만들었을 때 그냥 읽으면 3장, 이렇게 읽으면 6장이 맞았다.
+    멀쩡한 사진에는 오히려 해로워서(6장 중 4장만 그대로) 첫 결과가 맞지 않을 때만 쓴다.
+    """
+    import cv2
+
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    return cv2.cvtColor(cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray), cv2.COLOR_GRAY2BGR)
+
+
 class PaddleOcrEngine:
     def __init__(self, lang: str, det_max_side: int = 0) -> None:
         self._lang = lang
@@ -103,8 +124,8 @@ class PaddleOcrEngine:
         return self._ready
 
     @property
-    def can_rotate(self) -> bool:
-        """recognize(accept=...)로 사진을 돌려 다시 읽을 수 있다."""
+    def can_reread(self) -> bool:
+        """recognize(judge=...)로 대비를 높이거나 사진을 돌려 다시 읽을 수 있다."""
         return True
 
     def _load(self) -> Any:
@@ -154,14 +175,16 @@ class PaddleOcrEngine:
         self,
         image_path: str,
         *,
-        accept: Callable[[list[OcrBox]], bool] | None = None,
+        judge: Callable[[list[OcrBox]], Verdict] | None = None,
         rank: Callable[[list[OcrBox]], Any] | None = None,
     ) -> list[OcrBox]:
         """사진을 읽는다. 방향 판별 모델이 사진을 먼저 바로 세운다.
 
-        accept가 있는데 결과를 받아들이지 않으면 방향 판별이 틀렸을 수 있다. 그때는 사진을 90°, 270°, 180° 돌려
-        (판별 없이) 다시 읽고, 받아들여지는 첫 결과를 쓴다. 끝내 없으면 rank가 가장 큰 결과를 쓴다
-        (rank가 없으면 글자를 가장 많이·확실하게 읽은 결과).
+        judge가 있고 결과가 GOOD이 아니면 다시 읽어 본다 (모두 같은 잠금 안에서).
+        1. 대비를 높인 사진으로 한 번 더 읽는다. GOOD이면 그것을 쓴다.
+        2. 둘 중 하나라도 UPRIGHT면 방향은 맞다. 원래 결과를(원래가 DOUBTFUL이면 대비를 높인 결과를) 쓴다.
+        3. 둘 다 DOUBTFUL이면 방향 판별이 틀렸을 수 있다. 사진을 90°, 270°, 180° 돌려(판별 없이) 읽고 GOOD인 첫 결과를 쓴다.
+        4. 끝내 GOOD이 없으면 rank가 가장 큰 결과 (rank가 없으면 글자를 가장 많이·확실하게 읽은 결과).
         """
         import numpy as np
         from PIL import Image
@@ -173,18 +196,10 @@ class PaddleOcrEngine:
             # 경로 대신 배열: Windows의 비ASCII 경로도 지원한다.
             with Image.open(image_path) as image:
                 bgr = np.ascontiguousarray(np.asarray(image.convert("RGB"))[:, :, ::-1])
-            boxes = boxes_from_results(list(ocr.predict(bgr)))
-            if accept is not None and not accept(boxes):
-                candidates = [boxes]
-                for turns in (1, 3, 2):  # 반시계 방향으로 90°씩: 90°, 270°, 180°
-                    rotated = np.ascontiguousarray(np.rot90(bgr, turns))
-                    candidate = boxes_from_results(list(ocr.predict(rotated, use_doc_orientation_classify=False)))
-                    if accept(candidate):
-                        boxes = candidate
-                        break
-                    candidates.append(candidate)
-                else:
-                    boxes = max(candidates, key=rank or text_weight)
+            if judge is None:
+                boxes = boxes_from_results(list(ocr.predict(bgr)))
+            else:
+                boxes = self._read_carefully(ocr, bgr, judge, rank or text_weight)
             self._ready = True
             return boxes
         except Exception:
@@ -192,6 +207,36 @@ class PaddleOcrEngine:
             raise
         finally:
             self._predict_lock.release()
+
+    @staticmethod
+    def _read_carefully(
+        ocr: Any, bgr: Any, judge: Callable[[list[OcrBox]], Verdict], rank: Callable[[list[OcrBox]], Any]
+    ) -> list[OcrBox]:
+        """recognize의 1~4단계."""
+        import numpy as np
+
+        def read(image: Any, **options: Any) -> list[OcrBox]:
+            return boxes_from_results(list(ocr.predict(np.ascontiguousarray(image), **options)))
+
+        first = read(bgr)
+        first_verdict = judge(first)
+        if first_verdict == Verdict.GOOD:
+            return first
+        enhanced = read(enhance_contrast(bgr))
+        enhanced_verdict = judge(enhanced)
+        if enhanced_verdict == Verdict.GOOD:
+            return enhanced
+        if first_verdict == Verdict.UPRIGHT:
+            return first
+        if enhanced_verdict == Verdict.UPRIGHT:
+            return enhanced
+        candidates = [first, enhanced]
+        for turns in (1, 3, 2):  # 반시계 방향으로 90°씩: 90°, 270°, 180°
+            candidate = read(np.rot90(bgr, turns), use_doc_orientation_classify=False)
+            if judge(candidate) == Verdict.GOOD:
+                return candidate
+            candidates.append(candidate)
+        return max(candidates, key=rank)
 
     def warmup(self) -> None:
         """설치 여부뿐 아니라 검출·방향·인식 모델의 실제 추론을 검사한다."""

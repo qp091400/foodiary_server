@@ -34,7 +34,7 @@ from app.services.expiry import classify, estimate
 from app.services.foodsafety import ProductInfo, lookup_barcode
 from app.services.ocr import OcrEngine, get_ocr_engine
 from app.services.ocr.base import OcrBox, OcrBusyError
-from app.services.ocr.paddle import text_weight
+from app.services.ocr.paddle import Verdict, text_weight
 from app.services.receipt_parser import ParsedReceipt, parse_receipt
 from app.timeutil import today, utcnow
 
@@ -139,25 +139,29 @@ def checks_out(parsed: ParsedReceipt) -> bool:
     return not draft_warnings(len(parsed.items), items_sum, parsed.total_amount)
 
 
-def looks_upright(parsed: ParsedReceipt, *, landscape: bool) -> bool:
-    """방향이 맞게 읽혔다고 볼 수 있는가. 합계가 맞으면 그렇다.
+def judge_reading(parsed: ParsedReceipt, *, landscape: bool) -> Verdict:
+    """읽은 결과 판정. 합계가 맞으면 GOOD.
 
-    합계가 안 맞아도 세로 사진에서 품목을 몇 개 이상 읽었으면 방향은 맞다(총액 줄이 없는 영수증도 있다).
-    가로 사진이거나 품목을 거의 못 읽었으면 사진이 돌아가 있을 수 있다.
+    합계가 안 맞아도 세로 사진에서 품목을 몇 개 이상 읽었으면 방향은 맞다(UPRIGHT). 총액 줄이 없는 영수증도 있다.
+    가로 사진이거나 품목을 거의 못 읽었으면 사진이 돌아가 있을 수 있다(DOUBTFUL).
     """
-    return checks_out(parsed) or (not landscape and len(parsed.items) >= UPRIGHT_MIN_ITEMS)
+    if checks_out(parsed):
+        return Verdict.GOOD
+    if not landscape and len(parsed.items) >= UPRIGHT_MIN_ITEMS:
+        return Verdict.UPRIGHT
+    return Verdict.DOUBTFUL
 
 
 def read_receipt(ocr: OcrEngine, image_path: str, *, landscape: bool) -> list[OcrBox]:
-    """OCR. 방향이 틀린 것 같으면 엔진이 사진을 돌려 다시 읽는다 (돌릴 수 있는 엔진만).
+    """OCR. 합계가 맞지 않으면 엔진이 대비를 높이거나 사진을 돌려 다시 읽는다 (그럴 수 있는 엔진만).
 
-    어느 방향도 합계가 맞지 않으면(총액 줄이 없는 영수증) 품목을 가장 많이 읽은 방향을 고른다.
+    끝내 합계가 맞지 않으면(총액 줄이 없는 영수증 등) 품목을 가장 많이 읽은 결과를 고른다.
     """
-    if not getattr(ocr, "can_rotate", False):
+    if not getattr(ocr, "can_reread", False):
         return ocr.recognize(image_path)
     return ocr.recognize(
         image_path,
-        accept=lambda boxes: looks_upright(parse_receipt(boxes), landscape=landscape),
+        judge=lambda boxes: judge_reading(parse_receipt(boxes), landscape=landscape),
         rank=lambda boxes: (len(parse_receipt(boxes).items), text_weight(boxes)),
     )
 

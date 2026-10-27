@@ -9,7 +9,7 @@ from PIL import Image
 from app.config import settings
 from app.services.ocr import NullOcrEngine, get_ocr_engine
 from app.services.ocr.base import OcrBox
-from app.services.ocr.paddle import PaddleOcrEngine, boxes_from_results
+from app.services.ocr.paddle import PaddleOcrEngine, Verdict, boxes_from_results
 
 
 class ArrayLike:
@@ -116,46 +116,71 @@ def test_orientation_can_be_switched_off(fake_paddleocr, tmp_path, monkeypatch):
     assert "doc_orientation_classify_model_name" not in fake_paddleocr[0]
 
 
-def test_rotates_and_reads_again_when_the_result_is_not_accepted(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    ("verdicts", "chosen", "reads"),
+    [
+        # 읽은 순서: 1 원본, 2 대비를 높인 사진, 3 90°, 4 270°, 5 180°
+        ({1: Verdict.GOOD}, 1, 1),  # 합계가 맞으면 한 번으로 끝
+        ({2: Verdict.GOOD}, 2, 2),  # 어두운 사진: 대비를 높여 맞으면 그것
+        ({1: Verdict.UPRIGHT}, 1, 2),  # 방향은 맞음: 대비도 안 통하면 원래 결과
+        ({2: Verdict.UPRIGHT}, 2, 2),  # 원래는 거의 못 읽었는데 대비를 높이니 방향이 맞아 보임
+        ({4: Verdict.GOOD}, 4, 4),  # 가로 사진: 270° 돌려서 맞음
+        ({}, 5, 5),  # 끝내 맞는 게 없으면 rank가 가장 큰 결과 (여기서는 마지막에 읽은 것)
+    ],
+    ids=["good", "contrast", "upright", "contrast-upright", "rotated", "none"],
+)
+def test_reads_again_with_more_contrast_then_rotated(monkeypatch, tmp_path, verdicts, chosen, reads):
     pytest.importorskip("numpy")
+    pytest.importorskip("cv2")
     path = tmp_path / "landscape.jpg"
     Image.new("RGB", (40, 30), "white").save(path)  # 가로 사진: 높이 30, 너비 40
     calls = []
 
-    class SidewaysReceipt:
-        """세로로 세웠을 때만(높이 > 너비) 품목을 읽는 가짜 OCR. 시계 방향으로 세워야 제대로 읽힌다고 친다."""
+    class NumberedReads:
+        """몇 번째로 읽었는지를 글자로 돌려주는 가짜 OCR."""
 
         def __init__(self, **kwargs):
             pass
 
         def predict(self, image, **options):
             calls.append((image.shape[:2], options.get("use_doc_orientation_classify")))
-            upright = image.shape[0] > image.shape[1] and len(calls) == 3  # 270°에서만
-            text = "우유 2,980" if upright else "ㄷㄷ"
-            return [{"rec_texts": [text], "rec_scores": [0.9 if upright else 0.3], "rec_boxes": [[1, 2, 3, 4]]}]
+            return [{"rec_texts": [str(len(calls))], "rec_scores": [0.9], "rec_boxes": [[1, 2, 3, 4]]}]
 
-    monkeypatch.setitem(sys.modules, "paddleocr", types.SimpleNamespace(PaddleOCR=SidewaysReceipt))
+    monkeypatch.setitem(sys.modules, "paddleocr", types.SimpleNamespace(PaddleOCR=NumberedReads))
     engine = PaddleOcrEngine("korean")
-    assert engine.can_rotate
+    assert engine.can_reread
+    boxes = engine.recognize(
+        str(path),
+        judge=lambda boxes: verdicts.get(int(boxes[0].text), Verdict.DOUBTFUL),
+        rank=lambda boxes: int(boxes[0].text),
+    )
+    assert boxes[0].text == str(chosen)
+    assert len(calls) == reads
+    # 원본과 대비를 높인 사진은 방향 판별을 거치고, 직접 돌려 읽을 때는 판별을 끈다
+    expected = [((30, 40), None), ((30, 40), None), ((40, 30), False), ((40, 30), False), ((30, 40), False)]
+    assert calls == expected[:reads]
 
-    # 받아들이는 결과가 나오면 거기서 멈춘다: 원본 → 90° → 270°
-    boxes = engine.recognize(str(path), accept=lambda boxes: boxes[0].text == "우유 2,980")
-    assert [box.text for box in boxes] == ["우유 2,980"]
-    assert calls == [((30, 40), None), ((40, 30), False), ((40, 30), False)]  # 돌려 읽을 때는 방향 판별을 끈다
 
-    # 끝내 받아들이지 않으면 글자를 가장 많이·확실하게 읽은 결과
-    calls.clear()
-    boxes = engine.recognize(str(path), accept=lambda boxes: False)
-    assert [box.text for box in boxes] == ["우유 2,980"] and len(calls) == 4
-    # rank를 주면 그 값이 가장 큰 결과 (여기서는 일부러 짧은 글자를 고르게 한다)
-    calls.clear()
-    boxes = engine.recognize(str(path), accept=lambda boxes: False, rank=lambda boxes: -len(boxes[0].text))
-    assert [box.text for box in boxes] == ["ㄷㄷ"]
+def test_reads_once_without_a_judge(fake_paddleocr, tmp_path):
+    pytest.importorskip("numpy")
+    path = tmp_path / "receipt.jpg"
+    Image.new("RGB", (40, 30), "white").save(path)
+    engine = PaddleOcrEngine("korean")
+    assert len(engine.recognize(str(path))) == 1 and len(fake_paddleocr) == 1
 
-    # accept가 없으면 한 번만 읽는다
-    calls.clear()
-    engine.recognize(str(path))
-    assert len(calls) == 1
+
+def test_enhance_contrast_returns_a_grey_three_channel_image():
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    from app.services.ocr.paddle import enhance_contrast
+
+    dim = np.full((40, 30, 3), (40, 50, 60), dtype=np.uint8)
+    dim[10:20, 5:25] = (20, 25, 30)  # 어두운 바탕의 더 어두운 글자
+    enhanced = enhance_contrast(dim)
+    assert enhanced.shape == dim.shape
+    assert (enhanced[..., 0] == enhanced[..., 1]).all() and (enhanced[..., 1] == enhanced[..., 2]).all()
+    gray = cv2.cvtColor(dim, cv2.COLOR_BGR2GRAY)
+    assert int(enhanced.max()) - int(enhanced.min()) > int(gray.max()) - int(gray.min())  # 대비가 커진다
 
 
 def test_engine_detection_size_option(fake_paddleocr, tmp_path):
