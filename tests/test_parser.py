@@ -366,6 +366,47 @@ def test_store_label_and_misread_total():
     assert classify("테라(500ml)") == "drink"
 
 
+def test_quantity_read_as_a_vertical_bar_keeps_the_product():
+    # 두 줄형 영수증에서 OCR이 수량 "1"을 "|"로 읽은 경우: 숫자 줄이 상품 이름이 되고 진짜 이름이 사라졌었다
+    items = _items("한우등심", "203251 20,526 | 20,526", "청정원쌈장 2,450 l 2,450", "두부", "8801114123456 1,500 I 1,500")
+    assert [_summary(item) for item in items] == [
+        ("한우등심", 1.0, 20526, 20526, 0),
+        ("청정원쌈장", 1.0, 2450, 2450, 0),
+        ("두부", 1.0, 1500, 1500, 0),
+    ]
+    assert normalize_line("20,526 | 20,526") == "20,526 1 20,526"
+    assert normalize_line("두부 1,500 ㅣ 1,500") == "두부 1,500 1 1,500"
+    # 숫자 사이에 있지 않은 "|"나 영문자는 그대로
+    assert normalize_line("A|B 1,000") == "A|B 1,000"
+    assert normalize_line("Lemon 1,000") == "Lemon 1,000"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "20,526 |",  # 이름 자리에 금액과 세로선
+        "20,526 | 14,582",
+        "14,582 1",
+        "- 500 2,000",
+        "* 1,500",
+        "ㅊ 3,000",  # 자음만 있는 오인식 조각
+        "ㄴ→ 2,980",
+        "123 456 7,000",
+    ],
+)
+def test_number_and_symbol_lines_are_never_products(line):
+    assert _items(line) == []
+    # 상품 이름 줄 다음에 와도 이 줄이 이름이 되지는 못한다 (금액이 맞으면 기다리던 진짜 이름의 품목이 된다)
+    assert {item.name for item in _items("서울우유", line)} <= {"서울우유"}
+
+
+def test_names_need_a_word():
+    assert [item.name for item in _items("7UP 1,500", "KF94 마스크 3,000", "우유 2,980")] == ["7UP", "KF94 마스크", "우유"]
+    assert _items("A 1,500", "1+1 2,000", "500ml 1,500", "1.5L 2,000", "90 g 1,200") == []  # 영문자 하나, 숫자뿐, 단위뿐
+    # 용량이 붙은 진짜 이름은 그대로
+    assert [item.name for item in _items("콜라 1.5L 2,000", "Cool 500ml 1,500")] == ["콜라 1.5L", "Cool 500ml"]
+
+
 def test_misread_names_are_fixed():
     (item,) = _items("서울우규 1L 2,980 1 2,980")
     assert item.name == "서울우유 1L"

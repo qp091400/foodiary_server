@@ -102,6 +102,12 @@ _TRAILING_MARKS_RE = re.compile(r"\s*[*#★☆]+$")
 # 금액 모양("1,5OO", "l2,000원")인데 숫자 자리에 비슷한 글자가 섞인 토큰. 쉼표 자리 모양이 있을 때만 고친다.
 _LOOKALIKE_AMOUNT_RE = re.compile(r"(?<!\S)(-?)([\dOolI|]{1,3}(?:[,.][\dOolI|]{3})+)(원?)(?!\S)")
 _DIGIT_LOOKALIKES = str.maketrans({"O": "0", "o": "0", "l": "1", "I": "1", "|": "1"})
+# 숫자 둘 사이에 혼자 있는 "|", "l", "I", "ㅣ"는 OCR이 수량 "1"을 잘못 읽은 것이다. ("203251 20,526 | 20,526")
+_LONE_QUANTITY_RE = re.compile(r"(?<=\d)\s+[|lIㅣ]\s+(?=-?\d)")
+# 이름이라면 한글이 한 글자라도 있거나 영문자가 둘 이상 있어야 한다. ("20,526 |", "- 500"은 이름이 아니다)
+_WORD_RE = re.compile(r"[가-힣]|[A-Za-z].*[A-Za-z]")
+# 용량 표기("500ml", "1.5L", "90g")의 영문자는 이름의 글자로 세지 않는다
+_SIZE_RE = re.compile(r"\d[\d.,]*\s*(?:ml|l|g|kg|oz)(?![A-Za-z])", re.IGNORECASE)
 
 
 def _fix_lookalike_amount(match: re.Match) -> str:
@@ -171,6 +177,7 @@ def normalize_line(text: str) -> str:
     text = re.sub(r"\s+", " ", text).strip()
     text = re.sub(r"(\d)\s*,\s*(\d{3})(?!\d)", r"\1,\2", text)  # "2, 980" → "2,980"
     text = _LOOKALIKE_AMOUNT_RE.sub(_fix_lookalike_amount, text)  # "1,5OO" → "1,500"
+    text = _LONE_QUANTITY_RE.sub(" 1 ", text)  # "20,526 | 20,526" → "20,526 1 20,526"
     text = re.sub(r"-\s+(?=\d)", "-", text)  # "- 500" → "-500"
     # 줄 앞의 순번(001, 01), POS 상품코드와 면세·행사 표시(*, #, ★, (면세), P)
     text = _MARKS_RE.sub("", text)
@@ -294,6 +301,11 @@ def _is_triplet(numbers: list[int]) -> bool:
     return len(numbers) >= 3 and min(numbers[-3:]) > 0 and numbers[-3] * numbers[-2] == numbers[-1]
 
 
+def _is_wordlike(name: str) -> bool:
+    """상품 이름처럼 보이는가: 한글이 있거나 영문자가 둘 이상 있다. 숫자·기호·용량 단위뿐인 줄은 상품이 아니다."""
+    return bool(_WORD_RE.search(_SIZE_RE.sub(" ", name)))
+
+
 def _is_header_only(name: str) -> bool:
     words = re.split(r"[\s/|·]+", name)
     return all(word in HEADER_WORDS for word in words if word)
@@ -331,7 +343,7 @@ def parse_items(lines: list[tuple[str, float]]) -> list[ParsedItem]:
             continue
 
         line = _split_line(text)
-        named = len(line.name) > 1 and not _is_header_only(line.name)
+        named = len(line.name) > 1 and _is_wordlike(line.name) and not _is_header_only(line.name)
 
         if not line.numbers:
             if named:  # (b) 상품명만 → 다음 줄의 숫자를 기다린다
