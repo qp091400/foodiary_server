@@ -112,7 +112,65 @@ def test_busy_ocr_is_503_like_the_real_upload(client, dev_tools):
     assert response.json()["detail"] == "다른 영수증을 분석 중입니다. 잠시 후 다시 시도해 주세요."
 
 
+def post_many(client, count=3, url=URL + "/batch", password=None, names=None):
+    headers = {"X-Test-Password": password} if password is not None else {}
+    names = names or [f"receipt{n}.jpg" for n in range(count)]
+    files = [("files", (name, image_bytes(), "image/jpeg")) for name in names]
+    return client.post(url, files=files, headers=headers)
+
+
+def test_dev_batch_recognizes_each_photo_and_saves_nothing(client, dev_tools):
+    engine = FakeOcrEngine(make_boxes(ROWS))
+    app.dependency_overrides[get_ocr_engine] = lambda: engine
+    response = post_many(client, names=["a.jpg", "b.pdf", "c.jpg"])  # 가운데 장은 형식이 틀림
+    assert response.status_code == 200, response.text
+    results = response.json()["results"]
+    assert [(r["index"], r["filename"], r["ok"], r["status_code"]) for r in results] == [
+        (0, "a.jpg", True, 201), (1, "b.pdf", False, 400), (2, "c.jpg", True, 201),
+    ]
+    assert results[0]["result"]["total_amount"] == 3480 and results[1]["result"] is None
+    assert "jpg, png, webp" in results[1]["detail"]
+    assert len(engine.calls) == 2
+    with SessionLocal() as db:
+        assert db.scalar(select(func.count()).select_from(Receipt)) == 0
+    assert not [path for path in Path(settings.upload_dir).rglob("*") if path.is_file()]
+
+
+def test_dev_batch_is_closed_like_the_single_page(client):
+    assert post_many(client).status_code == 404
+    assert post_many(client, url="/receipt-test/batch", password="").status_code == 404
+
+
+def test_dev_batch_limits_and_busy_ocr(client, dev_tools):
+    assert post_many(client, count=6).status_code == 400
+
+    class BusyOnSecond:
+        def __init__(self):
+            self.calls = 0
+
+        def recognize(self, image_path):
+            self.calls += 1
+            if self.calls == 2:
+                raise OcrBusyError("busy")
+            return make_boxes(ROWS)
+
+    app.dependency_overrides[get_ocr_engine] = lambda: BusyOnSecond()
+    results = post_many(client).json()["results"]
+    assert [(r["ok"], r["status_code"], r["retry_after"]) for r in results] == [(True, 201, None), (False, 503, 10), (True, 201, None)]
+
+
 # ── 운영용 /receipt-test: 테스트 비밀번호 ──────────────────────────────────
+
+def test_password_batch_needs_the_password(client, test_password):
+    engine = FakeOcrEngine(make_boxes(ROWS))
+    app.dependency_overrides[get_ocr_engine] = lambda: engine
+    for password in (None, "", "wrong-password-1234"):
+        assert post_many(client, url=TEST_URL + "/batch", password=password).status_code == 401
+    assert engine.calls == []  # 비밀번호가 틀리면 OCR을 돌리지 않는다
+    response = post_many(client, url=TEST_URL + "/batch", password=PASSWORD)
+    assert response.status_code == 200 and [r["ok"] for r in response.json()["results"]] == [True, True, True]
+    assert response.headers["Cache-Control"] == "no-store"
+    assert post_many(client).status_code == 404  # 개발용 경로는 계속 닫혀 있다
 
 
 def test_password_page_is_off_without_a_password(client):

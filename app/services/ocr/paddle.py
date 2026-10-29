@@ -196,7 +196,8 @@ class PaddleOcrEngine:
         1. 대비를 높인 사진으로 한 번 더 읽는다. GOOD이면 그것을 쓴다.
         2. 둘 중 하나라도 UPRIGHT면 방향은 맞다. 원래 결과를(원래가 DOUBTFUL이면 대비를 높인 결과를) 쓴다.
         3. 둘 다 DOUBTFUL이면 방향 판별이 틀렸을 수 있다. 사진을 90°, 270°, 180° 돌려(판별 없이) 읽고 GOOD인 첫 결과를 쓴다.
-        4. 끝내 GOOD이 없으면 rank가 가장 큰 결과 (rank가 없으면 글자를 가장 많이·확실하게 읽은 결과).
+        4. 끝내 GOOD이 없으면 rank가 가장 큰 결과. 같으면 먼저 읽은 것(처음 → 대비 → 90° → 270° → 180°)을 쓴다.
+           rank가 없으면 글자를 가장 많이·확실하게 읽은 결과.
         """
         import numpy as np
         from PIL import Image

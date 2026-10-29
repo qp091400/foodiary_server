@@ -9,9 +9,11 @@ from app.config import settings
 from app.database import SessionLocal
 from app.main import app
 from app.models import FoodItem, Receipt, ReceiptItem
+from app.routers.receipts import MAX_BATCH_FILES
 from app.services import barcode as barcode_service
 from app.services.foodsafety import BarcodeLookup, ProductInfo
 from app.services.ocr import get_ocr_engine
+from app.services.ocr.base import OcrBusyError
 from app.services.ocr.paddle import Verdict
 from app.services.receipt_parser import parse_receipt
 from app.timeutil import today
@@ -204,6 +206,110 @@ def test_duplicate_receipt_barcode_409(client, fridge, monkeypatch):
     assert upload(client, fridge).status_code == 201
 
 
+# ── 여러 장 업로드 (POST /receipts/batch) ──────────────────────────────
+
+
+def upload_many(client, fridge, photos):
+    """photos: [(파일 이름, 내용), ...]를 multipart `files`로 한 번에 보낸다."""
+    files = [("files", (name, data, "image/jpeg")) for name, data in photos]
+    return client.post(f"/fridges/{fridge['id']}/receipts/batch", headers=fridge["headers"], files=files)
+
+
+def test_batch_upload_makes_a_draft_per_photo(client, fridge):
+    use_ocr(RECEIPT_ROWS)
+    response = upload_many(
+        client, fridge, [("a.jpg", image_bytes()), ("b.png", image_bytes("PNG")), ("c.webp", image_bytes("WEBP"))]
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert (body["succeeded"], body["failed"]) == (3, 0)
+    assert [(r["index"], r["filename"], r["ok"], r["status_code"]) for r in body["results"]] == [
+        (0, "a.jpg", True, 201), (1, "b.png", True, 201), (2, "c.webp", True, 201),
+    ]
+    first = body["results"][0]["receipt"]
+    assert (first["status"], first["total_amount"], first["warnings"]) == ("pending", 6970, [])
+    assert len(first["draft_items"]) == 4
+    assert len({r["receipt"]["id"] for r in body["results"]}) == 3  # 장마다 따로 저장된다
+    listed = client.get(f"/fridges/{fridge['id']}/receipts?status=pending", headers=fridge["headers"]).json()
+    assert len(listed) == 3 and len(uploaded_files()) == 3
+
+
+def test_batch_one_bad_photo_does_not_stop_the_others(client, fridge):
+    use_ocr(RECEIPT_ROWS)
+    body = upload_many(
+        client, fridge,
+        [("one.jpg", image_bytes()), ("two.pdf", image_bytes()), ("three.jpg", b"not an image"), ("four.jpg", image_bytes())],
+    ).json()
+    assert [(r["ok"], r["status_code"]) for r in body["results"]] == [(True, 201), (False, 400), (False, 400), (True, 201)]
+    assert "jpg, png, webp" in body["results"][1]["detail"] and "이미지" in body["results"][2]["detail"]
+    assert body["results"][1]["receipt"] is None
+    assert (body["succeeded"], body["failed"]) == (2, 2)
+    assert len(uploaded_files()) == 2  # 실패한 장은 저장하지 않는다
+
+
+def test_batch_reports_a_duplicate_receipt_per_photo(client, fridge, monkeypatch):
+    use_ocr(RECEIPT_ROWS)
+    monkeypatch.setattr(barcode_service, "decode_receipt_barcode", lambda image: "2026101000120034")
+    body = upload_many(client, fridge, [("a.jpg", image_bytes()), ("same.jpg", image_bytes())]).json()
+    first, second = body["results"]
+    assert (first["ok"], second["ok"], second["status_code"]) == (True, False, 409)
+    assert (second["detail"], second["receipt_id"]) == ("이미 등록된 영수증입니다.", first["receipt"]["id"])
+    assert len(uploaded_files()) == 1
+
+
+def test_batch_busy_ocr_is_reported_for_that_photo_only(client, fridge):
+    class BusyOnSecond:
+        def __init__(self):
+            self.boxes, self.calls = make_boxes(RECEIPT_ROWS), 0
+
+        def recognize(self, image_path):
+            self.calls += 1
+            if self.calls == 2:
+                raise OcrBusyError("busy")
+            return self.boxes
+
+    engine = BusyOnSecond()
+    app.dependency_overrides[get_ocr_engine] = lambda: engine
+    body = upload_many(client, fridge, [("a.jpg", image_bytes()), ("b.jpg", image_bytes()), ("c.jpg", image_bytes())]).json()
+    assert [(r["ok"], r["status_code"], r["retry_after"]) for r in body["results"]] == [
+        (True, 201, None), (False, 503, 10), (True, 201, None),
+    ]
+    assert body["results"][1]["detail"] == "다른 영수증을 분석 중입니다. 잠시 후 다시 시도해 주세요."
+    assert len(uploaded_files()) == 2
+
+
+def test_batch_size_limits(client, fridge):
+    use_ocr(RECEIPT_ROWS)
+    too_many = upload_many(client, fridge, [(f"{n}.jpg", image_bytes()) for n in range(MAX_BATCH_FILES + 1)])
+    assert too_many.status_code == 400 and f"{MAX_BATCH_FILES}장" in too_many.json()["detail"]
+    assert upload_many(client, fridge, [(f"{n}.jpg", image_bytes()) for n in range(MAX_BATCH_FILES)]).status_code == 200
+    none = client.post(f"/fridges/{fridge['id']}/receipts/batch", headers=fridge["headers"])
+    assert none.status_code == 422  # 사진을 하나도 안 보냄
+    assert len(uploaded_files()) == MAX_BATCH_FILES  # 너무 많이 보낸 요청은 하나도 처리하지 않는다
+
+
+def test_batch_counts_every_photo_in_the_ocr_rate_limit(client, fridge, monkeypatch):
+    use_ocr(RECEIPT_ROWS)
+    monkeypatch.setattr(settings, "rate_limit_enabled", True)
+    monkeypatch.setattr(settings, "ocr_requests_per_minute", 3)
+    body = upload_many(client, fridge, [(f"{n}.jpg", image_bytes()) for n in range(5)]).json()
+    # 요청 한 번(첫 장) + 둘째·셋째 장 = 3번. 넷째 장부터는 한도에 걸린다
+    assert [r["status_code"] for r in body["results"]] == [201, 201, 201, 429, 429]
+    assert body["results"][3]["retry_after"] > 0 and "너무 많습니다" in body["results"][3]["detail"]
+    # 한도를 이미 다 썼으면 요청 자체가 429
+    assert upload_many(client, fridge, [("a.jpg", image_bytes())]).status_code == 429
+
+
+def test_batch_needs_a_login_and_the_same_fridge_access_as_single_upload(client, fridge):
+    use_ocr(RECEIPT_ROWS)
+    url = f"/fridges/{fridge['id']}/receipts/batch"
+    files = [("files", ("a.jpg", image_bytes(), "image/jpeg"))]
+    assert client.post(url, files=files).status_code == 401
+    stranger = signup(client, "stranger")
+    assert client.post(url, files=files, headers=auth(stranger)).status_code == 404
+    assert uploaded_files() == []
+
+
 def test_unreadable_barcode_does_not_block_upload(client, fridge, monkeypatch):
     use_ocr(RECEIPT_ROWS)
     monkeypatch.setattr(barcode_service, "decode_receipt_barcode", lambda image: None)
@@ -310,8 +416,8 @@ def test_upload_judges_the_reading_for_rereads(client, fridge, rows, size, verdi
     app.dependency_overrides[get_ocr_engine] = lambda: engine
     assert upload(client, fridge, data=image_bytes(size=size)).status_code == 201
     assert engine.verdicts == [verdict]
-    # 어느 방향도 받아들여지지 않으면 품목을 가장 많이 읽은 방향을 고른다
-    assert engine.ranks[0][0] == len(parse_receipt(engine.boxes).items)
+    # 어느 방향도 받아들여지지 않으면 품목을 가장 많이 읽은 결과를 고른다 (글자 무게는 보지 않는다)
+    assert engine.ranks == [len(parse_receipt(engine.boxes).items)]
 
 
 def test_missing_total_warning(client, fridge):

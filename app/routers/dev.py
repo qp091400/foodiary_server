@@ -14,7 +14,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
@@ -28,6 +28,7 @@ from app.routers.receipts import (
     plausible_purchase_date,
     read_receipt,
     read_upload,
+    run_batch,
 )
 from app.services import barcode as barcode_service
 from app.services.ocr import OcrEngine, get_ocr_engine
@@ -97,7 +98,9 @@ def _recognize(file: UploadFile, db: Session, ocr: OcrEngine, *, show_errors: bo
         "receipt_barcode": receipt_barcode,
         "draft_items": draft_items,
         "items_sum": items_sum,
-        "warnings": draft_warnings(len(draft_items), items_sum, parsed.total_amount),
+        "warnings": draft_warnings(
+            len(draft_items), items_sum, parsed.total_amount, name_cut=any(item["name_cut"] for item in draft_items)
+        ),
         "raw_lines": parsed.lines,
         "ocr_seconds": ocr_seconds,
         "server_seconds": round(time.perf_counter() - received, 1),
@@ -120,9 +123,45 @@ def receipt_test(
     return _recognize(file, db, ocr, show_errors=True)
 
 
+def _recognize_many(request: Request, files: list[UploadFile], db: Session, ocr: OcrEngine, *, show_errors: bool) -> dict:
+    """여러 장 업로드와 같은 순서(한 장씩, 한 장이 실패해도 계속)로 인식만 해 본다. 아무것도 저장하지 않는다."""
+    outcomes = run_batch(request, files, lambda file: _recognize(file, db, ocr, show_errors=show_errors), db=db)
+    return {
+        "results": [
+            {
+                "index": o.index, "filename": o.filename, "ok": o.ok, "status_code": o.status_code,
+                "result": o.payload, "detail": o.detail, "retry_after": o.retry_after,
+            }
+            for o in outcomes
+        ]
+    }
+
+
+@router.post("/receipt-test/batch")
+def receipt_test_batch(
+    request: Request,
+    files: list[UploadFile] = File(),
+    db: Session = Depends(get_db),
+    ocr: OcrEngine = Depends(get_ocr_engine),
+):
+    """사진 여러 장을 로그인 없이 인식만 해 본다."""
+    return _recognize_many(request, files, db, ocr, show_errors=True)
+
+
 @test_router.get("", response_class=HTMLResponse)
 def password_receipt_test_page():
     return _page()
+
+
+@test_router.post("/batch", dependencies=[Depends(require_test_password)])
+def password_receipt_test_batch(
+    request: Request,
+    files: list[UploadFile] = File(),
+    db: Session = Depends(get_db),
+    ocr: OcrEngine = Depends(get_ocr_engine),
+):
+    """테스트 비밀번호로 사진 여러 장을 인식만 해 본다."""
+    return _recognize_many(request, files, db, ocr, show_errors=False)
 
 
 @test_router.post("", dependencies=[Depends(require_test_password)])

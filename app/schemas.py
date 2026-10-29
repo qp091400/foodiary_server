@@ -360,6 +360,7 @@ class DraftItem(SizeFields):
     expiry_source: str | None = None
     product_name: str | None = None
     confidence: float = 0.0
+    name_cut: bool = Field(False, description="쇼핑몰 주문내역 화면에서 이름이 잘려 있다. 확정 전에 이름을 확인하게 한다")
 
 
 class ReceiptItemOut(SizeFields):
@@ -410,6 +411,23 @@ class ReceiptDetail(BaseModel):
     items_sum: int = Field(description="품목 실결제 합 (금액 - 할인)")
     warnings: list[str]
     raw_lines: list[str] = Field(description="OCR 원문 줄")
+
+
+class BatchUploadResult(BaseModel):
+    index: int = Field(description="보낸 순서 (0부터)")
+    filename: str | None
+    ok: bool
+    status_code: int = Field(description="201이면 초안이 만들어졌다. 아니면 한 장 업로드가 돌려줬을 HTTP 상태 (409 중복, 503 바쁨 등)")
+    receipt: ReceiptDetail | None = Field(None, description="ok일 때 초안")
+    detail: str | None = Field(None, description="ok가 아닐 때 한국어 사유")
+    receipt_id: int | None = Field(None, description="409(이미 등록됨)일 때 기존 영수증 번호")
+    retry_after: int | None = Field(None, description="503·429일 때 이 초 뒤에 다시 올리면 된다")
+
+
+class ReceiptBatchResponse(BaseModel):
+    results: list[BatchUploadResult] = Field(description="보낸 순서대로. 한 장이 실패해도 나머지는 처리된다")
+    succeeded: int
+    failed: int
 
 
 class ConfirmItem(BaseModel):

@@ -23,6 +23,7 @@ class ParsedItem:
     discount: int = 0
     barcode: str | None = None
     confidence: float = 0.0
+    name_cut: bool = False  # 화면에서 이름이 잘려 있다(주문내역 화면)
 
 
 @dataclass
@@ -32,6 +33,7 @@ class ParsedReceipt:
     total_amount: int | None = None
     items: list[ParsedItem] = field(default_factory=list)
     lines: list[str] = field(default_factory=list)
+    kind: str = "receipt"  # receipt | order_screen (쇼핑몰 주문내역 화면 캡처)
 
 
 # ── 패턴 ────────────────────────────────────────────────────────────────
@@ -458,7 +460,13 @@ def find_total(lines: list[str]) -> int | None:
 
 
 def parse_receipt(boxes: list[OcrBox]) -> ParsedReceipt:
-    grouped = [(normalize_line(text), confidence) for text, confidence in group_lines(boxes)]
+    from app.services.order_screen import is_order_screen, parse_order_screen  # 순환 import를 피하려고 함수 안에서
+
+    raw = group_lines(boxes)
+    # 쇼핑몰 주문내역 화면은 영수증과 모양이 전혀 달라서 따로 읽는다. (normalize_line은 영수증 줄 전용이다)
+    if is_order_screen([text for text, _ in raw]):
+        return parse_order_screen(raw)
+    grouped = [(normalize_line(text), confidence) for text, confidence in raw]
     lines = [text for text, _ in grouped]
     start, end = find_item_section(lines)
     return ParsedReceipt(

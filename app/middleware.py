@@ -13,7 +13,7 @@ from starlette.responses import JSONResponse
 from app.config import settings
 
 # 영수증 업로드와 인식 테스트. 테스트 비밀번호를 틀린 요청도 센다(비밀번호 맞히기 방지).
-_OCR_PATH = re.compile(r"^/(?:fridges/\d+/receipts|(?:dev/)?receipt-test)/?$")
+_OCR_PATH = re.compile(r"^/(?:fridges/\d+/receipts|(?:dev/)?receipt-test)(?:/batch)?/?$")
 
 
 class RequestLimiter:
@@ -46,6 +46,21 @@ class RequestLimiter:
 request_limiter = RequestLimiter()
 
 
+def _identity(request: Request) -> str:
+    # Cloud Run 배포는 전달 헤더를 신뢰하지 않고 인스턴스 전체 한도를 쓴다.
+    return "global" if settings.rate_limit_scope == "global" else (request.client.host if request.client else "unknown")
+
+
+def extra_ocr_request(request: Request) -> int:
+    """여러 장 업로드에서 둘째 장부터 영수증 한도를 한 장씩 더 쓴다. (요청 한 번은 미들웨어가 이미 셌다)
+
+    한도에 걸리면 기다릴 초를, 아니면 0을 돌려준다.
+    """
+    if not settings.rate_limit_enabled:
+        return 0
+    return request_limiter.check((_identity(request), "ocr"), settings.ocr_requests_per_minute)
+
+
 class SecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         retry_after = 0
@@ -54,11 +69,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             group = "auth" if path.startswith("/auth/") else "ocr" if _OCR_PATH.fullmatch(path) else None
             if group:
                 limit = settings.auth_requests_per_minute if group == "auth" else settings.ocr_requests_per_minute
-                # Cloud Run 배포는 전달 헤더를 신뢰하지 않고 인스턴스 전체 한도를 쓴다.
-                identity = "global" if settings.rate_limit_scope == "global" else (
-                    request.client.host if request.client else "unknown"
-                )
-                retry_after = request_limiter.check((identity, group), limit)
+                retry_after = request_limiter.check((_identity(request), group), limit)
         if retry_after:
             response = JSONResponse(
                 status_code=429,

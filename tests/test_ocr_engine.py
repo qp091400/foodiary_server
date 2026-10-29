@@ -165,6 +165,33 @@ def test_reads_again_with_more_contrast_then_rotated(monkeypatch, tmp_path, verd
     assert calls == expected[:reads]
 
 
+def test_a_tie_keeps_the_first_reading(monkeypatch, tmp_path):
+    """영수증이 아닌 사진(화면 캡처 등)은 어느 방향도 품목이 없다. 그때 거꾸로 돌려 읽은 결과가 뽑히면 안 된다."""
+    pytest.importorskip("numpy")
+    pytest.importorskip("cv2")
+    path = tmp_path / "screenshot.jpg"
+    Image.new("RGB", (30, 40), "white").save(path)
+    calls = []
+
+    class MoreTextWhenRotated:
+        def __init__(self, **kwargs):
+            pass
+
+        def predict(self, image, **options):
+            calls.append(options)
+            text = "화면" * (1 + len(calls) * 5)  # 돌려 읽을수록 글자 무게가 커진다
+            return [{"rec_texts": [text], "rec_scores": [0.9], "rec_boxes": [[1, 2, 3, 4]]}]
+
+    monkeypatch.setitem(sys.modules, "paddleocr", types.SimpleNamespace(PaddleOCR=MoreTextWhenRotated))
+    engine = PaddleOcrEngine("korean")
+    judge = lambda boxes: Verdict.DOUBTFUL  # noqa: E731
+    boxes = engine.recognize(str(path), judge=judge, rank=lambda boxes: 0)
+    assert len(calls) == 5 and boxes[0].text == "화면" * 6  # 5번 읽었지만 동점이면 처음 읽은 결과
+    # rank가 없으면 글자 무게가 가장 큰 결과
+    calls.clear()
+    assert engine.recognize(str(path), judge=judge)[0].text == "화면" * 26
+
+
 def test_reads_once_without_a_judge(fake_paddleocr, tmp_path):
     pytest.importorskip("numpy")
     path = tmp_path / "receipt.jpg"
