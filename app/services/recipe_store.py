@@ -1,0 +1,68 @@
+"""Read-only indexed catalogue; each request opens the current atomic snapshot."""
+import json
+import sqlite3
+from contextlib import closing
+from pathlib import Path
+
+from app.config import settings
+from app.services.recipe_names import with_display_name
+from app.services.recipes import PARENTS, STAPLES, catalogue, ingredient_key, rank
+
+
+def store_path():
+    return Path(settings.recipe_data_dir) / 'recipes.sqlite3'
+
+
+def connect():
+    return sqlite3.connect(store_path().resolve().as_uri() + '?mode=ro', uri=True)
+
+
+def recommendations(foods):
+    if not store_path().exists():
+        data = catalogue()
+        return dict(recipes=rank(data['recipes'], foods), catalogue_count=len(data['recipes']),
+                    source_total=data['source_total'], sample=data['sample'], imported_at=data['imported_at'])
+    with closing(connect()) as db:
+        metadata = json.loads(db.execute('SELECT value FROM metadata').fetchone()[0])
+        required = []
+        for food in foods:
+            key = ingredient_key(food.name)
+            required.append({key, PARENTS[key]} if key in PARENTS else {key})
+        rows = []
+        available = set().union(*required) if required else set()
+        main = available - STAPLES
+        if main:
+            clauses, params = [], []
+            # Older snapshots remain usable until the first screened import is complete.
+            columns = {r[1] for r in db.execute('PRAGMA table_info(recipes)')}
+            if 'recommendable' in columns:
+                clauses.append('r.recommendable=1')
+            if 'combination_count' in columns:
+                clauses.append('r.combination_count>=2')
+            for options in required:
+                marks = ','.join('?' for _ in options)
+                clauses.append(f'r.id IN (SELECT recipe_id FROM ingredients WHERE key IN ({marks}))')
+                params.extend(sorted(options))
+            marks = ','.join('?' for _ in main)
+            clauses.append(f'r.id IN (SELECT recipe_id FROM ingredients WHERE key IN ({marks}))')
+            params.extend(sorted(main))
+            available_marks = ','.join('?' for _ in available)
+            family = 'r.dish_family' if 'dish_family' in columns else 'r.id'
+            query = (f'WITH scored AS (SELECT r.payload, {family} AS family, '
+                     f'r.ingredient_count - (SELECT COUNT(*) FROM ingredients i '
+                     f'WHERE i.recipe_id=r.id AND i.key IN ({available_marks})) AS missing '
+                     'FROM recipes r WHERE ' + ' AND '.join(clauses) + '), '
+                     'variants AS (SELECT payload,missing,ROW_NUMBER() OVER '
+                     '(PARTITION BY family ORDER BY missing,RANDOM()) AS choice FROM scored) '
+                     'SELECT payload FROM variants WHERE choice=1 ORDER BY missing,RANDOM() LIMIT 30')
+            rows = [json.loads(row[0]) for row in db.execute(query, [*sorted(available), *params])]
+        # Reuse the same strict all-selected rule and response contract as the legacy catalogue.
+        return dict(metadata, recipes=rank(rows, foods))
+
+
+def detail(recipe_id):
+    if not store_path().exists():
+        return with_display_name(next((r for r in catalogue()['recipes'] if r['id'] == recipe_id), None))
+    with closing(connect()) as db:
+        row = db.execute('SELECT payload FROM recipes WHERE id=?', (recipe_id,)).fetchone()
+        return with_display_name(json.loads(row[0])) if row else None
