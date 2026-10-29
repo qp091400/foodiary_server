@@ -48,9 +48,9 @@ def test_ranking_counts_no_assumed_pantry_and_requires_main_match():
 
 def test_missing_count_priority_with_random_ties_before_limit(monkeypatch):
     from app.services import recipes
-    rows = [recipe("a", "달걀 1개"), recipe("b", "달걀 2개"),
-            recipe("c", "달걀 1개, 소금 약간"),
-            recipe("d", "달걀 1개, 양파 1개, 소금 약간")]
+    rows = [recipe("a", "달걀 1개, 양파 1개"), recipe("b", "달걀 2개, 양파 2개"),
+            recipe("c", "달걀 1개, 양파 1개, 소금 약간"),
+            recipe("d", "달걀 1개, 양파 1개, 당근 1개, 소금 약간")]
     foods = [SimpleNamespace(name="계란")]
     monkeypatch.setattr(recipes.random, "shuffle", lambda values: None)
     assert [r["id"] for r in rank(rows, foods)] == ["a", "b", "c", "d"]

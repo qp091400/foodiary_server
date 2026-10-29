@@ -7,6 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from app.config import settings
+from app.services.recipe_names import display_name, dish_family
 
 SOURCE_URL = "https://www.foodsafetykorea.go.kr/api/openApiInfo.do?svc_no=COOKRCP01"
 SOURCE = "식품의약품안전처 · 조리식품의 레시피 DB"
@@ -44,14 +45,70 @@ ALIASES = {
     "부추": ("부추", "조선부추"), "땅콩": ("땅콩",),
     "밀가루": ("밀가루",), "전분": ("전분",), "물": ("물",),
 }
+# Extend recognition to packaged foods and produce used across the larger sources.
+ALIASES.update({
+    '토마토': ('토마토',), '방울토마토': ('방울토마토', '대추방울토마토'),
+    '브로콜리': ('브로콜리',), '아보카도': ('아보카도',), '레몬': ('레몬',),
+    '사과': ('사과',), '바나나': ('바나나',), '딸기': ('딸기',), '블루베리': ('블루베리',),
+    '망고': ('망고',), '키위': ('키위', '참다래'), '복숭아': ('복숭아', '천도복숭아'),
+    '파인애플': ('파인애플',), '오렌지': ('오렌지',), '체리': ('체리',),
+    '메추리알': ('메추리알',), '두유': ('두유',), '연유': ('연유',),
+    '모짜렐라치즈': ('모짜렐라', '모차렐라'), '크림치즈': ('크림치즈',),
+    '소시지': ('소시지', '소세지', '프랑크소시지'), '스팸': ('스팸', '런천미트'),
+    '참치통조림': ('참치통조림', '참치캔', '캔참치'), '맛살': ('맛살', '크래미'),
+    '어묵': ('어묵', '오뎅'), '만두': ('만두', '교자'), '식빵': ('식빵',),
+    '떡국떡': ('떡국떡',), '떡볶이떡': ('떡볶이떡',), '가래떡': ('가래떡',),
+    '스파게티면': ('스파게티면',), '소면': ('소면',), '당면': ('당면',),
+    '쌀국수': ('쌀국수',), '우동면': ('우동면', '우동사리'), '라면': ('라면',),
+    '김': ('김', '김밥용김', '김밥김'), '미역': ('미역',), '다시마': ('다시마',),
+    '연어': ('연어',), '꽃게': ('꽃게',), '문어': ('문어',), '낙지': ('낙지',),
+    '바지락': ('바지락',), '멸치': ('멸치',), '명란': ('명란', '명란젓'),
+    '완두콩': ('완두콩',), '강낭콩': ('강낭콩',), '병아리콩': ('병아리콩',),
+    '아몬드': ('아몬드',), '호두': ('호두',), '캐슈넛': ('캐슈넛',), '옥수수': ('옥수수',),
+    '꿀': ('꿀', '벌꿀'), '케첩': ('케첩', '케찹'), '마요네즈': ('마요네즈',),
+    '굴소스': ('굴소스',), '돈가스소스': ('돈가스소스', '돈까스소스'),
+    '토마토소스': ('토마토소스',), '맛술': ('맛술', '미림'), '올리고당': ('올리고당',),
+    '물엿': ('물엿',), '부침가루': ('부침가루',), '튀김가루': ('튀김가루',),
+})
 STAPLES = {"물", "소금", "설탕", "간장", "저염간장", "고추장", "된장", "참기름", "들기름", "식용유", "올리브유", "후추", "고춧가루", "식초", "깨"}
-PARENTS = {"삼겹살": "돼지고기", "목살": "돼지고기", "닭가슴살": "닭고기"}
+PARENTS = {"삼겹살": "돼지고기", "목살": "돼지고기", "닭가슴살": "닭고기", '방울토마토': '토마토'}
+SUPPLIES = {'칼', '도마', '가위', '비닐봉지', '키친타올', '키친타월', '랩', '밀폐용기',
+            '전자레인지', '냄비', '후라이팬', '프라이팬', '없음', '없어요', '재료없음', '준비물',
+            '종이호일', '쿠킹호일', '은박지', '이쑤시개', '에어프라이어', '오븐', '텀블러'}
+COMBINATION_EXTRAS = {'얼음', '각얼음', '왕각얼음', '얼음물', '찬물', '냉수', '뜨거운물',
+                      '끓는물', '따뜻한물', '미지근한물', '정수물', '정수', '생수', '맹물',
+                      '수돗물', '쌀뜨물', '베이킹소다', '식소다', '베이킹파우더',
+                      '카놀라유', '포도씨유', '해바라기유', '고추기름', '파기름', '콩기름',
+                      '물엿', '올리고당', '꿀'}
+COMBINATION_EXTRAS.update({'기름장', '매실액', '매실액기스', '매실청', '맛술', '청주', '소주', '천일염', '와사비'})
+TOOL_DESCRIPTION = re.compile(r'냄비|프라이팬|후라이팬|전자레인지|전자렌지|에어프라이어|'
+                              r'종이호일|종일호일|쿠킹호일|키친타올|키친타월|비닐봉지|오븐팬|텀블러')
+WATER_OR_ICE = re.compile(
+    r'^(?:물|찬물|뜨거운물|따뜻한물|미지근한물|끓는물|쌀뜨물|생수|얼음물|각얼음|왕각얼음|얼음)'
+    r'(?:넉넉|잠길|가득|자작|충분|적당|살짝|많이|약간|조금|취향|기호|필요|재료가|재료를|'
+    r'계란이|달걀이|종이컵|소주컵|머그컵|소주잔|한컵|반컵|한잔|또는|이나|or|약|[abc]$)')
+COMBINATION_IGNORED = STAPLES | SUPPLIES | COMBINATION_EXTRAS
+
+
+def is_combination_ingredient(key):
+    return bool(key and key not in COMBINATION_IGNORED
+                and not WATER_OR_ICE.search(key) and not TOOL_DESCRIPTION.search(key))
+
+
+def combination_keys(recipe):
+    """Distinct food ingredients; quantities, water, basic seasoning and tools do not count."""
+    return {p['key'] for p in recipe['ingredients'] if is_combination_ingredient(p['key'])}
 
 
 def compact(value: str) -> str:
     return re.sub(r"[^가-힣a-z]", "", value.lower())
 
 
+ALIAS_LOOKUP = sorted([(compact(alias), key) for key, aliases in ALIASES.items()
+                       for alias in aliases], key=lambda pair: len(pair[0]), reverse=True)
+
+
+@lru_cache(maxsize=100000)
 def ingredient_key(value: str) -> str:
     name = compact(value)
     name = re.sub(r"^(재료|주재료|양념|육수|고명)", "", name)
@@ -69,8 +126,7 @@ def ingredient_key(value: str) -> str:
         return "적양배추"
     if "적양파" in name:
         return "적양파"
-    candidates = [(compact(alias), key) for key, aliases in ALIASES.items() for alias in aliases]
-    for alias, key in sorted(candidates, key=lambda pair: len(pair[0]), reverse=True):
+    for alias, key in ALIAS_LOOKUP:
         if len(alias) == 1:
             if name == alias:
                 return key
@@ -85,7 +141,9 @@ def ingredient_key(value: str) -> str:
 
 def ingredient_parts(raw: str) -> list[dict]:
     # Split commas outside quantity parentheses. Keep original quantities for display.
-    parts = re.split(r",(?![^()]*\))|\n|[;；]", raw)
+    raw = raw.replace('\x07', ' ')
+    raw = re.sub(r'\[[^\]]*\]', '\n', raw)
+    parts = re.split(r",(?![^()]*\))|\n|[;；|]", raw)
     result, seen = [], set()
     for part in parts:
         part = re.sub(r"\[[^\]]*\]", "", part).strip().lstrip("•●·- ")
@@ -132,6 +190,8 @@ def catalogue() -> dict:
 
 
 def rank(recipes: list[dict], foods: list, limit: int = 30) -> list[dict]:
+    if limit <= 0:
+        return []
     available = set()
     required = []
     for food in foods:
@@ -143,6 +203,8 @@ def rank(recipes: list[dict], foods: list, limit: int = 30) -> list[dict]:
         available.update(alternatives)
     scored = []
     for recipe in recipes:
+        if len(combination_keys(recipe)) < 2:
+            continue  # Hard policy, including legacy catalogues and manual overrides.
         recipe_keys = {part["key"] for part in recipe["ingredients"]}
         if not required or any(not (options & recipe_keys) for options in required):
             continue  # Every selected ingredient must occur in this one recipe.
@@ -155,11 +217,21 @@ def rank(recipes: list[dict], foods: list, limit: int = 30) -> list[dict]:
         main_missing = sum(not part["staple"] for part in missing)
         score = len(missing)
         summary = {key: recipe[key] for key in ("id", "name", "category", "method")}
+        summary['display_name'] = display_name(recipe)
+        summary.update({key: recipe.get(key, '') for key in ('source', 'cooking_time', 'difficulty', 'servings')})
+        summary['has_steps'] = bool(recipe.get('steps'))
         summary.update(matched=[p["text"] for p in matched], missing=[p["text"] for p in missing],
                        missing_main=main_missing)
-        scored.append((score, summary))
+        scored.append((score, summary, dish_family(recipe)))
     # Shuffle before stable sorting and limiting: equal-rank recipes, including
     # those beyond the first 30, have an equal chance on every request.
     random.shuffle(scored)
     scored.sort(key=lambda row: row[0])
-    return [row[1] for row in scored[:limit]]
+    result, seen = [], set()
+    for _, summary, family in scored:
+        if family not in seen:
+            seen.add(family)
+            result.append(summary)
+            if len(result) == limit:
+                break
+    return result

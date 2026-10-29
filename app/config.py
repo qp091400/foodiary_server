@@ -53,6 +53,8 @@ class Settings(BaseSettings):
 
     foodsafety_api_key: str = ""  # 비우면 바코드 조회 비활성
     recipe_data_dir: str = "recipe_data"  # 별도 볼륨; 원본/색인은 Git에 넣지 않는다
+    mafra_api_key: str = ""
+    mafra_api_base: str = "http://211.237.50.150:7080/openapi"
     cors_origins: str = "*"
     auto_create_tables: bool = True
     timezone: str = "Asia/Seoul"
