@@ -191,6 +191,7 @@ class UserOut(BaseModel):
     created_at: UtcDatetime
     friend_code: str
     is_admin: bool
+    avatar_url: str | None = None
 
 
 class TokenPair(BaseModel):
@@ -574,10 +575,11 @@ class PublicUser(BaseModel):
     id: int
     nickname: str
     friend_code: str
+    avatar_url: str | None = None
 
     @classmethod
     def of(cls, user) -> "PublicUser":
-        return cls(id=user.id, nickname=user.nickname, friend_code=user.friend_code)
+        return cls(id=user.id, nickname=user.nickname, friend_code=user.friend_code, avatar_url=user.avatar_url)
 
 
 class FriendOut(BaseModel):

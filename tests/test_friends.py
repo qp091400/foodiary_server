@@ -60,8 +60,8 @@ def test_friend_code_is_fixed_and_tells_same_nicknames_apart(client, people):
     assert sorted((f["user"]["nickname"], f["user"]["friend_code"]) for f in friends) == sorted(
         [("bob", people["bob"]["code"]), ("bob", twin["user"]["friend_code"])]
     )
-    assert set(friends[0]["user"]) == {"id", "nickname", "friend_code"}  # 이메일·아이디는 보이지 않는다
     assert client.get("/users/me", headers=people["bob"]["headers"]).json()["friend_code"] == people["bob"]["code"]
+    assert set(friends[0]["user"]) == {"id", "nickname", "friend_code", "avatar_url"}  # 이메일과 로그인 아이디는 비공개
 
 
 def test_the_old_ways_to_find_people_are_gone(client, people):

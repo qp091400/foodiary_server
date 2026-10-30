@@ -31,6 +31,11 @@ class User(Base):
     friend_code: Mapped[str] = mapped_column(String(8), unique=True, default=new_friend_code)
     # 관리자: 남의 글도 지울 수 있다. scripts/set_admin.py로만 바꾼다
     is_admin: Mapped[bool] = mapped_column(default=False)
+    avatar_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    @property
+    def avatar_url(self) -> str | None:
+        return f"/users/{self.id}/avatar/{self.avatar_path.rsplit('/', 1)[-1]}" if self.avatar_path else None
 
 
 class EmailVerification(Base):

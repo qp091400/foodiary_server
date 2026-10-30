@@ -1,6 +1,12 @@
 """내 정보."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import uuid
+from pathlib import Path
+from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile, Response
+from fastapi.responses import FileResponse
+from PIL import ImageOps
+from app.config import settings
+from app.routers.receipts import load_image, read_upload
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -14,9 +20,10 @@ from app.schemas import (
     SharedItemOut,
     UserOut,
     UserUpdate,
+    PublicUser,
 )
 from app.security import create_access_token, create_refresh_token, hash_password, verify_password
-from app.services.friends import can_request_changes, fridge_permission
+from app.services.friends import can_request_changes, fridge_permission, are_friends
 
 router = APIRouter(prefix="/users", tags=["사용자"])
 
@@ -31,6 +38,51 @@ def update_me(payload: UserUpdate, user: User = Depends(get_current_user), db: S
     user.nickname = payload.nickname
     db.commit()
     return user
+
+
+@router.post("/me/avatar", response_model=UserOut, summary="프로필 사진 설정")
+def upload_avatar(file: UploadFile = File(), me: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    image = load_image(read_upload(file))
+    # Re-encode a square photo without EXIF location/device metadata.
+    image = ImageOps.fit(image, (512, 512))
+    user = db.scalar(select(User).where(User.id == me.id).with_for_update().execution_options(populate_existing=True))
+    old = user.avatar_path
+    relative = f"avatars/{user.id}/{uuid.uuid4().hex}.jpg"
+    target = Path(settings.upload_dir) / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        image.save(target, "JPEG", quality=88)
+        user.avatar_path = relative
+        db.commit()
+    except Exception:
+        db.rollback()
+        target.unlink(missing_ok=True)
+        raise
+    if old:
+        (Path(settings.upload_dir) / old).unlink(missing_ok=True)
+    return user
+
+
+@router.delete("/me/avatar", status_code=204, summary="프로필 사진 삭제")
+def delete_avatar(me: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    user = db.scalar(select(User).where(User.id == me.id).with_for_update().execution_options(populate_existing=True))
+    old = user.avatar_path
+    user.avatar_path = None
+    db.commit()
+    if old:
+        (Path(settings.upload_dir) / old).unlink(missing_ok=True)
+    return Response(status_code=204)
+
+
+@router.get("/{user_id}/avatar/{filename}", response_class=FileResponse, summary="로그인 사용자에게 프로필 사진 제공")
+def get_avatar(user_id: int, filename: str, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    user = db.get(User, user_id)
+    if not user or not user.avatar_path or filename != user.avatar_path.rsplit("/", 1)[-1]:
+        raise HTTPException(404, detail="프로필 사진이 없어요.")
+    target = Path(settings.upload_dir) / user.avatar_path
+    if not target.is_file():
+        raise HTTPException(404, detail="프로필 사진이 없어요.")
+    return FileResponse(target, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @router.post("/me/password", response_model=PasswordChangeResponse, summary="비밀번호 변경")
@@ -55,6 +107,13 @@ def change_password(
 
 
 # ── 남의 냉장고 보기 ─────────────────────────────────────────────────────
+
+@router.get("/{user_id}/profile", summary="공개 프로필 (로그인 필요)")
+def public_profile(user_id: int, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(404, detail="사용자를 찾을 수 없어요.")
+    return {**PublicUser.of(user).model_dump(), "is_friend": are_friends(db, me.id, user.id)}
 
 NO_SUCH_USER = "그런 사용자를 찾을 수 없어요."
 
