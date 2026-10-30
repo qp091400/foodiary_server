@@ -64,6 +64,12 @@ def get_fridge_access(
     return FridgeAccess(fridge=fridge, member=member, user=user)
 
 
+def require_admin(user: User = Depends(get_current_user)) -> User:
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="관리자만 할 수 있는 작업입니다.")
+    return user
+
+
 def require_owner(access: FridgeAccess = Depends(get_fridge_access)) -> FridgeAccess:
     if not access.is_owner:
         raise HTTPException(status_code=403, detail="냉장고 주인만 할 수 있는 작업입니다.")

@@ -189,6 +189,8 @@ class UserOut(BaseModel):
     email: str
     nickname: str
     created_at: UtcDatetime
+    friend_code: str
+    is_admin: bool
 
 
 class TokenPair(BaseModel):
@@ -223,8 +225,20 @@ class FridgeCreate(BaseModel):
     name: FridgeName
 
 
+Visibility = Literal["private", "friends", "public"]
+
+
 class FridgeUpdate(BaseModel):
-    name: FridgeName
+    """바꿀 것만 보낸다. name은 이름, visibility는 멤버가 아닌 사람에게 보일 범위(private 나만 / friends 친구들도 / public 모두)."""
+
+    name: FridgeName | None = None
+    visibility: Visibility | None = None
+
+    @model_validator(mode="after")
+    def _something_to_change(self):
+        if self.name is None and self.visibility is None:
+            raise ValueError("바꿀 내용(name 또는 visibility)이 없습니다.")
+        return self
 
 
 class FridgeOut(BaseModel):
@@ -234,6 +248,7 @@ class FridgeOut(BaseModel):
     my_role: str
     member_count: int
     created_at: UtcDatetime
+    visibility: Visibility
 
 
 class MemberOut(BaseModel):
@@ -546,3 +561,185 @@ class MonthlyStats(BaseModel):
     discarded_value: int
     waste_rate: float = Field(description="버린 금액 / (먹은 금액 + 버린 금액)")
     top_discarded: list[DiscardedCategory]
+
+
+# ── 친구 · 남의 냉장고 · 커뮤니티 ────────────────────────────────────────
+
+Relation = Literal["none", "friend", "requested", "incoming"]  # 나와의 관계: 아님 / 친구 / 내가 요청함 / 상대가 요청함
+
+
+class PublicUser(BaseModel):
+    """다른 사람에게 보여도 되는 정보. 이메일·아이디는 넣지 않는다."""
+
+    id: int
+    nickname: str
+
+
+class UserSearchOut(PublicUser):
+    relation: Relation
+
+
+class FriendCodeOut(BaseModel):
+    friend_code: str
+
+
+class FriendTarget(BaseModel):
+    """친구 요청을 받을 사람. code(친구 코드·링크), nickname(정확히 같은 닉네임), user_id(검색 결과에서 고른 사람) 중 하나만."""
+
+    code: Annotated[str, StringConstraints(strip_whitespace=True, to_upper=True, min_length=1, max_length=16)] | None = None
+    nickname: Nickname | None = None
+    user_id: int | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one(self):
+        if sum(value is not None for value in (self.code, self.nickname, self.user_id)) != 1:
+            raise ValueError("code, nickname, user_id 중 하나만 보내 주세요.")
+        return self
+
+
+class FriendOut(BaseModel):
+    user_id: int
+    nickname: str
+    since: UtcDatetime
+
+
+class FriendRequestOut(BaseModel):
+    id: int
+    user: PublicUser  # 상대방 (받은 요청이면 보낸 사람, 보낸 요청이면 받는 사람)
+    created_at: UtcDatetime
+
+
+class FriendRequestResult(BaseModel):
+    status: Literal["requested", "friends"]  # 상대가 먼저 요청해 둔 상태면 바로 친구가 된다
+    user: PublicUser
+    request_id: int | None = None
+
+
+class SharedFridgeOut(BaseModel):
+    """남의 냉장고 목록 한 줄."""
+
+    id: int
+    name: str
+    visibility: Visibility
+    item_count: int
+
+
+class SharedItemOut(SizeFields):
+    """남의 냉장고에서 보이는 품목. 가격·메모·바코드·영수증·누가 넣었는지는 숨긴다."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    category: str
+    storage: str
+    quantity: float
+    remaining_quantity: float
+    purchased_on: date
+    expiry_date: date | None
+
+    @computed_field
+    @property
+    def category_label(self) -> str:
+        return label_of(self.category)
+
+    @computed_field
+    @property
+    def days_left(self) -> int | None:
+        return None if self.expiry_date is None else (self.expiry_date - today()).days
+
+
+PostTitle = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+PostBody = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+
+
+class PostCreate(BaseModel):
+    title: PostTitle
+    body: PostBody
+
+
+class PostPhotoOut(BaseModel):
+    id: int
+    url: str  # 로그인 토큰을 붙여 GET으로 받으면 사진이 온다
+
+
+class PostOut(BaseModel):
+    id: int
+    author: PublicUser
+    title: str
+    body: str
+    created_at: UtcDatetime
+    mine: bool  # 내가 쓴 글
+    can_delete: bool  # 내가 쓴 글이거나 내가 관리자
+    like_count: int
+    liked_by_me: bool
+    comment_count: int
+    photos: list[PostPhotoOut]
+
+
+class PostList(BaseModel):
+    posts: list[PostOut]
+    next_before_id: int | None  # 다음 쪽은 before_id=이 값으로 부른다. 없으면 마지막이다
+
+
+class LikeOut(BaseModel):
+    like_count: int
+    liked_by_me: bool
+
+
+CommentBody = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+
+
+class CommentCreate(BaseModel):
+    body: CommentBody
+
+
+class CommentOut(BaseModel):
+    id: int
+    post_id: int
+    author: PublicUser
+    body: str
+    created_at: UtcDatetime
+    mine: bool
+    can_delete: bool  # 내가 쓴 댓글이거나 내가 관리자
+
+
+class CommentList(BaseModel):
+    comments: list[CommentOut]  # 오래된 것부터
+    next_after_id: int | None  # 다음 쪽은 after_id=이 값으로 부른다. 없으면 마지막이다
+
+
+ReportReason = Literal["spam", "abuse", "inappropriate", "privacy", "other"]  # 광고·도배 / 욕설·괴롭힘 / 부적절·불쾌 / 개인정보 / 기타
+
+
+class ReportCreate(BaseModel):
+    reason: ReportReason
+    detail: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)] | None = None
+
+
+class ReportTargetOut(BaseModel):
+    """신고된 글이나 댓글. 관리자가 지우기 전에 내용을 확인하는 용도."""
+
+    post_id: int
+    author: PublicUser
+    text: str  # 글이면 제목과 본문, 댓글이면 본문 (앞부분)
+    photo_count: int
+    deleted: bool
+
+
+class AdminReportOut(BaseModel):
+    id: int
+    target_type: Literal["post", "comment"]
+    target_id: int
+    reason: ReportReason
+    detail: str | None
+    status: Literal["open", "resolved", "dismissed"]
+    created_at: UtcDatetime
+    reporter: PublicUser
+    open_reports_on_target: int  # 같은 대상에 아직 처리하지 않은 신고 수
+    target: ReportTargetOut | None
+
+
+class ReportResolve(BaseModel):
+    action: Literal["delete", "dismiss"]  # 대상을 지운다 / 문제없음으로 닫는다
+

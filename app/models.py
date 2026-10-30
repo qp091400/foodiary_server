@@ -10,6 +10,12 @@ from app.database import Base
 from app.timeutil import utcnow
 
 
+def new_friend_code() -> str:
+    from app.security import generate_invite_code  # security가 이 파일을 import해서, 순환을 피하려고 부를 때 가져온다
+
+    return generate_invite_code()
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -21,6 +27,10 @@ class User(Base):
     # 비밀번호 변경·재설정 때 +1 → 이전에 발급한 토큰 무효화
     token_version: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    # 친구 추가용 코드(링크에 담아 공유한다). 새로 뽑을 수 있다
+    friend_code: Mapped[str] = mapped_column(String(8), unique=True, default=new_friend_code)
+    # 관리자: 남의 글도 지울 수 있다. scripts/set_admin.py로만 바꾼다
+    is_admin: Mapped[bool] = mapped_column(default=False)
 
 
 class EmailVerification(Base):
@@ -45,6 +55,8 @@ class Fridge(Base):
     name: Mapped[str] = mapped_column(String(50))
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    # 멤버가 아닌 사람에게 품목을 보여 줄 범위: private(나만) / friends(친구들도) / public(모두)
+    visibility: Mapped[str] = mapped_column(String(10), default="private")
 
 
 class FridgeMember(Base):
@@ -168,3 +180,90 @@ class ProductCache(Base):
     shelf_life_text: Mapped[str | None] = mapped_column(String(300))
     shelf_life_days: Mapped[int | None]
     fetched_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class Friendship(Base):
+    """친구 요청과 친구 관계. 요청한 사람 → 받은 사람. accepted가 되면 서로 친구다."""
+
+    __tablename__ = "friendships"
+    __table_args__ = (UniqueConstraint("requester_id", "addressee_id", name="uq_friendships_pair"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    requester_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    addressee_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    status: Mapped[str] = mapped_column(String(10), default="pending")  # pending / accepted
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    responded_at: Mapped[datetime | None]
+
+
+class Post(Base):
+    """커뮤니티 글. 지운 글은 deleted_at을 채워 두고 보여 주지 않는다 (누가 지웠는지 남긴다)."""
+
+    __tablename__ = "posts"
+    __table_args__ = (Index("ix_posts_deleted_at_id", "deleted_at", "id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(100))
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    deleted_at: Mapped[datetime | None]
+    deleted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+
+
+class PostLike(Base):
+    """글 좋아요. 한 사람이 한 글에 하나."""
+
+    __tablename__ = "post_likes"
+
+    post_id: Mapped[int] = mapped_column(ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class Comment(Base):
+    """글의 댓글. 글처럼 지운 댓글은 deleted_at을 채워 두고 보여 주지 않는다."""
+
+    __tablename__ = "comments"
+    __table_args__ = (Index("ix_comments_post_id_deleted_at_id", "post_id", "deleted_at", "id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    post_id: Mapped[int] = mapped_column(ForeignKey("posts.id", ondelete="CASCADE"))
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    body: Mapped[str] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    deleted_at: Mapped[datetime | None]
+    deleted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+
+
+class PostPhoto(Base):
+    """글에 붙인 사진. 파일은 uploads/posts/{글 번호}/ 아래에 둔다."""
+
+    __tablename__ = "post_photos"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    post_id: Mapped[int] = mapped_column(ForeignKey("posts.id", ondelete="CASCADE"), index=True)
+    path: Mapped[str] = mapped_column(String(120))  # uploads 폴더 기준 상대 경로
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class Report(Base):
+    """글이나 댓글 신고. 한 사람이 같은 대상을 한 번만 신고할 수 있고, 관리자가 지우거나 문제없음으로 처리한다."""
+
+    __tablename__ = "reports"
+    __table_args__ = (
+        UniqueConstraint("reporter_id", "target_type", "target_id", name="uq_reports_reporter_target"),
+        Index("ix_reports_status_id", "status", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    reporter_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    target_type: Mapped[str] = mapped_column(String(10))  # post / comment
+    target_id: Mapped[int]  # 글이나 댓글 번호 (대상이 둘이라 외래 키는 걸지 않는다)
+    reason: Mapped[str] = mapped_column(String(20))  # spam / abuse / inappropriate / privacy / other
+    detail: Mapped[str | None] = mapped_column(String(300))
+    status: Mapped[str] = mapped_column(String(10), default="open")  # open / resolved(지움) / dismissed(문제없음)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    handled_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    handled_at: Mapped[datetime | None]
+

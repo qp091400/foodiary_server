@@ -42,6 +42,7 @@ def _fridge_out(db: Session, fridge: Fridge, role: str) -> FridgeOut:
         my_role=role,
         member_count=_member_count(db, fridge.id),
         created_at=fridge.created_at,
+        visibility=fridge.visibility,
     )
 
 
@@ -67,6 +68,7 @@ def list_fridges(user: User = Depends(get_current_user), db: Session = Depends(g
             my_role=role,
             member_count=member_count,
             created_at=fridge.created_at,
+            visibility=fridge.visibility,
         )
         for fridge, role, member_count in rows
     ]
@@ -128,17 +130,21 @@ def get_fridge(access: FridgeAccess = Depends(get_fridge_access), db: Session = 
         my_role=access.member.role,
         member_count=len(members),
         created_at=access.fridge.created_at,
+        visibility=access.fridge.visibility,
         members=members,
     )
 
 
-@router.patch("/{fridge_id}", response_model=FridgeOut, summary="냉장고 이름 변경 (주인만)")
+@router.patch("/{fridge_id}", response_model=FridgeOut, summary="냉장고 이름·공개 범위 변경 (주인만)")
 def update_fridge(
     payload: FridgeUpdate,
     access: FridgeAccess = Depends(require_owner),
     db: Session = Depends(get_db),
 ):
-    access.fridge.name = payload.name
+    if payload.name is not None:
+        access.fridge.name = payload.name
+    if payload.visibility is not None:
+        access.fridge.visibility = payload.visibility
     db.commit()
     return _fridge_out(db, access.fridge, access.member.role)
 
