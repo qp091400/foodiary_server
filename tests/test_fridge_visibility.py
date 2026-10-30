@@ -13,10 +13,11 @@ def world(client):
         tokens = signup(client, name)
         people[name] = {"headers": auth(tokens), "id": tokens["user"]["id"], "code": tokens["user"]["friend_code"], "tokens": tokens}
     owner, friend = people["owner"], people["friend"]
-    # owner와 friend는 친구
-    sent = client.post("/friends/requests", headers=friend["headers"], json={"code": owner["code"]}).json()
-    client.post(f"/friends/requests/{sent['request_id']}/accept", headers=owner["headers"])
     fridge_id = default_fridge_id(client, owner["tokens"])
+    # owner와 friend는 링크로 친구가 된다. 링크로 받은 보기 권한은 거둬서, 공개 범위만으로 보이는지 따로 시험한다.
+    link = client.post(f"/fridges/{fridge_id}/share-links", headers=owner["headers"], json={}).json()
+    assert client.post(f"/share-links/{link['token']}/join", headers=friend["headers"]).status_code == 200
+    assert client.delete(f"/fridges/{fridge_id}/access/{friend['id']}", headers=owner["headers"]).status_code == 204
     for item in (
         {"name": "서울우유 1L", "quantity": 2, "unit_price": 2980, "total_price": 5960, "barcode": "8801234567890", "memo": "비밀 메모", "expiry_date": "2099-01-05"},
         {"name": "두부", "expiry_date": "2099-01-01"},

@@ -1,46 +1,73 @@
-# 친구 · 남의 냉장고 보기 · 커뮤니티
+# 친구 · 냉장고 공유 · 변경 요청 · 커뮤니티
 
-로그인한 사용자끼리 친구를 맺고, 주인이 허락한 만큼 서로의 냉장고를 보고, 글을 써서 나누는 기능이다. 모든 경로는 로그인(Bearer 토큰)이 필요하다.
-1차는 친구, 냉장고 공개 범위, 글쓰기와 지우기이고, 2차는 글에 사진 붙이기, 좋아요, 댓글, 신고와 관리자 처리다.
+로그인한 사용자끼리 **링크로 친구를 맺고**, 주인이 준 권한만큼 서로의 냉장고를 보거나 고치고, 보기 권한만 있는 친구는 **변경 요청**을 보내고, 글을 써서 나누는 기능이다. 모든 경로는 로그인(Bearer 토큰)이 필요하다.
 
 ## 정한 것
 
-- 친구 찾기: **친구 코드(링크에 담아 공유)**, **닉네임**, 닉네임 검색에서 고른 사람. 이메일로는 찾지 않는다(그 이메일이 가입자인지 알려 주게 되므로).
-- 냉장고 공개 범위는 냉장고마다 주인이 고른다: `private`(나만, 기본값) / `friends`(친구들도) / `public`(모두).
-- 커뮤니티 글은 로그인한 모두에게 보인다.
-- 글은 쓴 사람이 지울 수 있고, **관리자는 누구 글이든 지울 수 있다**. 관리자는 `users.is_admin`이고 API로는 바꿀 수 없다.
+- **친구는 냉장고 공유 링크로만 맺는다.** 주인이 냉장고마다 링크를 만들어 보내면(시간표 공유처럼), 링크로 들어온 사람은 주인과 친구가 되고 그 냉장고의 권한을 받는다. 친구 코드나 닉네임으로 요청을 보내는 방식은 없앴다.
+- **친구 권한은 냉장고마다 둘이다.**
+  - `viewer`(기본): 보기만 하고, 주인에게 **변경 요청**을 보낼 수 있다.
+  - `editor`: 주인처럼 고칠 수 있다(품목 추가, 수정, 먹음, 버림). 냉장고 지우기, 공개 범위, 링크, 권한 관리는 주인만 한다.
+- **친구 코드는 한 번 받으면 바뀌지 않는다.** 닉네임은 겹쳐도 되고(가입할 때 직접 입력), 같은 닉네임은 친구 코드로 구별한다. 코드는 사람을 찾는 용도가 아니라 구별하는 이름표다.
+- 냉장고 공개 범위도 있다(`private` 나만 기본 / `friends` 친구들 모두 / `public` 모두). 링크로 받은 권한과 별개로 "누구에게나 보이게"를 하고 싶을 때 쓴다.
+- 커뮤니티 글은 로그인한 모두에게 보인다. 글은 쓴 사람이 지울 수 있고, **관리자는 누구 글이든 지울 수 있다**. 관리자는 `users.is_admin`이고 API로는 바꿀 수 없다.
 
-## 친구
+## 공유 링크와 친구
 
 | 경로 | 설명 |
 |---|---|
-| `GET /users/me` | 내 정보에 `friend_code`(8자)와 `is_admin`이 들어 있다. 링크는 앱이 코드를 담아 만든다 |
-| `POST /users/me/friend-code` | 친구 코드를 새로 만든다. 예전 코드와 링크는 못 쓴다 |
-| `GET /users/lookup?code=` | 코드가 누구 것인지(닉네임)와 나와의 관계. 링크를 눌렀을 때 "○○님에게 친구 요청?"을 보여 주는 용도 |
-| `GET /users/search?nickname=` | 닉네임 앞부분이 같은 사람 최대 20명(두 글자부터). 나와의 관계(`none` 아님, `friend` 친구, `requested` 내가 요청함, `incoming` 상대가 요청함)가 같이 온다 |
-| `POST /friends/requests` | 요청 보내기. 본문은 `{"code": ...}`, `{"nickname": ...}`, `{"user_id": ...}` 중 **하나만**. 같은 닉네임이 여러 명이면 409(검색해서 고른다) |
-| `GET /friends/requests?direction=incoming\|outgoing` | 받은 / 보낸 요청 |
-| `POST /friends/requests/{id}/accept` · `/decline` | 받은 요청 수락 / 거절 |
-| `DELETE /friends/requests/{id}` | 내가 보낸 요청 취소 |
-| `GET /friends` | 내 친구 목록 |
-| `DELETE /friends/{user_id}` | 친구 끊기 |
+| `POST /fridges/{id}/share-links` | 링크 만들기(주인만). 본문 `{"permission": "viewer"\|"editor", "expires_in_days": 7, "max_uses": null}`. 응답의 `token`으로 앱이 링크를 만든다. 서버에 `SHARE_LINK_BASE`를 설정해 두면 `url`도 온다 |
+| `GET /fridges/{id}/share-links` | 살아 있는 링크(주인만). 만료, 취소, 다 쓴 링크는 빠진다 |
+| `DELETE /fridges/{id}/share-links/{link_id}` | 링크 없애기. 이미 들어온 사람의 권한은 그대로다 |
+| `GET /share-links/{token}` | 링크를 눌렀을 때 "○○님의 냉장고 [이름]"과 받게 될 권한, 내가 이미 가진 권한을 보여 주는 미리 보기 |
+| `POST /share-links/{token}/join` | 링크로 들어오기: 주인과 친구가 되고 권한을 받는다 |
+| `GET /friends` | 내 친구 목록(닉네임, 친구 코드) |
+| `DELETE /friends/{user_id}` | 친구 끊기. 서로의 냉장고에서 받았던 권한이 모두 사라지고, 기다리던 변경 요청은 취소된다 |
 
-- 상대가 이미 나에게 요청해 둔 상태에서 내가 요청하면 바로 친구가 된다(`status: "friends"`).
-- 답을 못 받은 요청은 50개까지(`MAX_PENDING_REQUESTS`, TODO: balance). 넘으면 429.
-- 거절하거나 취소하면 기록이 지워져서 다시 보낼 수 있다.
+- 링크는 기본 7일(최대 90일) 동안 살아 있고, `max_uses`로 들어올 수 있는 사람 수를 정할 수 있다. 냉장고 하나에 살아 있는 링크는 20개까지(`MAX_ACTIVE_LINKS`, TODO: balance).
+- 권한은 **올라가기만 한다**: 보기 권한인 사람이 고치기 링크로 들어오면 고치기가 되지만, 고칠 수 있는 사람이 보기 링크를 눌러도 내려가지 않는다. 이미 그만큼의 권한이 있는 사람이 링크를 다시 눌러도 횟수가 늘지 않고, 다 쓴 링크도 열린다.
+- 내 링크로 내가 들어올 수는 없다(400). 링크가 없거나 만료되었으면 404.
+- 링크 주소 모양(웹 주소나 앱 딥링크)은 앱과 정해야 한다. 서버는 `token`만 알면 된다.
 
-## 남의 냉장고 보기 (읽기 전용)
+## 주인이 친구별 권한 관리
+
+| 경로 | 설명 |
+|---|---|
+| `GET /fridges/{id}/access` | 이 냉장고에 권한이 있는 사람과 `viewer`/`editor`(주인만) |
+| `PATCH /fridges/{id}/access/{user_id}` | 권한 바꾸기 `{"permission": "viewer"\|"editor"}` |
+| `DELETE /fridges/{id}/access/{user_id}` | 이 냉장고의 권한 거두기. 친구는 그대로다 |
+
+(예전 초대 코드 방식 `POST /fridges/{id}/invites`, `POST /fridges/join`은 그대로 있다. 코드로 들어온 사람은 `editor`와 같고 친구가 되지는 않는다.)
+
+## 변경 요청
+
+보기 권한이 있는 **친구**가 주인에게 보낸다. 주인이 승인하면 그때 냉장고에 반영되고, 거절하면 아무 일도 없다.
+
+| 경로 | 설명 |
+|---|---|
+| `POST /change-requests` | 요청 보내기. `kind`가 `add`면 `fridge_id`, `name`(선택: `quantity`, `category`, `storage`, `expiry_date`), `consume`(먹음)·`discard`(버림)이면 `fridge_id`, `item_id`(선택: `quantity`, 비우면 남은 양 전부). 모두 `note`(200자)를 붙일 수 있다 |
+| `GET /change-requests/sent?status=` | 내가 보낸 요청(최신순) |
+| `DELETE /change-requests/{id}` | 처리 전인 내 요청 취소 |
+| `GET /change-requests/received?status=&fridge_id=` | **내 냉장고들**에 들어온 요청(기본은 처리 전, 오래된 것부터) |
+| `POST /change-requests/{id}/approve` | 승인: 냉장고에 반영(주인만). 그 사이 품목이 없어졌거나 이미 다 먹었으면 400/404가 나고 요청은 처리 전으로 남는다 |
+| `POST /change-requests/{id}/decline` | 거절(주인만) |
+
+- 요청을 보낼 수 있는 사람: 그 냉장고를 볼 수 있고 **주인의 친구**인 `viewer`. 주인과 `editor`는 직접 고치면 되니 400, 친구가 아닌데 공개 냉장고를 보고 있는 사람은 403, 볼 수 없는 냉장고는 404다.
+- 반영된 기록에는 **요청한 사람**이 남는다(누가 먹었는지, 누가 넣었는지). 승인과 거절은 주인만 한다(`editor`도 못 한다).
+- 한 사람이 한 냉장고에 답을 못 받은 요청은 20개까지(`MAX_PENDING_PER_FRIDGE`, TODO: balance).
+- 푸시 알림은 아직 없다. 앱이 `GET /change-requests/received`로 주인에게 보여 준다.
+
+## 남의 냉장고 보기
 
 | 경로 | 설명 |
 |---|---|
 | `PATCH /fridges/{id}` | 본문에 `{"visibility": "private" \| "friends" \| "public"}`. 냉장고 주인만. `name`과 같이 또는 따로 보낸다 |
-| `GET /users/{user_id}/fridges` | 그 사람이 주인인 냉장고 중 **내가 볼 수 있는 것**과 남은 품목 수 |
-| `GET /users/{user_id}/fridges/{fridge_id}/items` | 그 냉장고의 남은 품목(소비기한이 빠른 순, 기본 200개) |
+| `GET /users/{user_id}/fridges` | 그 사람이 주인인 냉장고 중 **내가 볼 수 있는 것**, 남은 품목 수, 내 권한(`my_permission`), 변경 요청을 보낼 수 있는지(`can_request_changes`) |
+| `GET /users/{user_id}/fridges/{fridge_id}/items` | 그 냉장고의 남은 품목(소비기한이 빠른 순, 기본 200개). 변경 요청에 쓸 `id`가 들어 있다 |
 
-- 볼 수 있는 사람: 그 냉장고의 멤버(공유 냉장고) / `friends`이면 주인의 친구 / `public`이면 로그인한 모두.
+- 볼 수 있는 사람: 그 냉장고의 멤버(주인, `editor`) / 링크로 받은 `viewer` / `friends`이면 주인의 친구 / `public`이면 로그인한 모두.
 - 보이는 정보는 품목 이름, 분류, 보관 방법, 수량, 구매일, 소비기한, 남은 일수뿐이다. **가격, 메모, 바코드, 영수증, 누가 넣었는지는 숨긴다.** 먹거나 버린 품목도 안 보인다.
-- 볼 수 없으면 있는지 없는지도 알려 주지 않고 404를 준다. 친구를 끊으면 바로 닫힌다.
-- 이 경로로는 고치거나 지울 수 없다. 공유 냉장고(초대 코드로 같이 쓰는 것)와는 다른 기능이다.
+- 볼 수 없으면 있는지 없는지도 알려 주지 않고 404를 준다. 이 경로로는 고치거나 지울 수 없다(고치려면 `editor`가 되거나 변경 요청을 보낸다).
 
 ## 커뮤니티
 
@@ -103,11 +130,13 @@ python -m scripts.set_admin 이메일 --remove   # 빼기
 
 ## 배포할 때
 
-- DB가 바뀐다: `users`에 `friend_code`(이미 가입한 사람에게는 마이그레이션이 하나씩 만들어 준다), `is_admin`, `fridges`에 `visibility`(기본 `private`), 새 표 `friendships`, `posts`(마이그레이션 `0002`), `post_likes`, `comments`, `post_photos`, `reports`(`0003`). 새로 더해지기만 하고 지워지는 것은 없다. 마이그레이션은 배포 순서의 `migrate` 단계에서 `deploy`보다 먼저 돈다.
+- DB가 바뀐다: `users`에 `friend_code`(이미 가입한 사람에게는 마이그레이션이 하나씩 만들어 준다), `is_admin`, `fridges`에 `visibility`(기본 `private`), 새 표 `friendships`, `posts`(마이그레이션 `0002`), `post_likes`, `comments`, `post_photos`, `reports`(`0003`), `fridge_viewers`, `fridge_share_links`, `change_requests`(`0004`). 새 칸과 표만 더해진다. 단 `0004`는 답을 못 받은 예전 친구 요청(`friendships.status = 'pending'`)을 지운다(요청 방식을 없앴으므로). 마이그레이션은 배포 순서의 `migrate` 단계에서 `deploy`보다 먼저 돈다.
 - `friend_code`는 기본값 없이 필수라서, 마이그레이션 뒤에 **옛 버전의 서버로 되돌리면 새 가입이 실패한다**. 되돌릴 일이 생기면 `alembic downgrade 0001`을 먼저 한다. (`downgrade 0002`는 2차 표만 지운다. 올린 사진 파일은 `uploads/posts/`에 남으니 필요하면 따로 지운다.)
+- 예전 친구 요청 방식의 경로(`/friends/requests...`, `/users/search`, `/users/lookup`, `POST /users/me/friend-code`)는 없어졌다. 앱이 쓰고 있었다면 링크 방식으로 바꿔야 한다.
 - 로컬 개발 DB는 `AUTO_CREATE_TABLES`로 만들어져서 새 칸이 자동으로 안 생긴다. 한 번만: `alembic stamp 0001` 다음 `alembic upgrade head`.
 
 ## 아직 없는 것
 
+- 친구가 링크 말고 다른 방법(요청, 검색)으로 만나는 것. 변경 요청 푸시 알림. 친구를 모든 냉장고에 한꺼번에 권한 주기(지금은 냉장고마다 링크를 만든다).
 - **사용자 차단**(그 사람의 글과 댓글을 안 보기). 사용자가 글을 올리는 앱은 스토어 심사에서 신고, 차단, 이용약관을 요구받을 수 있어서(확인 필요) 앱을 공개하기 전에 차단과 약관은 준비해야 한다.
 - 신고가 쌓이면 자동으로 숨기기, 알림, 글 수정, 사진 썸네일.

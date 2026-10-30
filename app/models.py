@@ -183,7 +183,7 @@ class ProductCache(Base):
 
 
 class Friendship(Base):
-    """친구 요청과 친구 관계. 요청한 사람 → 받은 사람. accepted가 되면 서로 친구다."""
+    """친구 관계. 공유 링크로 들어오면 바로 accepted로 만들어진다. (예전 요청 방식의 pending은 이제 쓰지 않는다)"""
 
     __tablename__ = "friendships"
     __table_args__ = (UniqueConstraint("requester_id", "addressee_id", name="uq_friendships_pair"),)
@@ -263,6 +263,52 @@ class Report(Base):
     reason: Mapped[str] = mapped_column(String(20))  # spam / abuse / inappropriate / privacy / other
     detail: Mapped[str | None] = mapped_column(String(300))
     status: Mapped[str] = mapped_column(String(10), default="open")  # open / resolved(지움) / dismissed(문제없음)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    handled_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    handled_at: Mapped[datetime | None]
+
+
+class FridgeViewer(Base):
+    """냉장고를 볼 수만 있는 친구. 변경 요청은 보낼 수 있다. 고칠 수 있는 친구는 FridgeMember(role=member)다."""
+
+    __tablename__ = "fridge_viewers"
+
+    fridge_id: Mapped[int] = mapped_column(ForeignKey("fridges.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class FridgeShareLink(Base):
+    """냉장고 공유 링크. 링크로 들어온 사람은 주인과 친구가 되고, permission만큼의 권한을 받는다."""
+
+    __tablename__ = "fridge_share_links"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    fridge_id: Mapped[int] = mapped_column(ForeignKey("fridges.id", ondelete="CASCADE"), index=True)
+    token: Mapped[str] = mapped_column(String(32), unique=True)
+    permission: Mapped[str] = mapped_column(String(10))  # viewer(보기, 변경 요청) / editor(주인처럼 고치기)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    expires_at: Mapped[datetime]
+    max_uses: Mapped[int | None]  # 비우면 횟수 제한 없음
+    use_count: Mapped[int] = mapped_column(default=0)
+    revoked_at: Mapped[datetime | None]
+
+
+class ChangeRequest(Base):
+    """친구가 냉장고 주인에게 보내는 변경 요청. 주인이 승인하면 그때 냉장고에 반영된다."""
+
+    __tablename__ = "change_requests"
+    __table_args__ = (Index("ix_change_requests_fridge_id_status", "fridge_id", "status"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    fridge_id: Mapped[int] = mapped_column(ForeignKey("fridges.id", ondelete="CASCADE"))
+    requester_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(10))  # add(추가) / consume(먹음) / discard(버림)
+    item_id: Mapped[int | None] = mapped_column(ForeignKey("food_items.id", ondelete="SET NULL"))
+    item_name: Mapped[str | None] = mapped_column(String(200))  # 요청할 때의 이름. 품목이 나중에 없어져도 무엇이었는지 남는다
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # quantity, name, category, storage, expiry_date
+    note: Mapped[str | None] = mapped_column(String(200))
+    status: Mapped[str] = mapped_column(String(10), default="pending")  # pending / approved / declined / cancelled
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     handled_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     handled_at: Mapped[datetime | None]

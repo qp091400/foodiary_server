@@ -563,56 +563,70 @@ class MonthlyStats(BaseModel):
     top_discarded: list[DiscardedCategory]
 
 
-# ── 친구 · 남의 냉장고 · 커뮤니티 ────────────────────────────────────────
+# ── 친구 · 공유 링크 · 변경 요청 · 남의 냉장고 · 커뮤니티 ────────────────
 
-Relation = Literal["none", "friend", "requested", "incoming"]  # 나와의 관계: 아님 / 친구 / 내가 요청함 / 상대가 요청함
+Permission = Literal["viewer", "editor"]  # viewer: 보기 + 변경 요청만 / editor: 주인처럼 고치기
 
 
 class PublicUser(BaseModel):
-    """다른 사람에게 보여도 되는 정보. 이메일·아이디는 넣지 않는다."""
+    """다른 사람에게 보여도 되는 정보. 닉네임은 겹칠 수 있어서 바뀌지 않는 친구 코드로 구별한다. 이메일·아이디는 넣지 않는다."""
 
     id: int
     nickname: str
-
-
-class UserSearchOut(PublicUser):
-    relation: Relation
-
-
-class FriendCodeOut(BaseModel):
     friend_code: str
 
-
-class FriendTarget(BaseModel):
-    """친구 요청을 받을 사람. code(친구 코드·링크), nickname(정확히 같은 닉네임), user_id(검색 결과에서 고른 사람) 중 하나만."""
-
-    code: Annotated[str, StringConstraints(strip_whitespace=True, to_upper=True, min_length=1, max_length=16)] | None = None
-    nickname: Nickname | None = None
-    user_id: int | None = None
-
-    @model_validator(mode="after")
-    def _exactly_one(self):
-        if sum(value is not None for value in (self.code, self.nickname, self.user_id)) != 1:
-            raise ValueError("code, nickname, user_id 중 하나만 보내 주세요.")
-        return self
+    @classmethod
+    def of(cls, user) -> "PublicUser":
+        return cls(id=user.id, nickname=user.nickname, friend_code=user.friend_code)
 
 
 class FriendOut(BaseModel):
-    user_id: int
-    nickname: str
+    user: PublicUser
     since: UtcDatetime
 
 
-class FriendRequestOut(BaseModel):
+class ShareLinkCreate(BaseModel):
+    permission: Permission = "viewer"
+    expires_in_days: int = Field(7, ge=1, le=90, description="링크가 살아 있는 날 수")
+    max_uses: int | None = Field(None, ge=1, le=100, description="이 링크로 들어올 수 있는 사람 수. 비우면 제한 없음")
+
+
+class ShareLinkOut(BaseModel):
     id: int
-    user: PublicUser  # 상대방 (받은 요청이면 보낸 사람, 보낸 요청이면 받는 사람)
+    token: str
+    url: str | None  # 서버에 SHARE_LINK_BASE가 설정되어 있을 때만. 아니면 앱이 token으로 링크를 만든다
+    permission: Permission
     created_at: UtcDatetime
+    expires_at: UtcDatetime
+    max_uses: int | None
+    use_count: int
 
 
-class FriendRequestResult(BaseModel):
-    status: Literal["requested", "friends"]  # 상대가 먼저 요청해 둔 상태면 바로 친구가 된다
+class ShareLinkPreview(BaseModel):
+    """링크를 눌렀을 때 "○○님의 냉장고를 볼까요?"를 보여 주는 용도."""
+
+    owner: PublicUser
+    fridge_name: str
+    permission: Permission
+    my_permission: Literal["none", "viewer", "editor"]  # 이미 가진 권한
+
+
+class JoinResult(BaseModel):
+    owner: PublicUser
+    fridge_id: int
+    fridge_name: str
+    permission: Permission  # 지금 내가 가진 권한 (이미 더 높은 권한이 있으면 그대로)
+    newly_friends: bool
+
+
+class AccessOut(BaseModel):
     user: PublicUser
-    request_id: int | None = None
+    permission: Permission
+    since: UtcDatetime
+
+
+class AccessUpdate(BaseModel):
+    permission: Permission
 
 
 class SharedFridgeOut(BaseModel):
@@ -622,6 +636,61 @@ class SharedFridgeOut(BaseModel):
     name: str
     visibility: Visibility
     item_count: int
+    my_permission: Literal["owner", "editor", "viewer"]
+    can_request_changes: bool  # 친구인 viewer만 주인에게 변경 요청을 보낼 수 있다
+
+
+ChangeKind = Literal["add", "consume", "discard"]  # 추가 / 먹음 / 버림
+ChangeStatus = Literal["pending", "approved", "declined", "cancelled"]
+ChangeNote = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+
+
+class ChangeRequestCreate(BaseModel):
+    """주인에게 보내는 변경 요청. add는 name(과 선택으로 quantity, category, storage, expiry_date), consume·discard는 item_id(와 선택으로 quantity)."""
+
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    fridge_id: int
+    kind: ChangeKind
+    item_id: int | None = None
+    quantity: float | None = Field(None, gt=0, description="추가할 수량(기본 1) / 먹거나 버린 수량(비우면 남은 양 전부)")
+    name: ItemName | None = None
+    category: CategoryKey = None
+    storage: Storage | None = None
+    expiry_date: date | None = None
+    note: ChangeNote | None = None
+
+    @model_validator(mode="after")
+    def _fits_the_kind(self):
+        if self.kind == "add":
+            if self.name is None:
+                raise ValueError("추가 요청에는 name이 필요합니다.")
+            if self.item_id is not None:
+                raise ValueError("추가 요청에는 item_id를 보내지 않습니다.")
+        else:
+            if self.item_id is None:
+                raise ValueError(f"{self.kind} 요청에는 item_id가 필요합니다.")
+            if any(value is not None for value in (self.name, self.category, self.storage, self.expiry_date)):
+                raise ValueError("먹음·버림 요청에는 item_id와 quantity만 보냅니다.")
+        return self
+
+
+class ChangeRequestOut(BaseModel):
+    id: int
+    fridge_id: int
+    fridge_name: str
+    requester: PublicUser
+    kind: ChangeKind
+    item_id: int | None
+    item_name: str | None  # 요청할 때의 품목 이름 (add면 만들 품목 이름)
+    quantity: float | None
+    category: str | None
+    storage: str | None
+    expiry_date: date | None
+    note: str | None
+    status: ChangeStatus
+    created_at: UtcDatetime
+    handled_at: UtcDatetime | None
 
 
 class SharedItemOut(SizeFields):

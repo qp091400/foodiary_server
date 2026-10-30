@@ -70,7 +70,7 @@ def test_write_list_and_count_comments(client, users):
     assert created.status_code == 201
     body = created.json()
     assert (body["body"], body["post_id"], body["mine"], body["can_delete"]) == ("첫 댓글", post_id, True, True)
-    assert body["author"] == {"id": users["jiyeon"]["id"], "nickname": "jiyeon"}
+    assert (body["author"]["id"], body["author"]["nickname"]) == (users["jiyeon"]["id"], "jiyeon")
     comment(client, users["minsu"], post_id, "두 번째")
     listed = client.get(f"/posts/{post_id}/comments", headers=users["minsu"]["headers"]).json()
     assert [c["body"] for c in listed["comments"]] == ["첫 댓글", "두 번째"] and listed["next_after_id"] is None  # 오래된 것부터

@@ -94,7 +94,7 @@ def test_admin_sees_what_was_reported_oldest_first(client, users):
     assert [(r["target_type"], r["reason"]) for r in reports] == [("post", "spam"), ("post", "abuse"), ("comment", "abuse")]
     first = reports[0]
     assert first["detail"] == "광고예요" and first["status"] == "open" and first["open_reports_on_target"] == 2
-    assert first["reporter"] == {"id": users["jiyeon"]["id"], "nickname": "jiyeon"}
+    assert (first["reporter"]["id"], first["reporter"]["nickname"]) == (users["jiyeon"]["id"], "jiyeon")
     assert first["target"]["author"]["nickname"] == "minsu" and first["target"]["text"].startswith("광고글\n사세요") and len(first["target"]["text"]) <= 200
     assert first["target"]["deleted"] is False
     assert reports[2]["target"]["text"] == "나쁜 댓글" and reports[2]["target"]["post_id"] == post_id

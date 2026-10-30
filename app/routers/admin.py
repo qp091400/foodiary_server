@@ -27,7 +27,7 @@ def _target(db: Session, report: Report) -> ReportTargetOut | None:
         photos = db.scalar(select(func.count()).select_from(PostPhoto).where(PostPhoto.post_id == post.id))
         return ReportTargetOut(
             post_id=post.id,
-            author=PublicUser(id=author.id, nickname=author.nickname),
+            author=PublicUser.of(author),
             text=f"{post.title}\n{post.body}"[:EXCERPT],
             photo_count=photos,
             deleted=post.deleted_at is not None,
@@ -38,7 +38,7 @@ def _target(db: Session, report: Report) -> ReportTargetOut | None:
         return None
     return ReportTargetOut(
         post_id=comment.post_id,
-        author=PublicUser(id=author.id, nickname=author.nickname),
+        author=PublicUser.of(author),
         text=comment.body[:EXCERPT],
         photo_count=0,
         deleted=comment.deleted_at is not None,
@@ -60,7 +60,7 @@ def _out(db: Session, report: Report) -> AdminReportOut:
         detail=report.detail,
         status=report.status,
         created_at=report.created_at,
-        reporter=PublicUser(id=reporter.id, nickname=reporter.nickname),
+        reporter=PublicUser.of(reporter),
         open_reports_on_target=open_count,
         target=_target(db, report),
     )

@@ -2,31 +2,21 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import FRIDGE_NOT_FOUND, get_current_user
-from app.models import Fridge, FoodItem, User
+from app.models import FoodItem, Fridge, User
 from app.schemas import (
-    FriendCodeOut,
     PasswordChangeRequest,
     PasswordChangeResponse,
-    PublicUser,
     SharedFridgeOut,
     SharedItemOut,
     UserOut,
-    UserSearchOut,
     UserUpdate,
 )
-from app.security import (
-    create_access_token,
-    create_refresh_token,
-    generate_invite_code,
-    hash_password,
-    verify_password,
-)
-from app.services.friends import can_view_fridge, relations
+from app.security import create_access_token, create_refresh_token, hash_password, verify_password
+from app.services.friends import can_request_changes, fridge_permission
 
 router = APIRouter(prefix="/users", tags=["사용자"])
 
@@ -64,74 +54,44 @@ def change_password(
     )
 
 
-# ── 사람 찾기 · 친구 코드 ────────────────────────────────────────────────
+# ── 남의 냉장고 보기 ─────────────────────────────────────────────────────
 
 NO_SUCH_USER = "그런 사용자를 찾을 수 없어요."
 
 
-@router.get("/search", response_model=list[UserSearchOut], summary="닉네임으로 사람 찾기 (앞부분이 같은 사람, 최대 20명)")
-def search_users(
-    nickname: str = Query(min_length=2, max_length=20),
-    me: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    prefix = nickname.strip().lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    found = db.scalars(
-        select(User)
-        .where(func.lower(User.nickname).like(prefix + "%", escape="\\"), User.id != me.id)
-        .order_by(User.nickname, User.id)
-        .limit(20)
-    ).all()
-    related = relations(db, me.id, [user.id for user in found])
-    return [UserSearchOut(id=user.id, nickname=user.nickname, relation=related[user.id]) for user in found]
-
-
-@router.get("/lookup", response_model=UserSearchOut, summary="친구 코드로 사람 확인 (링크를 눌렀을 때 누구인지 보여 주려고)")
-def lookup_user(code: str = Query(min_length=1, max_length=16), me: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    user = db.scalar(select(User).where(User.friend_code == code.strip().upper()))
-    if user is None:
-        raise HTTPException(status_code=404, detail=NO_SUCH_USER)
-    relation = "none" if user.id == me.id else relations(db, me.id, [user.id])[user.id]
-    return UserSearchOut(id=user.id, nickname=user.nickname, relation=relation)
-
-
-@router.post("/me/friend-code", response_model=FriendCodeOut, summary="내 친구 코드를 새로 만들기 (예전 코드와 링크는 못 쓰게 된다)")
-def reset_friend_code(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    for _ in range(5):  # 코드가 겹치면 다시 뽑는다
-        user.friend_code = generate_invite_code()
-        try:
-            db.commit()
-        except IntegrityError:
-            db.rollback()
-            continue
-        return FriendCodeOut(friend_code=user.friend_code)
-    raise HTTPException(status_code=503, detail="친구 코드를 만들지 못했어요. 다시 시도해 주세요.")
-
-
-# ── 남의 냉장고 보기 (읽기 전용) ─────────────────────────────────────────
-
-
-def _visible_fridges(db: Session, me: User, owner_id: int) -> list[Fridge]:
-    owner = db.get(User, owner_id)
-    if owner is None:
+def _visible_fridges(db: Session, me: User, owner_id: int) -> list[tuple[Fridge, str]]:
+    """그 사람이 주인인 냉장고 중 내가 볼 수 있는 것과 거기서 내 권한(owner / editor / viewer)."""
+    if db.get(User, owner_id) is None:
         raise HTTPException(status_code=404, detail=NO_SUCH_USER)
     fridges = db.scalars(select(Fridge).where(Fridge.owner_id == owner_id).order_by(Fridge.id)).all()
-    return [fridge for fridge in fridges if can_view_fridge(db, me.id, fridge)]
+    seen = [(fridge, fridge_permission(db, me.id, fridge)) for fridge in fridges]
+    return [(fridge, permission) for fridge, permission in seen if permission is not None]
 
 
-@router.get("/{user_id}/fridges", response_model=list[SharedFridgeOut], summary="이 사람의 냉장고 중 내가 볼 수 있는 것")
+@router.get("/{user_id}/fridges", response_model=list[SharedFridgeOut], summary="이 사람의 냉장고 중 내가 볼 수 있는 것과 내 권한")
 def list_user_fridges(user_id: int, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    fridges = _visible_fridges(db, me, user_id)
-    counts = dict(
-        db.execute(
-            select(FoodItem.fridge_id, func.count())
-            .where(FoodItem.fridge_id.in_([fridge.id for fridge in fridges]), FoodItem.status == "active")
-            .group_by(FoodItem.fridge_id)
-        ).all()
-    ) if fridges else {}
+    visible = _visible_fridges(db, me, user_id)
+    counts = (
+        dict(
+            db.execute(
+                select(FoodItem.fridge_id, func.count())
+                .where(FoodItem.fridge_id.in_([fridge.id for fridge, _ in visible]), FoodItem.status == "active")
+                .group_by(FoodItem.fridge_id)
+            ).all()
+        )
+        if visible
+        else {}
+    )
     return [
-        SharedFridgeOut(id=fridge.id, name=fridge.name, visibility=fridge.visibility, item_count=counts.get(fridge.id, 0))
-        for fridge in fridges
+        SharedFridgeOut(
+            id=fridge.id,
+            name=fridge.name,
+            visibility=fridge.visibility,
+            item_count=counts.get(fridge.id, 0),
+            my_permission=permission,
+            can_request_changes=can_request_changes(db, me.id, fridge, permission),
+        )
+        for fridge, permission in visible
     ]
 
 
@@ -147,7 +107,7 @@ def list_user_fridge_items(
     me: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if fridge_id not in {fridge.id for fridge in _visible_fridges(db, me, user_id)}:
+    if fridge_id not in {fridge.id for fridge, _ in _visible_fridges(db, me, user_id)}:
         raise HTTPException(status_code=404, detail=FRIDGE_NOT_FOUND)  # 있는지 없는지도 알려 주지 않는다
     return db.scalars(
         select(FoodItem)
@@ -155,4 +115,3 @@ def list_user_fridge_items(
         .order_by(FoodItem.expiry_date.is_(None), FoodItem.expiry_date, FoodItem.name, FoodItem.id)
         .limit(limit)
     ).all()
-

@@ -64,7 +64,7 @@ def _decorate(db: Session, rows: list[tuple[Post, User]], me: User) -> list[Post
     return [
         PostOut(
             id=post.id,
-            author=PublicUser(id=author.id, nickname=author.nickname),
+            author=PublicUser.of(author),
             title=post.title,
             body=post.body,
             created_at=post.created_at,
@@ -252,7 +252,7 @@ def _comment_out(comment: Comment, author: User, me: User) -> CommentOut:
     return CommentOut(
         id=comment.id,
         post_id=comment.post_id,
-        author=PublicUser(id=author.id, nickname=author.nickname),
+        author=PublicUser.of(author),
         body=comment.body,
         created_at=comment.created_at,
         mine=comment.author_id == me.id,
