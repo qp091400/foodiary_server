@@ -68,6 +68,8 @@ class FridgeMember(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     role: Mapped[str] = mapped_column(String(10))  # owner / member
     joined_at: Mapped[datetime] = mapped_column(default=utcnow)
+    # 냉장고 묶음 공유로 받은 권한이면 True. 묶음이 바뀌면 다시 만들어진다. 주인이 이 냉장고에만 따로 준 권한은 False
+    derived: Mapped[bool] = mapped_column(default=False)
 
 
 class FridgeInvite(Base):
@@ -276,6 +278,17 @@ class FridgeViewer(Base):
     fridge_id: Mapped[int] = mapped_column(ForeignKey("fridges.id", ondelete="CASCADE"), primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    derived: Mapped[bool] = mapped_column(default=False)  # FridgeMember.derived와 같다
+
+
+class FridgeAccessBlock(Base):
+    """주인이 이 냉장고에 한해 이 친구의 권한을 '없음'으로 정해 둔 것. 묶음을 따라가는 권한도, 링크로 들어오는 것도 막는다."""
+
+    __tablename__ = "fridge_access_blocks"
+
+    fridge_id: Mapped[int] = mapped_column(ForeignKey("fridges.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
 class FridgeShareLink(Base):
@@ -312,4 +325,54 @@ class ChangeRequest(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     handled_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     handled_at: Mapped[datetime | None]
+
+
+class FridgeGroup(Base):
+    """냉장고 묶음(예: 집, 부모님 댁). 사람마다 자기 묶음을 만들고, 냉장고 하나는 여러 묶음에 들어갈 수 있다."""
+
+    __tablename__ = "fridge_groups"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(50))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class FridgeGroupItem(Base):
+    """묶음에 들어 있는 냉장고. 내가 볼 수 있는 냉장고면 남의 것도 넣을 수 있다 (목록 정리용)."""
+
+    __tablename__ = "fridge_group_items"
+
+    group_id: Mapped[int] = mapped_column(ForeignKey("fridge_groups.id", ondelete="CASCADE"), primary_key=True)
+    fridge_id: Mapped[int] = mapped_column(ForeignKey("fridges.id", ondelete="CASCADE"), primary_key=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class FridgeGroupShare(Base):
+    """묶음을 친구에게 공유한 것. 묶음 안에서 묶음 주인이 주인인 냉장고마다 permission만큼의 권한이 따라간다."""
+
+    __tablename__ = "fridge_group_shares"
+    __table_args__ = (UniqueConstraint("group_id", "user_id", name="uq_fridge_group_shares_group_user"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey("fridge_groups.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    permission: Mapped[str] = mapped_column(String(10))  # viewer / editor
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class FridgeGroupLink(Base):
+    """묶음 공유 링크. 들어온 사람은 묶음 주인과 친구가 되고 묶음이 공유된다."""
+
+    __tablename__ = "fridge_group_links"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey("fridge_groups.id", ondelete="CASCADE"), index=True)
+    token: Mapped[str] = mapped_column(String(32), unique=True)
+    permission: Mapped[str] = mapped_column(String(10))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    expires_at: Mapped[datetime]
+    max_uses: Mapped[int | None]
+    use_count: Mapped[int] = mapped_column(default=0)
+    revoked_at: Mapped[datetime | None]
 

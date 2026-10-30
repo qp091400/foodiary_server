@@ -25,7 +25,7 @@ from app.config import settings
 from app.database import get_db
 from app.deps import FridgeAccess, get_fridge_access
 from app.middleware import extra_ocr_request
-from app.models import FoodItem, Receipt, ReceiptItem
+from app.models import FoodItem, Fridge, Receipt, ReceiptItem
 from app.schemas import (
     BatchUploadResult,
     ConfirmItem,
@@ -41,6 +41,7 @@ from app.schemas import (
 from app.services import barcode as barcode_service
 from app.services.expiry import OTHER, classify, estimate
 from app.services.foodsafety import ProductInfo, lookup_barcode
+from app.services.friends import explicit_permission
 from app.services.ocr import OcrEngine, get_ocr_engine
 from app.services.ocr.base import OcrBox, OcrBusyError, next_ticket
 from app.services.ocr.paddle import Verdict
@@ -610,6 +611,17 @@ def confirm_receipt(
     if receipt.status != "pending":
         raise HTTPException(status_code=409, detail="이미 확정된 영수증입니다.")
 
+    # 품목마다 넣을 냉장고. 하나라도 못 넣는 곳이면 아무것도 만들지 않고 거절한다.
+    targets = {receipt.fridge_id}
+    for line in payload.items:
+        if line.include and line.fridge_id is not None and line.fridge_id not in targets:
+            permission = explicit_permission(db, access.user.id, line.fridge_id) if db.get(Fridge, line.fridge_id) else None
+            if permission is None:
+                raise HTTPException(status_code=404, detail="넣을 냉장고를 찾을 수 없어요.")
+            if permission == "viewer":
+                raise HTTPException(status_code=403, detail="보기만 할 수 있는 냉장고에는 넣을 수 없어요.")
+            targets.add(line.fridge_id)
+
     # 구매일: 요청 값 → 영수증에서 읽은 날짜 → 오늘
     purchased_on = payload.purchased_on or receipt.purchased_on or today()
     match_draft = _draft_matcher(receipt)
@@ -649,7 +661,7 @@ def confirm_receipt(
 
         total_price = line.amount - line.discount
         food = FoodItem(
-            fridge_id=receipt.fridge_id,
+            fridge_id=line.fridge_id or receipt.fridge_id,  # 영수증은 올린 냉장고에 남고, 품목은 고른 냉장고로 간다
             receipt_id=receipt.id,
             name=line.name,
             category=category,

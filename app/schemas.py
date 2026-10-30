@@ -249,6 +249,7 @@ class FridgeOut(BaseModel):
     member_count: int
     created_at: UtcDatetime
     visibility: Visibility
+    group_ids: list[int] = Field(default_factory=list, description="이 냉장고가 들어 있는 묶음 중 내가 볼 수 있는 것 (목록에서만 채워진다)")
 
 
 class MemberOut(BaseModel):
@@ -459,6 +460,7 @@ class ConfirmItem(BaseModel):
     storage: Storage | None = None
     expiry_date: date | None = None
     include: bool
+    fridge_id: int | None = Field(None, description="이 품목을 넣을 냉장고. 비우면 영수증을 올린 냉장고. 내가 주인이거나 고칠 수 있는 냉장고만 된다")
 
     @model_validator(mode="after")
     def _discount_within_amount(self) -> "ConfirmItem":
@@ -621,12 +623,13 @@ class JoinResult(BaseModel):
 
 class AccessOut(BaseModel):
     user: PublicUser
-    permission: Permission
+    permission: Literal["viewer", "editor", "none"]  # none: 주인이 이 냉장고에 한해 '없음'으로 정해 둔 사람
+    inherited: bool  # 냉장고 묶음 공유에서 따라온 권한이면 True (이 냉장고에 따로 정하면 그것이 우선한다)
     since: UtcDatetime
 
 
 class AccessUpdate(BaseModel):
-    permission: Permission
+    permission: Literal["viewer", "editor", "none"]
 
 
 class SharedFridgeOut(BaseModel):
@@ -812,3 +815,98 @@ class AdminReportOut(BaseModel):
 class ReportResolve(BaseModel):
     action: Literal["delete", "dismiss"]  # 대상을 지운다 / 문제없음으로 닫는다
 
+
+
+# ── 여러 냉장고를 합친 통계 ──────────────────────────────────────────────
+
+
+class FridgeLabel(BaseModel):
+    """통계 화면에서 냉장고를 알아보는 정보. 이름이 같은 냉장고가 있어서 주인도 같이 준다."""
+
+    fridge_id: int
+    fridge_name: str
+    owner: PublicUser
+
+
+class FridgeMonthlyStats(MonthlyStats, FridgeLabel):
+    pass
+
+
+class ExcludedFridge(FridgeLabel):
+    reason: Literal["view_only"] = Field("view_only", description="view_only: 보기만 할 수 있는 냉장고라 통계에서 뺐다")
+
+
+class OverviewMonthlyStats(MonthlyStats):
+    """합계는 MonthlyStats 그대로, 냉장고별 내역은 fridges."""
+
+    fridges: list[FridgeMonthlyStats]
+    excluded: list[ExcludedFridge]
+
+
+class FridgePurchaseSummary(FridgeLabel):
+    total_spent: int
+    groups: list[PurchaseGroup]
+
+
+class OverviewPurchaseSummary(PurchaseSummary):
+    fridges: list[FridgePurchaseSummary]
+    excluded: list[ExcludedFridge]
+
+
+# ── 냉장고 묶음 ──────────────────────────────────────────────────────────
+
+
+class FridgeGroupCreate(BaseModel):
+    name: FridgeName
+
+
+class FridgeGroupUpdate(BaseModel):
+    name: FridgeName
+
+
+class GroupFridgeOut(BaseModel):
+    """묶음 안의 냉장고 한 줄. 내가 볼 수 있는 냉장고만 나온다."""
+
+    id: int
+    name: str
+    owner: PublicUser
+    my_permission: Literal["owner", "editor", "viewer"]
+
+
+class GroupShareOut(BaseModel):
+    user: PublicUser
+    permission: Permission
+    since: UtcDatetime
+
+
+class GroupShareUpdate(BaseModel):
+    permission: Permission
+
+
+class FridgeGroupOut(BaseModel):
+    id: int
+    name: str
+    owner: PublicUser
+    mine: bool
+    my_share: Permission | None = Field(None, description="친구가 나에게 공유한 묶음이면 내가 받은 권한. 내 묶음이면 비어 있다")
+    fridges: list[GroupFridgeOut]
+    shares: list[GroupShareOut] = Field(description="이 묶음을 공유받은 친구들. 내 묶음일 때만 채워진다")
+    created_at: UtcDatetime
+
+
+class GroupLinkPreview(BaseModel):
+    """묶음 링크를 눌렀을 때 "○○님의 '집' 묶음을 받을까요?"를 보여 주는 용도."""
+
+    owner: PublicUser
+    group_name: str
+    permission: Permission
+    my_share: Literal["none", "viewer", "editor"]  # 이미 받은 묶음 권한
+    fridge_count: int = Field(description="이 링크로 권한을 받게 되는 냉장고 수 (묶음 주인이 주인인 냉장고)")
+
+
+class GroupJoinResult(BaseModel):
+    owner: PublicUser
+    group_id: int
+    group_name: str
+    permission: Permission  # 지금 내가 가진 묶음 권한 (이미 더 높은 권한이 있으면 그대로)
+    newly_friends: bool

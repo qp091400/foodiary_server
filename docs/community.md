@@ -1,4 +1,4 @@
-# 친구 · 냉장고 공유 · 변경 요청 · 커뮤니티
+# 친구 · 냉장고 공유 · 여러 냉장고와 묶음 · 변경 요청 · 커뮤니티
 
 로그인한 사용자끼리 **링크로 친구를 맺고**, 주인이 준 권한만큼 서로의 냉장고를 보거나 고치고, 보기 권한만 있는 친구는 **변경 요청**을 보내고, 글을 써서 나누는 기능이다. 모든 경로는 로그인(Bearer 토큰)이 필요하다.
 
@@ -10,6 +10,7 @@
   - `editor`: 주인처럼 고칠 수 있다(품목 추가, 수정, 먹음, 버림). 냉장고 지우기, 공개 범위, 링크, 권한 관리는 주인만 한다.
 - **친구 코드는 한 번 받으면 바뀌지 않는다.** 닉네임은 겹쳐도 되고(가입할 때 직접 입력), 같은 닉네임은 친구 코드로 구별한다. 코드는 사람을 찾는 용도가 아니라 구별하는 이름표다.
 - 냉장고 공개 범위도 있다(`private` 나만 기본 / `friends` 친구들 모두 / `public` 모두). 링크로 받은 권한과 별개로 "누구에게나 보이게"를 하고 싶을 때 쓴다.
+- **한 사람이 냉장고를 여러 개(10개까지, `MAX_FRIDGES_PER_USER`, TODO: balance) 만들 수 있고**, 냉장고마다 이름, 공개 범위, 친구별 권한(보기 / 고치기 / 없음)을 따로 정한다. 왼쪽 냉장고는 친구가 고치게 하고 오른쪽은 보기만 되게 하는 식이다. 아래 "여러 냉장고"와 "냉장고 묶음"을 본다.
 - 커뮤니티 글은 로그인한 모두에게 보인다. 글은 쓴 사람이 지울 수 있고, **관리자는 누구 글이든 지울 수 있다**. 관리자는 `users.is_admin`이고 API로는 바꿀 수 없다.
 
 ## 공유 링크와 친구
@@ -33,11 +34,62 @@
 
 | 경로 | 설명 |
 |---|---|
-| `GET /fridges/{id}/access` | 이 냉장고에 권한이 있는 사람과 `viewer`/`editor`(주인만) |
-| `PATCH /fridges/{id}/access/{user_id}` | 권한 바꾸기 `{"permission": "viewer"\|"editor"}` |
-| `DELETE /fridges/{id}/access/{user_id}` | 이 냉장고의 권한 거두기. 친구는 그대로다 |
+| `GET /fridges/{id}/access` | 이 냉장고에 권한이 있는 사람과 `viewer`/`editor`/`none`, 묶음에서 따라온 권한인지(`inherited`)(주인만) |
+| `PATCH /fridges/{id}/access/{user_id}` | **친구 목록에서 바로** 권한 정하기 `{"permission": "viewer"\|"editor"\|"none"}`. 링크 없이, 냉장고마다 따로. 친구이거나 이미 이 냉장고에 권한(또는 `none`)이 있는 사람에게만(아니면 404) |
+| `DELETE /fridges/{id}/access/{user_id}` | 이 냉장고에 **따로 정한** 권한(또는 `none`)을 지운다. 묶음에서 따라오는 권한이 있으면 그것에 맡긴다. 친구는 그대로다. 지울 게 없으면 404, 묶음에서 따라온 권한뿐이면 409(막으려면 `none`으로 바꾼다) |
+
+- **`none`(없음)**: 이 냉장고에 한해 이 친구에게 아무것도 안 준다. 공개 범위가 `friends`나 `public`이어도 **그 친구에게만** 이 냉장고가 안 보이고, 링크와 초대 코드로도 다시 들어올 수 없다(403). 한 냉장고만 한 친구에게 숨길 때 쓴다. 친구를 끊으면 `none` 표시도 사라진다.
 
 (예전 초대 코드 방식 `POST /fridges/{id}/invites`, `POST /fridges/join`은 그대로 있다. 코드로 들어온 사람은 `editor`와 같고 친구가 되지는 않는다.)
+
+## 여러 냉장고
+
+- `POST /fridges`로 냉장고를 더 만든다(이름만 정하면 된다). 한 사람이 **주인인** 냉장고를 10개까지 만들 수 있고, 남의 냉장고에 들어가 있는 것은 세지 않는다(넘으면 409). 지우면 다시 만들 수 있다.
+- `GET /fridges`는 내가 주인이거나 고칠 수 있는 냉장고 목록이다. 각 줄의 `group_ids`는 그 냉장고가 들어 있는 묶음(내 묶음, 나에게 공유된 묶음)의 번호다.
+- **영수증 품목을 냉장고별로 나눠 넣기**: `POST /fridges/{id}/receipts/{receipt_id}/confirm`의 품목 줄마다 `fridge_id`를 줄 수 있다. 비우면 사진을 올린 냉장고에 들어간다. 넣을 수 있는 곳은 **내가 주인이거나 고칠 수 있는 냉장고**이고, 보기만 되는 냉장고는 403, 없거나 권한이 없는 냉장고는 404다. 하나라도 어긋나면 아무것도 만들지 않고 영수증은 `pending`으로 남아 다시 확정할 수 있다. 영수증 자체와 영수증 수, 냉장고에 넣지 않은 줄의 금액은 올린 냉장고에 남고, 식품 지출과 구매 기록은 **품목이 들어간 냉장고**를 따른다.
+
+## 냉장고 묶음
+
+냉장고를 묶는 분류다(예: 집, 부모님 댁). 사람마다 자기 묶음을 10개까지(`MAX_GROUPS_PER_USER`, TODO: balance) 만들고, **냉장고 하나가 여러 묶음에 들어갈 수 있다.** 묶음에는 내가 볼 수 있는 냉장고면 남의 것(보기만 되는 것)도 정리용으로 넣을 수 있다. 한 묶음에는 50개까지(`MAX_FRIDGES_PER_GROUP`, TODO: balance).
+
+| 경로 | 설명 |
+|---|---|
+| `GET /fridge-groups` | 내 묶음과 친구가 나에게 공유한 묶음(공유받은 묶음은 보기만 된다: `mine=false`, `my_share`). `fridges`에는 **내가 볼 수 있는 냉장고만** 나온다 |
+| `POST /fridge-groups` | 만들기 `{"name": "집"}` |
+| `GET /fridge-groups/{id}` · `PATCH` · `DELETE` | 보기 / 이름 바꾸기 / 지우기(주인만. 냉장고는 그대로). 공유받은 묶음을 고치려 하면 403 |
+| `PUT /fridge-groups/{id}/fridges/{fridge_id}` | 냉장고 넣기(이미 있어도 괜찮다). 볼 수 없는 냉장고는 404 |
+| `DELETE /fridge-groups/{id}/fridges/{fridge_id}` | 빼기(냉장고는 그대로) |
+
+### 묶음을 친구에게 공유
+
+묶음을 공유하면 **그 묶음 안에서 내가 주인인 냉장고**마다 친구에게 `viewer`(보기) 또는 `editor`(고치기) 권한이 한꺼번에 따라간다. 남이 주인인 냉장고는 내가 권한을 줄 수 없으니 아무것도 따라가지 않는다.
+
+| 경로 | 설명 |
+|---|---|
+| `PUT /fridge-groups/{id}/shares/{user_id}` | 친구에게 공유하기 / 권한 바꾸기 `{"permission": "viewer"\|"editor"}`. 친구가 아니면 404 |
+| `DELETE /fridge-groups/{id}/shares/{user_id}` | 공유 끊기: 묶음 때문에 받았던 권한만 거둔다(따로 준 권한과 친구는 그대로) |
+| `POST /fridge-groups/{id}/links` · `GET` · `DELETE .../links/{link_id}` | 묶음 링크 만들기 / 살아 있는 링크 / 없애기(주인만). 본문과 규칙은 냉장고 링크와 같다(기본 7일, `max_uses`, 20개까지) |
+| `GET /group-links/{token}` | 링크 미리 보기: 누구의 어떤 묶음인지, 받게 될 권한, 받게 될 냉장고 수 |
+| `POST /group-links/{token}/join` | 링크로 들어오기: 주인과 친구가 되고 묶음이 공유된다 |
+
+- **권한은 묶음을 따라간다**: 나중에 묶음에 넣은 냉장고도 따라가고, 뺀 냉장고와 지운 묶음, 끊은 공유, 끊은 친구의 권한은 거둬진다.
+- **냉장고에 따로 정한 것이 이긴다**: 그 냉장고에 손으로 정한 권한(보기든 고치기든)은 묶음이 바뀌어도 그대로다. `none`은 묶음도 막는다. 같은 냉장고가 공유된 묶음 둘에 있으면 높은 권한을 받는다.
+- 묶음에서 따라온 권한은 `GET /fridges/{id}/access`에서 `inherited: true`로 보이고, 친구는 같은 이름의 묶음을 읽기 전용으로 본다.
+- 링크로 묶음 권한은 올라가기만 한다(낮추지 않는다). 내 묶음 링크로 내가 들어올 수는 없다(400).
+- `SHARE_LINK_BASE`가 있으면 묶음 링크의 `url`은 `{SHARE_LINK_BASE}group/{token}`이다(냉장고 링크 `{SHARE_LINK_BASE}{token}`과 겹치지 않게). 없으면 앱이 `token`으로 만든다.
+
+## 합쳐 보는 통계
+
+| 경로 | 설명 |
+|---|---|
+| `GET /stats/monthly?year=&month=&fridge_ids=&group_ids=` | 여러 냉장고를 합친 월별 통계 |
+| `GET /stats/purchases/summary?start=&end=&group_by=&fridge_ids=&group_ids=` | 여러 냉장고를 합친 구매 집계 |
+
+- `fridge_ids`와 `group_ids`는 여러 번 보낼 수 있고 섞어도 된다(`?fridge_ids=1&fridge_ids=3&group_ids=2`). 합집합이고 겹쳐도 한 번만 센다. 한 번에 각각 50개까지(넘으면 422).
+- **둘 다 비우면 전체**: 내가 주인이거나 고칠 수 있는 냉장고 전부.
+- 응답은 기존 단일 냉장고 응답(`MonthlyStats`, `PurchaseSummary`)에 합계가 그대로 들어 있고, `fridges`에 **냉장고별 내역**(냉장고 이름과 주인 포함)이 더해진다. `waste_rate`는 합친 금액으로 다시 계산한다.
+- **가격이 보이는 냉장고만 센다**: 보기만 되는 냉장고는 통계에서 빼고 `excluded`(`reason: view_only`)로 알려 준다. 묶음에는 들어 있어도 된다. 내가 볼 수 없는 냉장고나 묶음을 고르면 404(있는지도 알려 주지 않는다).
+- 냉장고 하나만 보는 `GET /fridges/{id}/stats/monthly`와 `.../purchases/summary`는 그대로다.
 
 ## 변경 요청
 
@@ -130,13 +182,13 @@ python -m scripts.set_admin 이메일 --remove   # 빼기
 
 ## 배포할 때
 
-- DB가 바뀐다: `users`에 `friend_code`(이미 가입한 사람에게는 마이그레이션이 하나씩 만들어 준다), `is_admin`, `fridges`에 `visibility`(기본 `private`), 새 표 `friendships`, `posts`(마이그레이션 `0002`), `post_likes`, `comments`, `post_photos`, `reports`(`0003`), `fridge_viewers`, `fridge_share_links`, `change_requests`(`0004`). 새 칸과 표만 더해진다. 단 `0004`는 답을 못 받은 예전 친구 요청(`friendships.status = 'pending'`)을 지운다(요청 방식을 없앴으므로). 마이그레이션은 배포 순서의 `migrate` 단계에서 `deploy`보다 먼저 돈다.
+- DB가 바뀐다: `users`에 `friend_code`(이미 가입한 사람에게는 마이그레이션이 하나씩 만들어 준다), `is_admin`, `fridges`에 `visibility`(기본 `private`), 새 표 `friendships`, `posts`(마이그레이션 `0002`), `post_likes`, `comments`, `post_photos`, `reports`(`0003`), `fridge_viewers`, `fridge_share_links`, `change_requests`(`0004`), `fridge_access_blocks`, `fridge_groups`, `fridge_group_items`, `fridge_group_shares`, `fridge_group_links`와 `fridge_members`·`fridge_viewers`의 `derived` 칸(`0005`). 새 칸과 표만 더해진다. 단 `0004`는 답을 못 받은 예전 친구 요청(`friendships.status = 'pending'`)을 지운다(요청 방식을 없앴으므로). 마이그레이션은 배포 순서의 `migrate` 단계에서 `deploy`보다 먼저 돈다.
 - `friend_code`는 기본값 없이 필수라서, 마이그레이션 뒤에 **옛 버전의 서버로 되돌리면 새 가입이 실패한다**. 되돌릴 일이 생기면 `alembic downgrade 0001`을 먼저 한다. (`downgrade 0002`는 2차 표만 지운다. 올린 사진 파일은 `uploads/posts/`에 남으니 필요하면 따로 지운다.)
 - 예전 친구 요청 방식의 경로(`/friends/requests...`, `/users/search`, `/users/lookup`, `POST /users/me/friend-code`)는 없어졌다. 앱이 쓰고 있었다면 링크 방식으로 바꿔야 한다.
 - 로컬 개발 DB는 `AUTO_CREATE_TABLES`로 만들어져서 새 칸이 자동으로 안 생긴다. 한 번만: `alembic stamp 0001` 다음 `alembic upgrade head`.
 
 ## 아직 없는 것
 
-- 친구가 링크 말고 다른 방법(요청, 검색)으로 만나는 것. 변경 요청 푸시 알림. 친구를 모든 냉장고에 한꺼번에 권한 주기(지금은 냉장고마다 링크를 만든다).
+- 친구가 링크 말고 다른 방법(요청, 검색)으로 만나는 것. 변경 요청 푸시 알림. 구매 기록 목록(`GET /fridges/{id}/purchases`)을 여러 냉장고에 걸쳐 보기(집계만 된다).
 - **사용자 차단**(그 사람의 글과 댓글을 안 보기). 사용자가 글을 올리는 앱은 스토어 심사에서 신고, 차단, 이용약관을 요구받을 수 있어서(확인 필요) 앱을 공개하기 전에 차단과 약관은 준비해야 한다.
 - 신고가 쌓이면 자동으로 숨기기, 알림, 글 수정, 사진 썸네일.

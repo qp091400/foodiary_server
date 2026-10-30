@@ -223,7 +223,7 @@ def test_removing_access_keeps_the_friendship(client, people):
     assert client.get(f"/users/{alice['id']}/fridges", headers=bob["headers"]).json() == []
     assert [f["user"]["id"] for f in client.get("/friends", headers=bob["headers"]).json()] == [alice["id"]]  # 친구는 그대로
     assert client.delete(url, headers=alice["headers"]).status_code == 404
-    assert client.patch(url, headers=alice["headers"], json={"permission": "editor"}).status_code == 404
+    assert client.patch(url, headers=alice["headers"], json={"permission": "editor"}).status_code == 200  # 친구라서 목록에서 바로 줄 수 있다 (링크 없이)
     assert client.delete(f"/fridges/{alice['fridge_id']}/access/{alice['id']}", headers=alice["headers"]).status_code == 404  # 주인 자신은 대상이 아니다
 
 

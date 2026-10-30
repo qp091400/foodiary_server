@@ -35,13 +35,29 @@ def _period(start: date | None, end: date | None) -> tuple[date | None, date | N
     return start, end
 
 
-def _purchases_query(fridge_id: int, start: date | None, end: date | None):
-    query = select(FoodItem).where(FoodItem.fridge_id == fridge_id)
+def purchases_query(fridge_ids: list[int], start: date | None, end: date | None):
+    query = select(FoodItem).where(FoodItem.fridge_id.in_(fridge_ids))
     if start:
         query = query.where(FoodItem.purchased_on >= start)
     if end:
         query = query.where(FoodItem.purchased_on <= end)
     return query
+
+
+def summarize_purchases(items: list[FoodItem], group_by: Literal["item", "category"]) -> tuple[list[PurchaseGroup], int]:
+    """산 식품을 이름이나 분류로 묶어 지출이 큰 순서로. (묶음 목록, 총 지출)"""
+    groups: dict[str, PurchaseGroup] = {}
+    for item in items:
+        if group_by == "category":
+            key, name = item.category, label_of(item.category)
+        else:  # "서울우유 1L"와 "서울 우유 1l"를 같은 것으로 묶는다
+            key, name = re.sub(r"\s+", "", item.name).lower(), item.name
+        group = groups.setdefault(key, PurchaseGroup(key=key, name=name, count=0, quantity=0, total_spent=0))
+        group.count += 1
+        group.quantity += item.quantity
+        group.total_spent += item.total_price or 0
+    ordered = sorted(groups.values(), key=lambda group: (-group.total_spent, -group.count, group.name))
+    return ordered, sum(group.total_spent for group in ordered)
 
 
 @router.get("/purchases", response_model=list[PurchaseOut], summary="산 식품 목록 (구매일 내림차순)")
@@ -55,7 +71,7 @@ def list_purchases(
 ):
     start, end = _period(start, end)
     query = (
-        _purchases_query(access.fridge.id, start, end)
+        purchases_query([access.fridge.id], start, end)
         .add_columns(Receipt.store_name)
         .outerjoin(Receipt, Receipt.id == FoodItem.receipt_id)
     )
@@ -91,28 +107,9 @@ def purchase_summary(
     db: Session = Depends(get_db),
 ):
     start, end = _period(start, end)
-    items = db.scalars(
-        _purchases_query(access.fridge.id, start, end).order_by(FoodItem.purchased_on.desc(), FoodItem.id.desc())
-    ).all()
-
-    groups: dict[str, PurchaseGroup] = {}
-    for item in items:
-        if group_by == "category":
-            key, name = item.category, label_of(item.category)
-        else:  # "서울우유 1L"와 "서울 우유 1l"를 같은 것으로 묶는다
-            key, name = re.sub(r"\s+", "", item.name).lower(), item.name
-        group = groups.setdefault(key, PurchaseGroup(key=key, name=name, count=0, quantity=0, total_spent=0))
-        group.count += 1
-        group.quantity += item.quantity
-        group.total_spent += item.total_price or 0
-    ordered = sorted(groups.values(), key=lambda group: (-group.total_spent, -group.count, group.name))
-    return PurchaseSummary(
-        start=start,
-        end=end,
-        group_by=group_by,
-        total_spent=sum(group.total_spent for group in ordered),
-        groups=ordered,
-    )
+    items = db.scalars(purchases_query([access.fridge.id], start, end).order_by(FoodItem.purchased_on.desc(), FoodItem.id.desc())).all()
+    groups, total_spent = summarize_purchases(items, group_by)
+    return PurchaseSummary(start=start, end=end, group_by=group_by, total_spent=total_spent, groups=groups)
 
 
 @router.get("/stats/monthly", response_model=MonthlyStats, summary="월별 지출·낭비 통계")
@@ -123,14 +120,17 @@ def monthly_stats(
     db: Session = Depends(get_db),
 ):
     now = today()
-    year, month = year or now.year, month or now.month
+    return month_stats(db, [access.fridge.id], year or now.year, month or now.month)
+
+
+def month_stats(db: Session, fridge_ids: list[int], year: int, month: int) -> MonthlyStats:
+    """냉장고 여럿을 합친 한 달 통계. 냉장고 하나면 그 냉장고의 통계."""
     start, end = month_bounds(year, month)
-    fridge_id = access.fridge.id
 
     # 식품 지출: 그 달에 산 식품의 실결제액
     spent_rows = db.execute(
         select(FoodItem.category, func.count(), func.coalesce(func.sum(FoodItem.total_price), 0))
-        .where(FoodItem.fridge_id == fridge_id, FoodItem.purchased_on.between(start, end))
+        .where(FoodItem.fridge_id.in_(fridge_ids), FoodItem.purchased_on.between(start, end))
         .group_by(FoodItem.category)
     ).all()
     spent_by_category = sorted(
@@ -143,7 +143,7 @@ def monthly_stats(
 
     # 비식품 지출: 확정된 영수증에서 냉장고에 넣지 않은 줄
     confirmed_in_month = (
-        Receipt.fridge_id == fridge_id,
+        Receipt.fridge_id.in_(fridge_ids),
         Receipt.status == "confirmed",
         Receipt.purchased_on.between(start, end),
     )
@@ -163,7 +163,7 @@ def monthly_stats(
             func.coalesce(func.sum(ConsumptionLog.quantity), 0),
             func.count(),
         )
-        .where(ConsumptionLog.fridge_id == fridge_id, ConsumptionLog.logged_on.between(start, end))
+        .where(ConsumptionLog.fridge_id.in_(fridge_ids), ConsumptionLog.logged_on.between(start, end))
         .group_by(ConsumptionLog.action, ConsumptionLog.category)
     ).all()
     consumed_value = sum(int(value) for action, _, value, _, _ in log_rows if action == "consume")

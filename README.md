@@ -272,6 +272,9 @@ curl "$API/fridges/$FRIDGE/items/expiring?days=3" -H "Authorization: Bearer $TOK
 ```bash
 curl "$API/fridges/$FRIDGE/stats/monthly?year=2026&month=10" -H "Authorization: Bearer $TOKEN"
 curl "$API/fridges/$FRIDGE/purchases/summary?group_by=item" -H "Authorization: Bearer $TOKEN"   # 우유: 3번, 4개, 8,940원
+
+# 여러 냉장고를 합쳐서 (fridge_ids·group_ids를 모두 비우면 내가 주인이거나 고칠 수 있는 냉장고 전부). 합계 + 냉장고별 내역
+curl "$API/stats/monthly?year=2026&month=10&fridge_ids=1&fridge_ids=3&group_ids=2" -H "Authorization: Bearer $TOKEN"
 ```
 
 ### 냉장고 공유
@@ -329,6 +332,8 @@ http://openapi.foodsafetykorea.go.kr/api/{KEY}/C005/json/1/5/BAR_CD=880123456789
 ## 친구 · 남의 냉장고 보기 · 커뮤니티
 
 친구 추가(친구 코드·링크, 닉네임), 냉장고마다 공개 범위(나만 / 친구들도 / 모두), 커뮤니티 글쓰기와 지우기(쓴 사람, 관리자)가 있습니다. 경로, 규칙, 관리자 만드는 법, 배포할 때 주의할 점은 [docs/community.md](docs/community.md)에 있습니다.
+
+한 사람이 냉장고를 10개까지 만들고, 냉장고마다 친구별 권한(보기 / 고치기 / 없음)을 따로 정하고, 영수증 품목을 냉장고별로 나눠 넣고, 냉장고를 **묶음**(예: 집, 부모님 댁)으로 묶어 통계에서 골라 보거나 친구에게 한꺼번에 공유할 수 있습니다. 같은 문서의 "여러 냉장고", "냉장고 묶음", "합쳐 보는 통계"에 있습니다.
 
 ## 9. 향후 확장 (이번 범위 아님)
 

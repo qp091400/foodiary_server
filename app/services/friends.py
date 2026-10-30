@@ -10,7 +10,16 @@
 from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.orm import Session
 
-from app.models import ChangeRequest, Fridge, FridgeMember, FridgeViewer, Friendship
+from app.models import (
+    ChangeRequest,
+    Fridge,
+    FridgeAccessBlock,
+    FridgeGroup,
+    FridgeGroupShare,
+    FridgeMember,
+    FridgeViewer,
+    Friendship,
+)
 from app.timeutil import utcnow
 
 
@@ -53,10 +62,13 @@ def explicit_permission(db: Session, user_id: int, fridge_id: int) -> str | None
 
 
 def fridge_permission(db: Session, viewer_id: int, fridge: Fridge) -> str | None:
-    """이 냉장고에서 내 권한. 직접 받은 권한이 없으면 주인이 정한 공개 범위(friends 친구들도 / public 모두)가 보기 권한을 준다."""
+    """이 냉장고에서 내 권한. 직접 받은 권한이 없으면 주인이 정한 공개 범위(friends 친구들도 / public 모두)가 보기 권한을 준다.
+    주인이 나를 이 냉장고에 '없음'으로 정해 두었으면 공개 범위와 상관없이 아무것도 못 한다."""
     granted = explicit_permission(db, viewer_id, fridge.id)
     if granted is not None:
         return granted
+    if db.get(FridgeAccessBlock, (fridge.id, viewer_id)) is not None:
+        return None
     if fridge.visibility == "public":
         return "viewer"
     if fridge.visibility == "friends" and are_friends(db, viewer_id, fridge.owner_id):
@@ -73,6 +85,12 @@ def _revoke(db: Session, owner_id: int, user_id: int) -> None:
     """owner의 냉장고에서 user가 받은 권한(보기, 고치기)을 모두 거두고, 보내 둔 변경 요청은 취소한다."""
     fridge_ids = select(Fridge.id).where(Fridge.owner_id == owner_id)
     db.execute(delete(FridgeViewer).where(FridgeViewer.user_id == user_id, FridgeViewer.fridge_id.in_(fridge_ids)))
+    db.execute(delete(FridgeAccessBlock).where(FridgeAccessBlock.user_id == user_id, FridgeAccessBlock.fridge_id.in_(fridge_ids)))
+    db.execute(
+        delete(FridgeGroupShare).where(
+            FridgeGroupShare.user_id == user_id, FridgeGroupShare.group_id.in_(select(FridgeGroup.id).where(FridgeGroup.owner_id == owner_id))
+        )
+    )
     db.execute(
         delete(FridgeMember).where(
             FridgeMember.user_id == user_id, FridgeMember.role == "member", FridgeMember.fridge_id.in_(fridge_ids)

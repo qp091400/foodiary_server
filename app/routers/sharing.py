@@ -11,9 +11,10 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.deps import FridgeAccess, get_current_user, require_owner
-from app.models import Fridge, FridgeMember, FridgeShareLink, FridgeViewer, User
+from app.models import Fridge, FridgeAccessBlock, FridgeMember, FridgeShareLink, FridgeViewer, User
 from app.schemas import AccessOut, AccessUpdate, JoinResult, PublicUser, ShareLinkCreate, ShareLinkOut, ShareLinkPreview
-from app.services.friends import explicit_permission, make_friends
+from app.services.access import is_blocked, reset_permission, set_permission
+from app.services.friends import are_friends, explicit_permission, make_friends
 from app.timeutil import utcnow
 
 router = APIRouter(tags=["공유 링크"])
@@ -114,6 +115,8 @@ def join_link(token: str, me: User = Depends(get_current_user), db: Session = De
     link, fridge, owner, current = _find(db, token, me)
     if owner.id == me.id:
         raise HTTPException(status_code=400, detail="내 냉장고의 링크예요.")
+    if is_blocked(db, fridge.id, me.id):
+        raise HTTPException(status_code=403, detail="이 냉장고는 주인이 접근을 막아 두었어요.")
     newly_friends = make_friends(db, owner.id, me.id)
     granted = current
     if link.permission == "editor":
@@ -132,60 +135,70 @@ def join_link(token: str, me: User = Depends(get_current_user), db: Session = De
     return JoinResult(owner=PublicUser.of(owner), fridge_id=fridge.id, fridge_name=fridge.name, permission=granted, newly_friends=newly_friends)
 
 
-# ── 주인: 누가 어떤 권한을 가졌는지 ──────────────────────────────────────
-
-
-@router.get("/fridges/{fridge_id}/access", response_model=list[AccessOut], summary="이 냉장고에 권한이 있는 사람들 (주인만)")
-def list_access(access: FridgeAccess = Depends(require_owner), db: Session = Depends(get_db)):
-    fridge_id = access.fridge.id
-    editors = db.execute(
-        select(User, FridgeMember.joined_at).join(FridgeMember, FridgeMember.user_id == User.id).where(FridgeMember.fridge_id == fridge_id, FridgeMember.role == "member")
-    ).all()
-    viewers = db.execute(
-        select(User, FridgeViewer.created_at).join(FridgeViewer, FridgeViewer.user_id == User.id).where(FridgeViewer.fridge_id == fridge_id)
-    ).all()
-    entries = [AccessOut(user=PublicUser.of(user), permission="editor", since=since) for user, since in editors] + [
-        AccessOut(user=PublicUser.of(user), permission="viewer", since=since) for user, since in viewers
-    ]
-    return sorted(entries, key=lambda entry: (entry.since, entry.user.id))
-
-
-def _holder(db: Session, fridge_id: int, user_id: int) -> str:
-    current = explicit_permission(db, user_id, fridge_id)
-    if current not in ("editor", "viewer"):  # 주인이거나 권한이 없다
-        raise HTTPException(status_code=404, detail="이 냉장고에 권한이 있는 사람이 아니에요.")
-    return current
-
-
-@router.patch("/fridges/{fridge_id}/access/{user_id}", response_model=AccessOut, summary="권한 바꾸기: viewer(보기+변경 요청) / editor(주인처럼 고치기) (주인만)")
-def change_access(user_id: int, payload: AccessUpdate, access: FridgeAccess = Depends(require_owner), db: Session = Depends(get_db)):
-    fridge_id = access.fridge.id
-    current = _holder(db, fridge_id, user_id)
-    if current != payload.permission:
-        if payload.permission == "editor":
-            db.delete(db.get(FridgeViewer, (fridge_id, user_id)))
-            db.add(FridgeMember(fridge_id=fridge_id, user_id=user_id, role="member"))
-        else:
-            db.delete(db.scalar(select(FridgeMember).where(FridgeMember.fridge_id == fridge_id, FridgeMember.user_id == user_id)))
-            db.add(FridgeViewer(fridge_id=fridge_id, user_id=user_id))
-        db.commit()
-    return AccessOut(
-        user=PublicUser.of(db.get(User, user_id)), permission=payload.permission, since=_since(db, fridge_id, user_id, payload.permission)
-    )
+# ── 주인: 친구별 권한 ───────────────────────────────────────────────────
 
 
 def _since(db: Session, fridge_id: int, user_id: int, permission: str):
     if permission == "editor":
         return db.scalar(select(FridgeMember.joined_at).where(FridgeMember.fridge_id == fridge_id, FridgeMember.user_id == user_id))
-    return db.scalar(select(FridgeViewer.created_at).where(FridgeViewer.fridge_id == fridge_id, FridgeViewer.user_id == user_id))
+    if permission == "viewer":
+        return db.scalar(select(FridgeViewer.created_at).where(FridgeViewer.fridge_id == fridge_id, FridgeViewer.user_id == user_id))
+    return db.scalar(select(FridgeAccessBlock.created_at).where(FridgeAccessBlock.fridge_id == fridge_id, FridgeAccessBlock.user_id == user_id))
 
 
-@router.delete("/fridges/{fridge_id}/access/{user_id}", status_code=204, summary="이 냉장고의 권한 거두기 (친구는 그대로) (주인만)")
-def remove_access(user_id: int, access: FridgeAccess = Depends(require_owner), db: Session = Depends(get_db)):
+def _entry(db: Session, fridge_id: int, user: User, permission: str) -> AccessOut:
+    inherited = False
+    if permission == "editor":
+        inherited = bool(db.scalar(select(FridgeMember.derived).where(FridgeMember.fridge_id == fridge_id, FridgeMember.user_id == user.id)))
+    elif permission == "viewer":
+        inherited = bool(db.scalar(select(FridgeViewer.derived).where(FridgeViewer.fridge_id == fridge_id, FridgeViewer.user_id == user.id)))
+    return AccessOut(user=PublicUser.of(user), permission=permission, inherited=inherited, since=_since(db, fridge_id, user.id, permission))
+
+
+@router.get("/fridges/{fridge_id}/access", response_model=list[AccessOut], summary="이 냉장고에서 친구별 권한 (보기, 고치기, 없음) (주인만)")
+def list_access(access: FridgeAccess = Depends(require_owner), db: Session = Depends(get_db)):
     fridge_id = access.fridge.id
-    if _holder(db, fridge_id, user_id) == "editor":
-        db.delete(db.scalar(select(FridgeMember).where(FridgeMember.fridge_id == fridge_id, FridgeMember.user_id == user_id)))
-    else:
-        db.delete(db.get(FridgeViewer, (fridge_id, user_id)))
+    entries = []
+    for permission, model, since in (
+        ("editor", FridgeMember, FridgeMember.joined_at),
+        ("viewer", FridgeViewer, FridgeViewer.created_at),
+        ("none", FridgeAccessBlock, FridgeAccessBlock.created_at),
+    ):
+        query = select(User.id).join(model, model.user_id == User.id).where(model.fridge_id == fridge_id)
+        if model is FridgeMember:
+            query = query.where(FridgeMember.role == "member")
+        for user_id in db.scalars(query).all():
+            entries.append(_entry(db, fridge_id, db.get(User, user_id), permission))
+    return sorted(entries, key=lambda entry: (entry.since, entry.user.id))
+
+
+def _target(db: Session, fridge: Fridge, user_id: int) -> User:
+    """권한을 정할 수 있는 사람: 주인의 친구, 또는 이미 이 냉장고에 권한이 있거나 '없음'으로 정해 둔 사람. 주인 자신은 안 된다."""
+    user = db.get(User, user_id) if user_id != fridge.owner_id else None
+    known = user is not None and (
+        are_friends(db, fridge.owner_id, user.id) or explicit_permission(db, user.id, fridge.id) is not None or is_blocked(db, fridge.id, user.id)
+    )
+    if not known:
+        raise HTTPException(status_code=404, detail="친구가 아니에요. 친구가 아닌 사람에게는 공유 링크로 권한을 줘요.")
+    return user
+
+
+@router.patch("/fridges/{fridge_id}/access/{user_id}", response_model=AccessOut, summary="이 냉장고에서 이 친구의 권한 정하기: viewer(보기+변경 요청) / editor(주인처럼 고치기) / none(없음) (주인만)")
+def change_access(user_id: int, payload: AccessUpdate, access: FridgeAccess = Depends(require_owner), db: Session = Depends(get_db)):
+    user = _target(db, access.fridge, user_id)
+    set_permission(db, access.fridge, user.id, payload.permission)
+    db.commit()
+    return _entry(db, access.fridge.id, user, payload.permission)
+
+
+@router.delete("/fridges/{fridge_id}/access/{user_id}", status_code=204, summary="이 냉장고에 따로 정한 권한 지우기 (묶음에서 따라오는 권한이 있으면 그것에 맡긴다. 친구는 그대로) (주인만)")
+def remove_access(user_id: int, access: FridgeAccess = Depends(require_owner), db: Session = Depends(get_db)):
+    user = _target(db, access.fridge, user_id)
+    if not reset_permission(db, access.fridge, user.id):
+        if explicit_permission(db, user.id, access.fridge.id):  # 묶음에서 따라온 권한만 있다
+            raise HTTPException(
+                status_code=409, detail="이 냉장고에 따로 정한 권한이 없어요. 묶음에서 따라온 권한이라면 '없음'으로 바꿔서 막을 수 있어요."
+            )
+        raise HTTPException(status_code=404, detail="이 냉장고에 권한이 있는 사람이 아니에요.")
     db.commit()
     return Response(status_code=204)

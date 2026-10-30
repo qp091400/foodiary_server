@@ -23,11 +23,14 @@ from app.schemas import (
     MemberOut,
 )
 from app.security import generate_invite_code
+from app.services.access import is_blocked
+from app.services.groups import groups_by_fridge
 from app.timeutil import utcnow
 
 router = APIRouter(prefix="/fridges", tags=["냉장고"])
 
 INVITE_TTL = timedelta(days=7)
+MAX_FRIDGES_PER_USER = 10  # TODO: balance. 내가 주인인 냉장고 수 (남의 냉장고에 멤버로 들어간 것은 세지 않는다)
 
 
 def _member_count(db: Session, fridge_id: int) -> int:
@@ -60,6 +63,7 @@ def list_fridges(user: User = Depends(get_current_user), db: Session = Depends(g
         .where(FridgeMember.user_id == user.id)
         .order_by(Fridge.id)
     ).all()
+    groups = groups_by_fridge(db, user.id, [fridge.id for fridge, _, _ in rows])
     return [
         FridgeOut(
             id=fridge.id,
@@ -69,6 +73,7 @@ def list_fridges(user: User = Depends(get_current_user), db: Session = Depends(g
             member_count=member_count,
             created_at=fridge.created_at,
             visibility=fridge.visibility,
+            group_ids=groups.get(fridge.id, []),
         )
         for fridge, role, member_count in rows
     ]
@@ -76,6 +81,12 @@ def list_fridges(user: User = Depends(get_current_user), db: Session = Depends(g
 
 @router.post("", response_model=FridgeOut, status_code=201, summary="새 냉장고 만들기")
 def create_fridge(payload: FridgeCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    owned = db.scalar(select(func.count()).select_from(Fridge).where(Fridge.owner_id == user.id))
+    if owned >= MAX_FRIDGES_PER_USER:
+        raise HTTPException(
+            status_code=409,
+            detail=f"냉장고는 {MAX_FRIDGES_PER_USER}개까지 만들 수 있어요. 안 쓰는 냉장고를 지운 뒤에 만들어 주세요.",
+        )
     fridge = Fridge(name=payload.name, owner_id=user.id)
     db.add(fridge)
     db.flush()
@@ -91,6 +102,8 @@ def join_fridge(payload: JoinRequest, user: User = Depends(get_current_user), db
     if fridge is None:
         raise HTTPException(status_code=404, detail="초대코드가 올바르지 않거나 만료되었습니다.")
 
+    if is_blocked(db, fridge.id, user.id):
+        raise HTTPException(status_code=403, detail="이 냉장고는 주인이 접근을 막아 두었어요.")
     already = "이미 참여 중인 냉장고입니다."
     if db.scalar(
         select(FridgeMember.id).where(FridgeMember.fridge_id == fridge.id, FridgeMember.user_id == user.id)
