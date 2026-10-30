@@ -53,11 +53,23 @@ def _close(seen: str, word: str) -> bool:
     return (slot == 0 and frozenset((x, y)) in _TENSE_PAIRS) or (slot == 2 and 0 in (x, y))
 
 
+def _one_syllable_off(seen: str, word: str) -> bool:
+    """글자 수가 같고 한 글자만 다르다. 그 글자도 초성·중성·종성 중 하나는 같아야 한다. ("코카율라" → "코카콜라": 받침 ㄹ)"""
+    wrong = [(x, y) for x, y in zip(seen, word) if x != y]
+    return len(wrong) == 1 and any(a == b for a, b in zip(_jamo(wrong[0][0]), _jamo(wrong[0][1])))
+
+
 def _fix_run(run: str) -> str:
     if any(word in run for word in _KNOWN):
         return run
     # 고친 결과로 비교한다: "칠성사이디"는 "칠성사이다"로도 "사이다"로도 같은 결과가 된다.
-    fixed = {run[: -len(word)] + word for word in _TARGETS if len(word) <= len(run) and _close(run[-len(word):], word)}
+    # 네 글자 이상 낱말은 나머지 글자가 모두 맞으면 한 글자가 통째로 달라도(자모 둘 이상) 고친다. 우연히 맞을 가능성이 낮다.
+    fixed = {
+        run[: -len(word)] + word
+        for word in _TARGETS
+        if len(word) <= len(run)
+        and (_close(run[-len(word):], word) or (len(word) >= 4 and _one_syllable_off(run[-len(word):], word)))
+    }
     return fixed.pop() if len(fixed) == 1 else run
 
 

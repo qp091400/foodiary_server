@@ -134,13 +134,11 @@ def test_production_ocr_failure_is_503_and_leaves_no_receipt_or_file(client, mon
 
 def test_engine_rejects_parallel_inference():
     pytest.importorskip("numpy")
-    engine = PaddleOcrEngine("korean")
-    engine._predict_lock.acquire()
-    try:
-        with pytest.raises(OcrBusyError):
-            engine.recognize("not-opened.jpg")
-    finally:
-        engine._predict_lock.release()
+    engine = PaddleOcrEngine("korean", engines=1)
+    engine._workers[0].busy = True  # 하나뿐인 엔진이 다른 사진을 읽는 중
+    with pytest.raises(OcrBusyError):
+        engine.recognize("not-opened.jpg")
+    assert engine.waiting == 0  # 거절된 사진은 줄에 서지 않는다
 
 
 @pytest.mark.parametrize("quantity", ["1e309", '"NaN"', '"Infinity"'])

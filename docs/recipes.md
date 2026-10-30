@@ -218,6 +218,7 @@ docker compose up --build -d
 
 이 자동 초기화는 개발용 `development` 타깃과 `docker-compose.yml`에 적용한다.
 운영·Cloud Run 타깃에는 적용하지 않는다. 운영은 영속 마운트와 권한을 별도로 구성해야 한다.
+Cloud Run 이미지는 자동 초기화 없이, 같은 `recipe_data/image-seed/`의 검증된 DB를 빌드 때 읽기 전용으로 넣는다 ([deploy/CLOUD_RUN.md](../deploy/CLOUD_RUN.md)의 "레시피 데이터 준비").
 이미지를 공유할 때도 데이터 출처의 이용 조건에 따라 비공개로 보관한다.
 고정 버전과 다른 자료가 볼륨에 있어도 이미지 자료로 백업 후 교체하므로,
 로컬에서 재수집한 DB를 유지하려면 해당 DB를 고정 배포 데이터로 갱신하거나 별도 실행 환경을 사용한다.

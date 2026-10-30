@@ -17,6 +17,12 @@
 !/scripts/**
 !/deploy/
 !/deploy/**
+# 레시피 DB(준비된 것만): Cloud Run 이미지에 들어간다. 다른 sqlite와 ZIP은 올리지 않는다.
+!/recipe-package.json
+!/recipe_data/
+!/recipe_data/image-seed/
+!/recipe_data/image-seed/recipes.sqlite3
+!/recipe_data/image-seed/manifest.json
 
 .git/
 .venv/

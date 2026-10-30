@@ -18,6 +18,8 @@ from app.services.name_fix import fix_name
         ("청정원고기전용삼장 170g", "청정원고기전용쌈장 170g"),
         ("깨잎 1봉", "깻잎 1봉"),
         ("코라 1.5L", "콜라 1.5L"),
+        # 네 글자 이상 낱말은 한 글자만 통째로 달라도 (실제 영수증: 코카콜라 → 코카율라)
+        ("코카율라(L)", "코카콜라(L)"),
     ],
 )
 def test_fixes_one_jamo_misreads(raw, expected):
@@ -36,6 +38,8 @@ def test_fixes_one_jamo_misreads(raw, expected):
         "소서지",  # 소시지·소세지 둘 다 가능 → 그대로
         "치즈와퍼",  # 고칠 후보가 없다
         "콜라 500ml",
+        "코카율랑",  # 두 글자가 다르면 그대로
+        "코카율",  # 낱말 전체가 아니면 그대로
         "",
     ],
 )

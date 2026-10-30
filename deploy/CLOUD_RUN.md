@@ -5,7 +5,7 @@
 
 ## 구성과 비용
 
-- Cloud Run: CPU 2개, RAM 8GiB, 워커 1개, 최소 인스턴스 0, 서비스/리비전 최대 1, 동시 HTTP 요청 4.
+- Cloud Run: CPU 8개와 RAM 8GiB에 OCR 엔진 2개(엔진마다 스레드 4개, 모델 하나, 메모리 1~2GB)로 사진 2장을 동시에 읽는다. 엔진 4개(스레드 2개씩)를 먼저 올려 봤더니 5장은 31초 → 20.8초로 줄었지만 사진 한 장을 읽는 시간이 6초 → 11초로 늘었다(같은 조건 로컬 측정: 한 장 3.2초 → 5.0초, 5장은 거의 같음). 그래서 2 × 4로 바꿨다. 엔진 하나가 CPU를 다 쓰지 못해서(CPU 2개 장당 2.3초 → 4개 1.5초 → 8개 1.2초, 내 PC) 엔진을 여러 개 두는 쪽이 8개를 제대로 쓴다. Cloud Run 실측(CPU 4개, 엔진 1개): 5장 31~33초. 새 설정의 시간은 배포 후 측정. 워커 1개, 최소 인스턴스 0, 서비스/리비전 최대 1, 동시 HTTP 요청 20(OCR은 한 번에 한 장이고 나머지는 줄을 서서 기다리므로, 기다리는 요청이 로그인·목록 같은 가벼운 요청을 막지 않게 넉넉히 둔다).
 - 과금: 요청 기반. 유휴 상태를 위해 최소 인스턴스를 유지하지 않는다. 첫 요청에는 모델 초기화 지연이 있다.
 - 기본 리전: 도쿄 `asia-northeast1`. Tier 1 요금과 한국에서의 거리를 고려한 초기값이다. 서울을 원하면 `init --region asia-northeast3`로 지정하고 해당 리전 요금을 다시 계산한다.
 - OCR: 기존 PaddleOCR CPU 모델. 모델 파일 9개를 이미지 빌드 때 검증·포함하고 런타임에는 로컬 경로로 읽는다. 영수증을 Gemini API에 보내지 않는다.
@@ -83,6 +83,25 @@ SSL 옵션이 없으면 `sslmode=verify-full&sslrootcert=system`을 사용한다
 python3 scripts/cloudrun.py --config deploy/cloudrun.config.example.json plan
 ```
 
+### 레시피 데이터 준비 (빌드 전에 처음 한 번)
+
+레시피 추천 DB(약 830MB)는 Git에 없고, `build`가 Cloud Run 이미지 안에 읽기 전용으로 넣는다(`RECIPE_DATA_DIR=/opt/recipe-data`). 준비돼 있지 않으면 `build`가 업로드 전에 멈춘다. Cloud Shell에서 둘 중 하나로 `~/foodiary-cloudrun/recipe_data/image-seed/`를 만든다:
+
+```sh
+# A. 공유받은 ZIP(약 160MB)을 Cloud Shell 업로드 메뉴로 올렸을 때
+python3 -m scripts.prepare_recipes --package ~/Foodiary-recipes-20261029-v4.zip
+
+# B. 비공개 저장소에서 직접 받을 때 (GitHub 계정에 접근 권한 필요)
+gh auth login
+python3 -m scripts.prepare_recipes
+```
+
+- `python3 -m scripts.start_with_recipes`는 `prepare_recipes`의 옛 이름이다.
+- 준비된 폴더는 다음 소스 업로드(`tar -xzf`) 때 그대로 남는다. 레시피 버전을 바꿀 때만(`recipe-package.json`) 다시 준비한다.
+- 이미지는 `recipe-package.json`에 적힌 해시와 맞는 DB가 아니면 빌드에서 실패한다.
+- ZIP과 DB는 Git·압축본(`package_release.py`)에 들어가지 않는다. 업로드는 `.gcloudignore`가 준비된 DB와 manifest만 통과시킨다.
+- 이미지가 800MB쯤 커져서 빌드 업로드와 첫 시작이 느려질 수 있다. Cloud Run에서의 시간은 아직 측정하지 않았다.
+
 ## 3. 리소스 생성과 비공개 배포
 
 이 단계부터 실제 리소스와 비용이 발생할 수 있다. 크레딧 적용·예산 알림·`plan`의 프로젝트를 먼저 확인한다.
@@ -138,8 +157,8 @@ python3 scripts/cloudrun.py publish
 새 코드를 배포할 때와 함께 하려면 `build → migrate`를 먼저 실행한다. `secrets`를 다시 실행해도 테스트 비밀번호는 유지된다.
 이 페이지는 아무것도 저장하지 않고, 틀린 비밀번호를 포함한 모든 요청이 영수증 업로드와 같은 분당 한도를 함께 쓴다.
 
-Cloud Run에서는 전달 IP 헤더를 신뢰하지 않으며 초기 요청 제한은 **인스턴스 전체** 인증 30회/분·영수증 업로드 10회/분이다.
-여러 사용자가 한도를 공유하고 재시작하면 카운터가 초기화된다. OCR 추론은 1개만 실행하고 충돌 시 503/Retry-After를 반환한다.
+Cloud Run에서는 전달 IP 헤더를 신뢰하지 않으며 초기 요청 제한은 **인스턴스 전체** 인증 30회/분·영수증 업로드 30회/분(사진 한 장이 한 번)이다.
+여러 사용자가 한도를 공유하고 재시작하면 카운터가 초기화된다. OCR 엔진은 2개이고 엔진마다 전용 스레드가 하나다. 동시에 온 사진은 요청(사람) 번호 순서로 엔진에 배정한다(한 사람의 사진을 먼저 읽고, 엔진이 남으면 다음 사람 것도 읽는다). 줄에 선 사진이 `OCR_QUEUE_MAX`를 넘거나 기다리다 `OCR_QUEUE_WAIT_SECONDS`가 지나면 503/Retry-After를 반환한다. 엔진의 모델은 서버가 켜질 때 하나씩 올라오므로(로컬 측정: 1개 4.3초, 2개 약 6초, 4개 8.2초) 첫 시작이 그만큼 늦어진다.
 초기 소규모 시험용 보호다. 다중 인스턴스나 실제 사용자를 늘리기 전에는 공유 요청 제한과 트래픽 보호를 설계한다.
 주기적인 `/ready` 외부 감시는 Neon의 절전을 방해할 수 있으므로 무료 한도 시험 중에는 상시 폴링하지 않는다.
 

@@ -10,6 +10,7 @@ from app.services.ocr.base import OcrBox
 from app.services.receipt_parser import (
     estimate_skew,
     find_purchase_date,
+    find_store_name,
     find_total,
     group_lines,
     normalize_line,
@@ -230,6 +231,10 @@ def test_normalize_line(raw, expected):
         ("두부 1,500", ("두부", 1.0, 1500, 1500, 0)),  # 숫자 1개 → 금액
         ("두부 1,500원", ("두부", 1.0, 1500, 1500, 0)),
         ("두부 2.980", ("두부", 1.0, 2980, 2980, 0)),  # OCR이 쉼표를 마침표로 읽은 경우
+        # (단가, 수량, 할인, 금액) 칸이 있는 영수증. 할인 칸의 0이 단가가 되면 안 된다 (실제 영수증: 단가 0원으로 나왔다)
+        ("[세트1더블누름버거 14,900 1 0 14,900", ("[세트1더블누름버거", 1.0, 14900, 14900, 0)),
+        ("우유 2,980 2 100 5,860", ("우유", 2.0, 2980, 5860, 0)),
+        ("우유 2,980 1 0 14,900", ("우유 2,980", 1.0, None, 14900, 0)),  # 맞아떨어지지 않으면 예전 규칙. 모르는 단가는 0이 아니라 None
     ],
 )
 def test_number_assignment(line, expected):
@@ -246,6 +251,15 @@ def test_name_then_numbers_on_next_line():
     # 상품코드가 상품명 앞에 찍힌 한 줄형
     (item,) = _items("8801114123456 풀무원 두부 1,500 2 3,000")
     assert (item.name, item.barcode, item.amount) == ("풀무원 두부", "8801114123456", 3000)
+
+
+def test_store_line_with_a_business_number_is_found_even_below_photo_background_text():
+    # 실제 영수증: 사진 배경의 키보드 글자가 위 다섯 줄을 채워도 "가게/사업자번호/대표자" 줄이 가게 이름이다
+    lines = ["ㅈㅉ", "Shift", "E", "ㄷC", "[영수 증]", "문번호]0012", "F", "카츠바이명세준/2230796812/김동준", "평기 성남시 수정구"]
+    assert find_store_name(lines) == "카츠바이명세준"
+    assert find_store_name(["이마트 성수점 / 123-45-67890 / 홍길동"]) == "이마트 성수점"
+    assert find_store_name(["Shift", "E", "ㄷC"]) is None  # 이름이 없으면 그대로 없다
+    assert find_store_name(["9번 / 2230796812"]) is None  # 한글 이름이 둘 이상이어야 한다
 
 
 def test_discount_rules():

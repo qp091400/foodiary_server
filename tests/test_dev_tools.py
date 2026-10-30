@@ -7,6 +7,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.main import app
 from app.models import Receipt
+from app.routers.receipts import MAX_BATCH_FILES
 from app.services.ocr import get_ocr_engine
 from app.services.ocr.base import OcrBusyError
 from tests.helpers import FakeOcrEngine, image_bytes, make_boxes
@@ -142,7 +143,8 @@ def test_dev_batch_is_closed_like_the_single_page(client):
 
 
 def test_dev_batch_limits_and_busy_ocr(client, dev_tools):
-    assert post_many(client, count=6).status_code == 400
+    assert post_many(client, count=MAX_BATCH_FILES + 1).status_code == 400
+    assert post_many(client, count=6).status_code == 200  # 예전 5장 제한은 없어졌다
 
     class BusyOnSecond:
         def __init__(self):

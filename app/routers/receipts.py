@@ -4,8 +4,11 @@ import io
 import json
 import logging
 import math
+import time
 import uuid
+from collections import deque
 from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -39,7 +42,7 @@ from app.services import barcode as barcode_service
 from app.services.expiry import OTHER, classify, estimate
 from app.services.foodsafety import ProductInfo, lookup_barcode
 from app.services.ocr import OcrEngine, get_ocr_engine
-from app.services.ocr.base import OcrBox, OcrBusyError
+from app.services.ocr.base import OcrBox, OcrBusyError, next_ticket
 from app.services.ocr.paddle import Verdict
 from app.services.receipt_parser import ParsedReceipt, parse_receipt
 from app.timeutil import today, utcnow
@@ -57,8 +60,11 @@ WARN_NO_TOTAL = "영수증 총액을 찾지 못했어요. 빠진 품목이 없�
 WARN_NAME_CUT = "상품 이름이 화면에서 잘려 있어요. 이름을 확인해 주세요"
 OCR_BUSY = "다른 영수증을 분석 중입니다. 잠시 후 다시 시도해 주세요."
 TOO_MANY_REQUESTS = "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."
-# 사진 여러 장 업로드 한 번에 받는 최대 장수. 장마다 OCR 몇 초가 걸리고 Cloud Run 요청 제한 시간은 180초다.
-MAX_BATCH_FILES = 5  # TODO: balance
+BATCH_TIME_UP = "사진이 많아 정해진 시간 안에 읽지 못했어요. 이 사진부터 다시 올려 주세요."
+BATCH_RETRY_SECONDS = 5
+# 사진 여러 장 업로드 한 번에 받는 최대 장수. 장수 때문에 막히지는 않게 넉넉하게 두고(요청 시간은 batch_seconds가 지킨다),
+# 앱이 사진을 나눠서 보내면 더 많이도 올릴 수 있다. 이 수는 한 요청이 메모리와 시간을 무한정 쓰지 못하게 하는 안전장치다.
+MAX_BATCH_FILES = 50  # TODO: balance
 # 합계가 맞지 않아도 세로 사진에서 이만큼 품목을 읽었으면 사진 방향은 맞다고 본다
 UPRIGHT_MIN_ITEMS = 3  # TODO: balance
 
@@ -165,18 +171,25 @@ def judge_reading(parsed: ParsedReceipt, *, landscape: bool) -> Verdict:
     return Verdict.DOUBTFUL
 
 
-def read_receipt(ocr: OcrEngine, image_path: str, *, landscape: bool) -> list[OcrBox]:
+def read_receipt(
+    ocr: OcrEngine, image_path: str, *, landscape: bool, wait: float = 0, ticket: int | None = None
+) -> list[OcrBox]:
     """OCR. 합계가 맞지 않으면 엔진이 대비를 높이거나 사진을 돌려 다시 읽는다 (그럴 수 있는 엔진만).
 
     끝내 합계가 맞지 않으면(총액 줄이 없는 영수증 등) 품목을 가장 많이 읽은 결과를 고른다. 품목 수가 같으면 처음 읽은
     결과를 그대로 쓴다: 영수증이 아닌 사진(화면 캡처 등)에서 글자 무게로 고르면 거꾸로 돌려 읽은 결과가 뽑힌다.
+
+    다른 사진을 읽는 중이면 wait초까지 순서를 기다린다 (그럴 수 있는 엔진만). 기다리다 시간이 지나면 OcrBusyError.
+    ticket은 요청 번호다. 번호가 작은 요청의 사진부터 읽는다.
     """
+    options = {"wait": wait, "ticket": ticket} if getattr(ocr, "can_queue", False) else {}
     if not getattr(ocr, "can_reread", False):
-        return ocr.recognize(image_path)
+        return ocr.recognize(image_path, **options)
     return ocr.recognize(
         image_path,
         judge=lambda boxes: judge_reading(parse_receipt(boxes), landscape=landscape),
         rank=lambda boxes: len(parse_receipt(boxes).items),
+        **options,
     )
 
 
@@ -247,7 +260,8 @@ def upload_receipt(
     db: Session = Depends(get_db),
     ocr: OcrEngine = Depends(get_ocr_engine),
 ):
-    return _create_draft(file, access, db, ocr)
+    # 다른 사람이 읽는 중이면 바로 거절하지 않고 순서를 기다린다
+    return _create_draft(file, access, db, ocr, settings.ocr_queue_wait_seconds)
 
 
 @dataclass
@@ -267,38 +281,116 @@ class BatchOutcome:
         return self.payload is not None
 
 
-def run_batch(
-    request: Request, files: list[UploadFile], handle: Callable[[UploadFile], Any], *, db: Session | None = None
-) -> list[BatchOutcome]:
-    """사진을 한 장씩 차례로 처리한다. 한 장이 실패해도(사유를 적고) 나머지를 계속한다.
+@dataclass
+class BatchSteps:
+    """사진 한 장을 처리하는 세 단계. 한 사진은 prepare → read → finish 순서이고, 사진 여러 장의 read가 겹쳐 돌 수 있다.
 
-    handle(file)은 성공하면 결과물을, 실패하면 HTTPException을 던진다. 이미 등록된 영수증(409 JSONResponse)도 실패로 적는다.
+    prepare와 finish는 요청 스레드에서 차례로 돈다(DB·파일). read는 OCR만 하고 DB를 쓰지 않아서 여러 스레드에서 동시에 돈다.
+    prepare가 돌려준 사진 객체는 discard()를 가져야 한다. 그 뒤 단계가 실패하면 저장한 파일을 지우려고 부른다.
+    """
+
+    prepare: Callable[[UploadFile], Any]  # → 사진 객체. 이미 등록된 영수증이면 409 JSONResponse, 실패는 HTTPException
+    read: Callable[[Any, float, int | None], Any]  # (사진, 기다릴 수 있는 초, 요청 번호) → OCR 결과
+    finish: Callable[[Any, Any], Any]  # (사진, OCR 결과) → 결과물. 이미 등록된 영수증이면 409 JSONResponse
+
+
+def _done(function: Callable[..., Any], *args: Any) -> Future:
+    """function을 지금 이 스레드에서 돌리고 결과(또는 오류)를 담은 Future를 돌려준다."""
+    future: Future = Future()
+    try:
+        future.set_result(function(*args))
+    except Exception as error:
+        future.set_exception(error)
+    return future
+
+
+def run_batch(
+    request: Request,
+    files: list[UploadFile],
+    steps: BatchSteps,
+    *,
+    ocr: OcrEngine | None = None,
+    db: Session | None = None,
+) -> list[BatchOutcome]:
+    """사진을 보낸 순서대로 처리한다. 한 장이 실패해도(사유를 적고) 나머지를 계속한다.
+
+    실패는 HTTPException으로 오고, 이미 등록된 영수증(409 JSONResponse)도 실패로 적는다.
     영수증 한도는 요청 한 번을 미들웨어가 이미 세었으므로 둘째 장부터 한 장씩 더 센다.
+
+    OCR 엔진이 여러 개이면(ocr.engines) 사진 여러 장을 엔진 수만큼 한꺼번에 읽는다. 사진은 차례로 저장하면서 읽기를
+    시작하고, 결과는 보낸 순서대로 받아 초안으로 만든다. 같은 요청의 사진은 같은 요청 번호로 줄을 서서, 여러 사람이 동시에
+    올리면 먼저 온 사람의 사진부터 읽는다 (사람 순서). 엔진이 남으면 다음 사람의 사진도 같이 읽는다.
+    읽기는 엔진 수의 2배까지 미리 걸어 둔다. 한 사진이 끝나고 다음 사진이 줄에 서기 전의 짧은 틈에 다른 사람의 사진이
+    엔진을 가져가면 사람들이 번갈아 읽혀서 모두 늦게 끝난다. (실제 측정: 4명이 5장씩 올리면 2명씩 짝지어 끝났다)
+
+    요청 하나가 쓸 수 있는 시간(batch_seconds)이 있다. 다른 사람 사진 때문에 오래 걸려 시간이 다 되면, 아직 시작하지 못한
+    사진은 503 + retry_after로 돌려준다. 앱은 그 사진들만 다시 올리면 된다.
     """
     if not 1 <= len(files) <= MAX_BATCH_FILES:
         raise HTTPException(status_code=400, detail=f"사진은 한 번에 1장에서 {MAX_BATCH_FILES}장까지 올릴 수 있습니다.")
-    outcomes = []
-    for index, file in enumerate(files):
-        outcome = BatchOutcome(index, file.filename, 500, detail="영수증을 처리하지 못했습니다.")
-        if index and (wait := extra_ocr_request(request)):
-            outcome.status_code, outcome.detail, outcome.retry_after = 429, TOO_MANY_REQUESTS, wait
+    deadline = time.monotonic() + settings.batch_seconds
+    ticket = next_ticket() if getattr(ocr, "can_queue", False) else None
+    engines = getattr(ocr, "engines", None)  # 줄 서기를 지원하는 실제 엔진만 갖고 있다
+    window = 2 * engines if engines else 1  # 한꺼번에 걸어 둘 읽기 수. 1이면 한 장씩 차례로
+    outcomes: list[BatchOutcome] = []
+    pending: deque[tuple[BatchOutcome, Any, Future]] = deque()  # 읽는 중인 사진, 보낸 순서
+
+    def fail(outcome: BatchOutcome, exc: HTTPException) -> None:
+        outcome.status_code, outcome.detail = exc.status_code, str(exc.detail)
+        outcome.retry_after = int((exc.headers or {}).get("Retry-After", 0)) or None
+
+    def record(outcome: BatchOutcome, result: Any) -> None:
+        if isinstance(result, JSONResponse):  # 이미 등록된 영수증
+            body = json.loads(result.body)
+            outcome.status_code, outcome.detail, outcome.receipt_id = result.status_code, body["detail"], body.get("receipt_id")
         else:
+            outcome.status_code, outcome.payload, outcome.detail = 201, result, None
+
+    def settle() -> None:
+        """가장 먼저 보낸 사진의 읽기를 기다려 초안으로 만든다."""
+        outcome, photo, reading = pending.popleft()
+        try:
+            record(outcome, steps.finish(photo, reading.result()))
+        except HTTPException as exc:
+            photo.discard()
+            fail(outcome, exc)
+        except Exception:
+            logger.exception("여러 장 업로드: %s번째 사진 처리 실패", outcome.index)
+            photo.discard()
+            if db is not None:
+                db.rollback()
+
+    with ThreadPoolExecutor(max_workers=window) as readers:
+        for index, file in enumerate(files):
+            outcome = BatchOutcome(index, file.filename, 500, detail="영수증을 처리하지 못했습니다.")
+            outcomes.append(outcome)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                outcome.status_code, outcome.detail, outcome.retry_after = 503, BATCH_TIME_UP, BATCH_RETRY_SECONDS
+                continue
+            if index and (wait := extra_ocr_request(request)):
+                outcome.status_code, outcome.detail, outcome.retry_after = 429, TOO_MANY_REQUESTS, wait
+                continue
             try:
-                result = handle(file)
+                photo = steps.prepare(file)
             except HTTPException as exc:
-                outcome.status_code, outcome.detail = exc.status_code, str(exc.detail)
-                outcome.retry_after = int((exc.headers or {}).get("Retry-After", 0)) or None
+                fail(outcome, exc)
+                continue
             except Exception:
                 logger.exception("여러 장 업로드: %s번째 사진 처리 실패", index)
                 if db is not None:
                     db.rollback()
-            else:
-                if isinstance(result, JSONResponse):  # 이미 등록된 영수증
-                    body = json.loads(result.body)
-                    outcome.status_code, outcome.detail, outcome.receipt_id = result.status_code, body["detail"], body.get("receipt_id")
-                else:
-                    outcome.status_code, outcome.payload, outcome.detail = 201, result, None
-        outcomes.append(outcome)
+                continue
+            if isinstance(photo, JSONResponse):
+                record(outcome, photo)
+                continue
+            wait = min(settings.ocr_queue_wait_seconds, remaining)
+            reading = readers.submit(steps.read, photo, wait, ticket) if window > 1 else _done(steps.read, photo, wait, ticket)
+            pending.append((outcome, photo, reading))
+            while len(pending) >= window:
+                settle()
+        while pending:
+            settle()
     return outcomes
 
 
@@ -315,11 +407,16 @@ def upload_receipts(
     db: Session = Depends(get_db),
     ocr: OcrEngine = Depends(get_ocr_engine),
 ):
-    """보낸 순서대로 한 장씩 읽는다. 장마다 따로 저장되므로 한 장이 실패(중복·바쁨 등)해도 나머지는 초안이 된다.
+    """보낸 순서대로 저장하고 읽는다(엔진이 여러 개면 여러 장을 동시에). 장마다 따로 저장되므로 한 장이 실패(중복·바쁨 등)해도 나머지는 초안이 된다.
 
     실패한 장은 `status_code`와 `detail`을 보고, 503·429면 `retry_after`초 뒤에 그 장만 다시 올리면 된다.
     """
-    outcomes = run_batch(request, files, lambda file: _create_draft(file, access, db, ocr), db=db)
+    steps = BatchSteps(
+        prepare=lambda file: _prepare_draft(file, access, db),
+        read=lambda photo, wait, ticket: _read_draft(photo, ocr, wait, ticket),
+        finish=lambda photo, boxes: _finish_draft(photo, boxes, access, db),
+    )
+    outcomes = run_batch(request, files, steps, ocr=ocr, db=db)
     results = [
         BatchUploadResult(
             index=o.index, filename=o.filename, ok=o.ok, status_code=o.status_code, receipt=o.payload,
@@ -331,8 +428,28 @@ def upload_receipts(
     return ReceiptBatchResponse(results=results, succeeded=succeeded, failed=len(results) - succeeded)
 
 
-def _create_draft(file: UploadFile, access: FridgeAccess, db: Session, ocr: OcrEngine):
-    """사진 한 장 → 초안. 성공하면 ReceiptDetail, 이미 등록된 영수증이면 409 JSONResponse, 그 밖의 실패는 HTTPException."""
+@dataclass
+class DraftPhoto:
+    """저장은 끝났고 OCR 결과를 기다리는 사진 한 장."""
+
+    image: Image.Image
+    relative_path: str
+    receipt_barcode: str | None
+
+    @property
+    def path(self) -> str:
+        return str(Path(settings.upload_dir) / self.relative_path)
+
+    @property
+    def landscape(self) -> bool:
+        return self.image.width > self.image.height
+
+    def discard(self) -> None:
+        _remove_file(self.relative_path)
+
+
+def _prepare_draft(file: UploadFile, access: FridgeAccess, db: Session) -> DraftPhoto | JSONResponse:
+    """사진 한 장 → 저장. 이미 등록된 영수증이면 409 JSONResponse, 그 밖의 실패는 HTTPException. (DB를 쓴다)"""
     # 1~3. 확장자·크기 검사, 보정 후 uploads/{fridge_id}/{uuid}.jpg로 저장
     image = load_image(read_upload(file))
     fridge_id = access.fridge.id
@@ -353,51 +470,77 @@ def _create_draft(file: UploadFile, access: FridgeAccess, db: Session, ocr: OcrE
                 return JSONResponse(
                     status_code=409, content={"detail": DUPLICATE_RECEIPT, "receipt_id": existing_id}
                 )
-
-        # 5. OCR → 파서 → 품목별 카테고리·소비기한 (상품코드가 있으면 C005 조회)
-        try:
-            boxes = read_receipt(ocr, str(absolute_path), landscape=image.width > image.height)
-        except OcrBusyError:
-            raise HTTPException(status_code=503, detail=OCR_BUSY, headers={"Retry-After": "10"}) from None
-        except Exception:
-            # 인식 실패는 "품목 0개" 초안으로 이어 간다. 사용자가 직접 추가할 수 있다.
-            logger.exception("영수증 OCR 실패")
-            if settings.ocr_fail_closed:
-                raise HTTPException(status_code=503, detail="영수증 인식 서비스를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요.") from None
-            boxes = []
-        parsed = parse_receipt(boxes)
-        purchased_on = plausible_purchase_date(parsed.purchased_on)
-
-        # 6. 초안 저장
-        receipt = Receipt(
-            fridge_id=fridge_id,
-            uploaded_by=access.user.id,
-            status="pending",
-            store_name=(parsed.store_name or "")[:100] or None,
-            purchased_on=purchased_on,
-            total_amount=parsed.total_amount,
-            receipt_barcode=receipt_barcode,
-            image_path=relative_path,
-            raw_lines=parsed.lines,
-            draft_items=build_draft(db, parsed, purchased_on or today()),
-        )
-        db.add(receipt)
-        try:
-            db.commit()
-        except IntegrityError:
-            db.rollback()
-            existing_id = receipt_barcode and db.scalar(
-                select(Receipt.id).where(Receipt.fridge_id == fridge_id, Receipt.receipt_barcode == receipt_barcode)
-            )
-            if not existing_id:
-                raise
-            # 같은 영수증을 동시에 올려서 unique(fridge_id, receipt_barcode)에 걸린 경우
-            _remove_file(relative_path)
-            return JSONResponse(status_code=409, content={"detail": DUPLICATE_RECEIPT, "receipt_id": existing_id})
     except Exception:
         _remove_file(relative_path)
         raise
+    return DraftPhoto(image, relative_path, receipt_barcode)
+
+
+def _read_draft(photo: DraftPhoto, ocr: OcrEngine, wait: float = 0, ticket: int | None = None) -> list[OcrBox]:
+    """5. OCR. DB를 쓰지 않아서 여러 스레드에서 동시에 불러도 된다.
+
+    wait는 다른 사진이 OCR을 쓰는 동안 순서를 기다릴 수 있는 초다. 0이면 기다리지 않고 바로 503.
+    """
+    try:
+        return read_receipt(ocr, photo.path, landscape=photo.landscape, wait=wait, ticket=ticket)
+    except OcrBusyError:
+        raise HTTPException(status_code=503, detail=OCR_BUSY, headers={"Retry-After": "10"}) from None
+    except Exception:
+        # 인식 실패는 "품목 0개" 초안으로 이어 간다. 사용자가 직접 추가할 수 있다.
+        logger.exception("영수증 OCR 실패")
+        if settings.ocr_fail_closed:
+            raise HTTPException(status_code=503, detail="영수증 인식 서비스를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요.") from None
+        return []
+
+
+def _finish_draft(photo: DraftPhoto, boxes: list[OcrBox], access: FridgeAccess, db: Session):
+    """OCR → 파서 → 품목별 카테고리·소비기한 (상품코드가 있으면 C005 조회) → 초안 저장. (DB를 쓴다)
+
+    성공하면 ReceiptDetail, 같은 영수증이 그 사이 등록되었다면 409 JSONResponse.
+    """
+    fridge_id = access.fridge.id
+    parsed = parse_receipt(boxes)
+    purchased_on = plausible_purchase_date(parsed.purchased_on)
+
+    # 6. 초안 저장
+    receipt = Receipt(
+        fridge_id=fridge_id,
+        uploaded_by=access.user.id,
+        status="pending",
+        store_name=(parsed.store_name or "")[:100] or None,
+        purchased_on=purchased_on,
+        total_amount=parsed.total_amount,
+        receipt_barcode=photo.receipt_barcode,
+        image_path=photo.relative_path,
+        raw_lines=parsed.lines,
+        draft_items=build_draft(db, parsed, purchased_on or today()),
+    )
+    db.add(receipt)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing_id = photo.receipt_barcode and db.scalar(
+            select(Receipt.id).where(Receipt.fridge_id == fridge_id, Receipt.receipt_barcode == photo.receipt_barcode)
+        )
+        if not existing_id:
+            raise
+        # 같은 영수증을 동시에 올려서 unique(fridge_id, receipt_barcode)에 걸린 경우
+        photo.discard()
+        return JSONResponse(status_code=409, content={"detail": DUPLICATE_RECEIPT, "receipt_id": existing_id})
     return _detail(db, receipt)
+
+
+def _create_draft(file: UploadFile, access: FridgeAccess, db: Session, ocr: OcrEngine, wait: float = 0):
+    """사진 한 장 → 초안. 성공하면 ReceiptDetail, 이미 등록된 영수증이면 409 JSONResponse, 그 밖의 실패는 HTTPException."""
+    photo = _prepare_draft(file, access, db)
+    if isinstance(photo, JSONResponse):
+        return photo
+    try:
+        return _finish_draft(photo, _read_draft(photo, ocr, wait), access, db)
+    except Exception:
+        photo.discard()
+        raise
 
 
 @router.get("", response_model=list[ReceiptSummary], summary="영수증 목록")

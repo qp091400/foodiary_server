@@ -61,6 +61,8 @@ STORE_RE = re.compile(
     r"마트|편의점|GS25|CU|세븐일레븐|이마트|홈플러스|롯데마트|코스트코|하나로|노브랜드|슈퍼|마켓|점$"
 )
 STORE_TAIL_RE = re.compile(r"\s*/\s*\d.*$")
+# "가게이름/사업자번호/대표자": 사업자번호(10자리) 앞의 한글 이름. 사진 배경의 글자가 위에 섞여도 이 줄은 가게 이름 줄이다.
+STORE_BIZ_RE = re.compile(r"^([^/]*[가-힣][^/]*?)\s*/\s*\d{3}-?\d{2}-?\d{5}(?!\d)")
 STORE_LABEL_RE = re.compile(r"(?:매장명|상호명?|가맹점명)\s*[:：]\s*(.+)")
 RECEIPT_WORD_RE = re.compile(r"\[?\s*영\s*수?\s*증\s*\]?")
 # 구분자가 공백뿐인 형태는 받지 않는다: "2000 1 2000" 같은 가격 줄이 2000-01-20으로 읽히기 때문.
@@ -260,14 +262,24 @@ def _split_line(text: str) -> _Line:
         else:
             name_tokens.append(token)
     # 숫자가 4개 이상이면 끝의 세 개만 (단가, 수량, 금액)이고 나머지는 상품명의 일부다. ("콜라 500 2,000 1 2,000")
+    # 단, 끝의 네 개가 (단가, 수량, 할인, 금액)으로 맞아떨어지면 네 개를 모두 숫자로 둔다. ("버거 14,900 1 0 14,900")
     if name_tokens and len(numeric) > 3:
-        name_tokens += [token for token, _ in numeric[:-3]]
-        numeric = numeric[-3:]
+        keep = 4 if len(numeric) >= 4 and _is_four_columns([value for _, value in numeric[-4:]]) else 3
+        name_tokens += [token for token, _ in numeric[:-keep]]
+        numeric = numeric[-keep:]
     return _Line(" ".join(name_tokens), [value for _, value in numeric], barcode)
+
+
+def _is_four_columns(numbers: list[int]) -> bool:
+    """(단가, 수량, 할인, 금액) 칸이 있는 영수증의 끝 네 숫자: 단가 × 수량 − 할인 = 금액."""
+    unit, quantity, discount, amount = numbers
+    return unit > 0 and quantity > 0 and discount >= 0 and unit * quantity - discount == amount
 
 
 def _assign_numbers(numbers: list[int], waiting_quantity: int | None = None) -> tuple[float, int | None, int]:
     """숫자들을 (수량, 단가, 금액)으로 배정한다."""
+    if len(numbers) >= 4 and _is_four_columns(numbers[-4:]):
+        return float(numbers[-3]), numbers[-4], numbers[-1]
     numbers = numbers[-3:]
     if len(numbers) == 3:
         unit, quantity, amount = numbers
@@ -283,7 +295,7 @@ def _assign_numbers(numbers: list[int], waiting_quantity: int | None = None) -> 
         if 0 < quantity <= 99:
             return float(quantity), unit, amount
         if 0 < unit <= 99:
-            return float(unit), quantity, amount
+            return float(unit), (quantity or None), amount  # 0은 단가가 아니다 (할인 칸의 0을 단가로 읽지 않는다)
         return 1.0, None, amount
     if len(numbers) == 2:
         first, amount = numbers
@@ -403,6 +415,9 @@ def find_store_name(lines: list[str]) -> str | None:
         # "매장명:(주)행복주점-역삼점 [영수증]"처럼 이름표가 있으면 그 뒤가 매장명이다
         if (match := STORE_LABEL_RE.search(line)) and (name := RECEIPT_WORD_RE.sub("", match.group(1)).strip()):
             return name
+    for line in lines[:15]:
+        if (match := STORE_BIZ_RE.match(line)) and len(HANGUL_RE.findall(match.group(1))) >= 2:
+            return match.group(1).strip()
     for line in top:
         if STORE_RE.search(line) and not META_RE.search(line):
             return line

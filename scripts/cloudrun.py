@@ -92,13 +92,27 @@ def environment(config: dict) -> dict[str, str]:
         APP_ENV="production", DEV_TOOLS="false", AUTO_CREATE_TABLES="false",
         TRUSTED_HOSTS=f"{urlsplit(service_url(config)).hostname},localhost,127.0.0.1",
         CORS_ORIGINS=",".join(config["origins"]), UPLOAD_DIR="/app/uploads", MAX_UPLOAD_MB="10",
-        OCR_ENGINE="paddle", OCR_LANG="korean", OCR_DET_MAX_SIDE="1280", OCR_CPU_THREADS="2",
+        OCR_ENGINE="paddle", OCR_LANG="korean", OCR_DET_MAX_SIDE="1280", OCR_CPU_THREADS="4", OCR_ENGINES="2",
         OCR_ORIENTATION_MODEL="PP-LCNet_x1_0_doc_ori",
         OCR_WARMUP="true", OCR_FAIL_CLOSED="true", RATE_LIMIT_ENABLED="true", RATE_LIMIT_SCOPE="global",
-        AUTH_REQUESTS_PER_MINUTE="30", OCR_REQUESTS_PER_MINUTE="10", EMAIL_BACKEND="smtp",
+        AUTH_REQUESTS_PER_MINUTE="30", OCR_REQUESTS_PER_MINUTE="30", EMAIL_BACKEND="smtp",
         SMTP_HOST=config["smtp_host"], SMTP_PORT="587", SMTP_USER=config["smtp_user"], MAIL_FROM=config["mail_from"],
         TIMEZONE="Asia/Seoul",
     )
+
+
+def check_recipe_seed() -> None:
+    """The Cloud Run image carries the recipe database. Stop before the upload instead of deep inside the Docker build."""
+    seed = ROOT / "recipe_data" / "image-seed"
+    try:
+        pinned = json.loads((ROOT / "recipe-package.json").read_text(encoding="utf-8"))["sha256"]
+        manifest = json.loads((seed / "manifest.json").read_text(encoding="utf-8"))
+        matches = manifest["sha256"] == pinned and (seed / "recipes.sqlite3").stat().st_size == manifest["database_bytes"]
+    except (OSError, KeyError, ValueError):
+        matches = False
+    if not matches:
+        raise RuntimeError("Recipe data is missing or differs from recipe-package.json. "
+                           "Run python3 -m scripts.prepare_recipes first (see deploy/CLOUD_RUN.md).")
 
 
 class Deployment:
@@ -131,7 +145,7 @@ class Deployment:
 
     def plan(self) -> dict:
         return dict(project=self.project, region=self.region, service=self.service, url=service_url(self.config),
-                    cpu=2, memory="8Gi", min_instances=0, max_instances=1, concurrency=4,
+                    cpu=8, memory="8Gi", min_instances=0, max_instances=1, concurrency=20,
                     billing="request-based", database="external PostgreSQL over TLS (Neon Free recommended)",
                     uploads=f"private gs://{self.config['bucket']} mounted at /app/uploads",
                     secrets=list(SECRET_KEYS), initial_access="IAM private; publish after verification",
@@ -244,6 +258,7 @@ class Deployment:
         print("Stored the test password as a new secret version without printing it. Run deploy, verify and publish.")
 
     def build(self) -> None:
+        check_recipe_seed()
         tag = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         image = f"{self.region}-docker.pkg.dev/{self.project}/{self.config['repository']}/{self.service}:{tag}"
         self.gcloud("builds", "submit", str(ROOT), f"--config={ROOT / 'deploy/cloudbuild.cloudrun.yaml'}",
@@ -284,7 +299,7 @@ class Deployment:
         save_private(env_file, json.dumps(environment(self.config)))
         self.gcloud("run", "deploy", self.service, f"--region={self.region}", f"--image={self.image()}",
                     f"--service-account={self.account('run')}", "--execution-environment=gen2", "--port=8080",
-                    "--cpu=2", "--memory=8Gi", "--cpu-throttling", "--cpu-boost", "--concurrency=4",
+                    "--cpu=8", "--memory=8Gi", "--cpu-throttling", "--cpu-boost", "--concurrency=20",
                     "--min=0", "--max=1", "--min-instances=0", "--max-instances=1", "--timeout=180s",
                     "--no-allow-unauthenticated", f"--env-vars-file={env_file.resolve()}",
                     f"--set-secrets={self.secret_bindings(self.runtime_secret_keys())}",

@@ -1,11 +1,20 @@
 """OCR 엔진 인터페이스. 나중에 로컬 VLM 등으로 바꿀 때 이 Protocol만 지키면 된다."""
 
+import itertools
 from dataclasses import dataclass
 from typing import Protocol
 
 
 class OcrBusyError(RuntimeError):
     """이미 다른 영수증을 처리 중이다."""
+
+
+_tickets = itertools.count()
+
+
+def next_ticket() -> int:
+    """요청 한 번이 받는 번호. 번호가 작은(먼저 온) 요청의 사진을 먼저 읽는다. 한 요청의 사진은 모두 같은 번호를 쓴다."""
+    return next(_tickets)
 
 
 @dataclass

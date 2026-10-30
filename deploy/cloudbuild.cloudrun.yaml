@@ -1,5 +1,10 @@
 steps:
+  # .dockerignore keeps the 800+ MB recipe database out of local builds. The Cloud Run image needs exactly that one folder.
   - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args: [-c, "printf '\\n!recipe_data\\n!recipe_data/image-seed\\n!recipe_data/image-seed/**\\n' >> .dockerignore"]
+  - name: gcr.io/cloud-builders/docker
+    env: ['DOCKER_BUILDKIT=1']  # builds only the stages the target needs (the development-only recipe stage is skipped)
     args: [build, --target, cloudrun, --tag, '${_IMAGE}', .]
 images: ['${_IMAGE}']
 timeout: 1800s

@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DIRECTORIES = ("app", "alembic", "scripts", "deploy")
-FILES = (".dockerignore", ".gcloudignore", "Dockerfile", "compose.production.yml", "requirements.txt", "requirements-ocr.txt", "constraints-production.txt", "alembic.ini", "README.md")
+FILES = (".dockerignore", ".gcloudignore", "Dockerfile", "compose.production.yml", "requirements.txt", "requirements-ocr.txt", "constraints-production.txt", "alembic.ini", "README.md", "recipe-package.json")
 
 
 def main() -> None:

@@ -51,10 +51,21 @@ CMD ["sh", "/app/deploy/entrypoint.sh"]
 FROM production AS cloudrun-models
 RUN python scripts/bake_ocr_models.py /tmp/verified-models
 
+# 레시피 DB는 Cloud Run 이미지 안에 읽기 전용으로 넣는다. 빌드 전에 `python3 -m scripts.prepare_recipes`로 준비해 두며,
+# recipe-package.json에 적힌 해시와 맞지 않으면 빌드가 실패한다. (개발 이미지와 달리 별도 컨텍스트가 없어 일반 COPY를 쓴다)
+FROM python:3.11-slim-bookworm AS cloudrun-recipes
+WORKDIR /check
+COPY recipe-package.json ./
+COPY scripts/install_recipe_package.py scripts/verify_recipe_seed.py ./scripts/
+COPY recipe_data/image-seed/ /opt/recipe-seed/
+RUN python -m scripts.verify_recipe_seed /opt/recipe-seed
+
 FROM production AS cloudrun
 COPY --from=cloudrun-models --chown=0:0 /tmp/verified-models /opt/foodiary-models
+COPY --from=cloudrun-recipes --chown=0:0 /opt/recipe-seed/ /opt/recipe-data/
 ENV OCR_MODELS_DIR=/opt/foodiary-models \
-    PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
+    PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True \
+    RECIPE_DATA_DIR=/opt/recipe-data
 CMD ["python", "/app/scripts/cloudrun_entrypoint.py"]
 
 FROM runtime AS development

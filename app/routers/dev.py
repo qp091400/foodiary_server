@@ -12,7 +12,9 @@ import os
 import secrets
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse
@@ -22,6 +24,7 @@ from app.config import settings
 from app.database import get_db
 from app.routers.receipts import (
     OCR_BUSY,
+    BatchSteps,
     build_draft,
     draft_warnings,
     load_image,
@@ -65,32 +68,58 @@ def _page() -> HTMLResponse:
     return HTMLResponse(PAGE_PATH.read_text(encoding="utf-8"))
 
 
-def _recognize(file: UploadFile, db: Session, ocr: OcrEngine, *, show_errors: bool) -> dict:
-    received = time.perf_counter()  # 사진을 다 받은 뒤부터. 페이지가 전체 시간과 비교해 업로드·대기 시간을 가늠한다
+@dataclass
+class _TestPhoto:
+    """OCR을 기다리는 사진 한 장. 임시 파일로만 두고 아무것도 저장하지 않는다."""
+
+    image: Any
+    path: str
+    received: float  # 사진을 다 받은 때. 페이지가 전체 시간과 비교해 업로드·대기 시간을 가늠한다
+    ocr_seconds: float = 0.0
+    ocr_error: str | None = None
+
+    def discard(self) -> None:
+        Path(self.path).unlink(missing_ok=True)
+
+
+def _prepare_test_photo(file: UploadFile) -> _TestPhoto:
+    received = time.perf_counter()
     image = load_image(read_upload(file))
     handle, path = tempfile.mkstemp(suffix=".jpg")
     os.close(handle)
-    ocr_error = None
+    photo = _TestPhoto(image, path, received)
     try:
         image.save(path, "JPEG", quality=90)
-        started = time.perf_counter()
-        try:
-            boxes = read_receipt(ocr, path, landscape=image.width > image.height)
-        except OcrBusyError:
-            raise HTTPException(status_code=503, detail=OCR_BUSY, headers={"Retry-After": "10"}) from None
-        except Exception as exc:
-            # 실제 업로드는 이 경우 빈 초안으로 넘어간다. 개발 페이지에서는 원인을 보여 준다.
-            logger.exception("영수증 인식 테스트 OCR 실패")
-            boxes, ocr_error = [], f"{type(exc).__name__}: {exc}" if show_errors else "영수증 인식에 실패했습니다."
-        ocr_seconds = round(time.perf_counter() - started, 1)
-    finally:
-        Path(path).unlink(missing_ok=True)
+    except Exception:
+        photo.discard()
+        raise
+    return photo
 
+
+def _read_test_photo(photo: _TestPhoto, ocr: OcrEngine, *, show_errors: bool, wait: float = 0, ticket: int | None = None):
+    """OCR만 한다. DB를 쓰지 않아서 여러 스레드에서 동시에 불러도 된다. 읽고 나면 임시 파일을 지운다."""
+    started = time.perf_counter()
+    boxes: list = []
+    try:
+        boxes = read_receipt(ocr, photo.path, landscape=photo.image.width > photo.image.height, wait=wait, ticket=ticket)
+    except OcrBusyError:
+        raise HTTPException(status_code=503, detail=OCR_BUSY, headers={"Retry-After": "10"}) from None
+    except Exception as exc:
+        # 실제 업로드는 이 경우 빈 초안으로 넘어간다. 개발 페이지에서는 원인을 보여 준다.
+        logger.exception("영수증 인식 테스트 OCR 실패")
+        photo.ocr_error = f"{type(exc).__name__}: {exc}" if show_errors else "영수증 인식에 실패했습니다."
+    finally:
+        photo.ocr_seconds = round(time.perf_counter() - started, 1)
+        photo.discard()
+    return boxes
+
+
+def _finish_test_photo(photo: _TestPhoto, boxes: list, db: Session) -> dict:
     parsed = parse_receipt(boxes)
     purchased_on = plausible_purchase_date(parsed.purchased_on)
     draft_items = build_draft(db, parsed, purchased_on or today())
     items_sum = sum(item["amount"] - item["discount"] for item in draft_items)
-    receipt_barcode = barcode_service.decode_receipt_barcode(image)
+    receipt_barcode = barcode_service.decode_receipt_barcode(photo.image)
     return {
         "store_name": parsed.store_name,
         "purchased_on": purchased_on,
@@ -102,10 +131,15 @@ def _recognize(file: UploadFile, db: Session, ocr: OcrEngine, *, show_errors: bo
             len(draft_items), items_sum, parsed.total_amount, name_cut=any(item["name_cut"] for item in draft_items)
         ),
         "raw_lines": parsed.lines,
-        "ocr_seconds": ocr_seconds,
-        "server_seconds": round(time.perf_counter() - received, 1),
-        "ocr_error": ocr_error,
+        "ocr_seconds": photo.ocr_seconds,
+        "server_seconds": round(time.perf_counter() - photo.received, 1),
+        "ocr_error": photo.ocr_error,
     }
+
+
+def _recognize(file: UploadFile, db: Session, ocr: OcrEngine, *, show_errors: bool, wait: float = 0) -> dict:
+    photo = _prepare_test_photo(file)
+    return _finish_test_photo(photo, _read_test_photo(photo, ocr, show_errors=show_errors, wait=wait), db)
 
 
 @router.get("/receipt-test", response_class=HTMLResponse)
@@ -120,12 +154,17 @@ def receipt_test(
     ocr: OcrEngine = Depends(get_ocr_engine),
 ):
     """로그인 없이 인식만 해 본다. 영수증도 이미지도 저장하지 않는다."""
-    return _recognize(file, db, ocr, show_errors=True)
+    return _recognize(file, db, ocr, show_errors=True, wait=settings.ocr_queue_wait_seconds)
 
 
 def _recognize_many(request: Request, files: list[UploadFile], db: Session, ocr: OcrEngine, *, show_errors: bool) -> dict:
-    """여러 장 업로드와 같은 순서(한 장씩, 한 장이 실패해도 계속)로 인식만 해 본다. 아무것도 저장하지 않는다."""
-    outcomes = run_batch(request, files, lambda file: _recognize(file, db, ocr, show_errors=show_errors), db=db)
+    """여러 장 업로드와 같은 방식(한 장이 실패해도 계속, 엔진이 여러 개면 동시에)으로 인식만 해 본다. 아무것도 저장하지 않는다."""
+    steps = BatchSteps(
+        prepare=_prepare_test_photo,
+        read=lambda photo, wait, ticket: _read_test_photo(photo, ocr, show_errors=show_errors, wait=wait, ticket=ticket),
+        finish=lambda photo, boxes: _finish_test_photo(photo, boxes, db),
+    )
+    outcomes = run_batch(request, files, steps, ocr=ocr, db=db)
     return {
         "results": [
             {
@@ -171,4 +210,4 @@ def password_receipt_test(
     ocr: OcrEngine = Depends(get_ocr_engine),
 ):
     """테스트 비밀번호로 인식만 해 본다. 영수증도 이미지도 저장하지 않는다."""
-    return _recognize(file, db, ocr, show_errors=False)
+    return _recognize(file, db, ocr, show_errors=False, wait=settings.ocr_queue_wait_seconds)

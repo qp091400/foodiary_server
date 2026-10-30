@@ -49,11 +49,16 @@ def test_invalid_connection_errors_do_not_echo_secret(value):
 def test_plan_is_offline_and_contains_no_secret_values(tmp_path, monkeypatch):
     monkeypatch.setattr(cloudrun.subprocess, "run", lambda *a, **kw: pytest.fail("Plan must not run commands"))
     plan = cloudrun.Deployment(config(), tmp_path).plan()
-    assert (plan["cpu"], plan["memory"], plan["min_instances"], plan["max_instances"]) == (2, "8Gi", 0, 1)
+    assert (plan["cpu"], plan["memory"], plan["min_instances"], plan["max_instances"]) == (8, "8Gi", 0, 1)
+    assert plan["concurrency"] == 20
     env = cloudrun.environment(config())
     assert not set(cloudrun.SECRET_KEYS) & env.keys()
     assert "*" not in env["TRUSTED_HOSTS"] and env["RATE_LIMIT_SCOPE"] == "global"
     assert env["OCR_ORIENTATION_MODEL"] == "PP-LCNet_x1_0_doc_ori"
+    assert env["OCR_REQUESTS_PER_MINUTE"] == "30"  # 한도는 사진 한 장을 한 번으로 센다. OCR이 빨라져서 올렸다
+    # 엔진 수 x 엔진당 스레드 수 = 서버 CPU 개수 (적으면 CPU가 놀고, 많으면 서로 기다린다). 엔진마다 메모리를 1~2GB 쓴다
+    assert int(env["OCR_ENGINES"]) * int(env["OCR_CPU_THREADS"]) == plan["cpu"]
+    assert int(env["OCR_ENGINES"]) * 2.5 <= int(plan["memory"].removesuffix("Gi"))
 
 
 def test_setup_checks_project_number_before_any_mutation(tmp_path, monkeypatch):
@@ -86,7 +91,9 @@ def test_migrate_and_deploy_use_pinned_secrets_and_separate_identities(tmp_path,
     command = calls[-1]
     assert "--image=" + image in command
     assert "--no-allow-unauthenticated" in command and "--cpu-throttling" in command
+    assert "--cpu=8" in command
     assert "--cpu-boost" in command  # 잠든 서버가 깨어날 때(모델 로딩) CPU를 더 받는다
+    assert "--concurrency=20" in command  # 줄 서서 기다리는 업로드가 가벼운 요청을 막지 않게
     assert "--memory=8Gi" in command and "--max=1" in command and "--min=0" in command
     assert "--service-account=foodiary-run@example-project.iam.gserviceaccount.com" in command
     assert any("mount-options=uid=10001;gid=10001" in argument for argument in command)
@@ -231,7 +238,8 @@ def test_runtime_checks_writable_volume_and_cleans_probe(tmp_path, monkeypatch):
 def test_missing_baked_models_fail_before_constructing_ocr(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "ocr_models_dir", str(tmp_path))
     with pytest.raises(RuntimeError, match="model file is missing"):
-        PaddleOcrEngine("korean")._load()
+        engine = PaddleOcrEngine("korean")
+        engine._load(engine._workers[0])
 
 
 def test_cost_estimate_does_not_assume_ten_dollars_caps_the_bill():
@@ -239,3 +247,54 @@ def test_cost_estimate_does_not_assume_ten_dollars_caps_the_bill():
     assert estimate(300_000, 10_000)["after_pro_credit_usd"] == pytest.approx(5.18)
     assert estimate(0, 0, other_costs=12)["after_pro_credit_usd"] == 2
     assert estimate(100, 1, free_tier=False)["cloud_run_usd"] == pytest.approx(0.0068)
+
+
+def prepare_seed(root, *, pinned="a" * 64, actual="a" * 64, size=5):
+    (root / "recipe-package.json").write_text(json.dumps({"sha256": pinned}))
+    seed = root / "recipe_data" / "image-seed"
+    seed.mkdir(parents=True)
+    (seed / "recipes.sqlite3").write_bytes(b"x" * 5)
+    (seed / "manifest.json").write_text(json.dumps({"sha256": actual, "database_bytes": size}))
+
+
+def test_build_needs_the_prepared_recipe_data_and_stops_before_uploading_anything(tmp_path, monkeypatch):
+    monkeypatch.setattr(cloudrun, "ROOT", tmp_path)
+    deployment = cloudrun.Deployment(config(), tmp_path)
+    monkeypatch.setattr(deployment, "gcloud", lambda *a, **kw: pytest.fail("Nothing may be uploaded without recipe data"))
+    with pytest.raises(RuntimeError, match="prepare_recipes"):  # nothing prepared
+        deployment.build()
+    for name, kwargs in (("old-version", dict(actual="b" * 64)), ("truncated", dict(size=99))):
+        folder = tmp_path / name
+        folder.mkdir()
+        prepare_seed(folder, **kwargs)
+        monkeypatch.setattr(cloudrun, "ROOT", folder)
+        with pytest.raises(RuntimeError, match="prepare_recipes"):
+            deployment.build()
+
+
+def test_build_continues_when_the_recipe_data_matches_the_pin(tmp_path, monkeypatch):
+    prepare_seed(tmp_path)
+    monkeypatch.setattr(cloudrun, "ROOT", tmp_path)
+    deployment = cloudrun.Deployment(config(), tmp_path)
+    calls = []
+
+    def gcloud(*args, **kwargs):
+        calls.append(args[:2])
+        return "sha256:" + "c" * 64 if args[0] == "artifacts" else ""
+
+    monkeypatch.setattr(deployment, "gcloud", gcloud)
+    deployment.build()
+    assert calls == [("builds", "submit"), ("artifacts", "docker")]
+
+
+def test_cloud_run_image_ships_the_recipe_database_without_opening_local_builds_to_it():
+    root = Path(__file__).resolve().parents[1]
+    dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
+    cloudrun_stage = dockerfile[dockerfile.index("FROM production AS cloudrun\n"):].split("\nFROM ")[0]
+    assert "COPY --from=cloudrun-recipes" in cloudrun_stage and "RECIPE_DATA_DIR=/opt/recipe-data" in cloudrun_stage
+    ignore = (root / ".gcloudignore").read_text(encoding="utf-8").splitlines()
+    assert {"!/recipe_data/image-seed/recipes.sqlite3", "!/recipe_data/image-seed/manifest.json", "!/recipe-package.json"} <= set(ignore)
+    assert not [line for line in ignore if line.startswith("!") and ("zip" in line or "foodiary_data" in line)]
+    build = (root / "deploy/cloudbuild.cloudrun.yaml").read_text(encoding="utf-8")
+    assert "!recipe_data/image-seed" in build and "DOCKER_BUILDKIT=1" in build
+    assert "recipe_data" in (root / ".dockerignore").read_text(encoding="utf-8")  # 개발 빌드 컨텍스트에는 계속 들어가지 않는다

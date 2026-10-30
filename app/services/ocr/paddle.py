@@ -1,16 +1,20 @@
 """PaddleOCR(PP-OCRv5) 엔진. paddle은 처음 호출될 때만 import·로딩한다."""
 
+import heapq
+import itertools
 import logging
 import math
 import tempfile
 import threading
 from collections.abc import Callable, Mapping
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass, field
 from enum import IntEnum
 from pathlib import Path
 from typing import Any
 
 from app.config import settings
-from app.services.ocr.base import OcrBox, OcrBusyError
+from app.services.ocr.base import OcrBox, OcrBusyError, next_ticket
 
 logger = logging.getLogger(__name__)
 
@@ -122,28 +126,73 @@ def enhance_contrast(bgr: Any) -> Any:
     return cv2.cvtColor(cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray), cv2.COLOR_GRAY2BGR)
 
 
+@dataclass(eq=False)
+class _Job:
+    """줄에 선 사진 한 장."""
+
+    ticket: int
+    image_path: str
+    judge: Any
+    rank: Any
+    future: Future = field(default_factory=Future)
+    begun: threading.Event = field(default_factory=threading.Event)  # 엔진에 배정되어 읽기 시작했다
+
+
+class _Worker:
+    """엔진 하나: 모델 하나와 전용 스레드 하나. 모델 로딩과 읽기는 늘 이 스레드에서만 한다.
+
+    가속 기능(oneDNN)은 스레드마다 캐시를 따로 두어서, 요청마다 다른 작업 스레드에서 읽으면 `std::exception`으로 읽기가
+    깨지고 메모리가 늘었다. (30번 읽기: 매번 새 스레드는 19번 실패)
+    """
+
+    def __init__(self, number: int) -> None:
+        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"ocr{number}")
+        self.ocr: Any = None
+        self.busy = False
+        self.ready = False
+
+
 class PaddleOcrEngine:
-    def __init__(self, lang: str, det_max_side: int = 0) -> None:
+    def __init__(self, lang: str, det_max_side: int = 0, engines: int | None = None) -> None:
         self._lang = lang
         self._det_max_side = det_max_side
-        self._ocr: Any = None
-        self._load_lock = threading.Lock()
-        self._predict_lock = threading.Lock()  # paddle predictor는 스레드 안전하지 않다
-        self._ready = False
+        self._load_lock = threading.Lock()  # 모델 로딩은 한 번에 하나씩
+        # paddle predictor는 스레드 안전하지 않아서 엔진마다 사진을 한 장씩 읽는다. 엔진이 여러 개면 사진 여러 장을 동시에 읽는다.
+        self._workers = [_Worker(number) for number in range(engines or settings.ocr_engines)]
+        self._lock = threading.Lock()  # 줄(_queue)과 엔진의 busy 표시를 지킨다
+        # 줄: (요청 번호, 도착 순서, 사진). 번호가 작은 요청의 사진부터 놀고 있는 엔진에 배정된다 (사람 순서)
+        self._queue: list[tuple[int, int, _Job]] = []
+        self._arrivals = itertools.count()
 
     @property
     def ready(self) -> bool:
-        return self._ready
+        return all(worker.ready for worker in self._workers)
+
+    @property
+    def engines(self) -> int:
+        """사진을 동시에 읽을 수 있는 수."""
+        return len(self._workers)
+
+    @property
+    def waiting(self) -> int:
+        """엔진이 비기를 기다리는 사진 수."""
+        with self._lock:
+            return len(self._queue)
+
+    @property
+    def can_queue(self) -> bool:
+        """recognize(wait=..., ticket=...)로 다른 사진이 끝나길 기다릴 수 있다."""
+        return True
 
     @property
     def can_reread(self) -> bool:
         """recognize(judge=...)로 대비를 높이거나 사진을 돌려 다시 읽을 수 있다."""
         return True
 
-    def _load(self) -> Any:
-        if self._ocr is None:
+    def _load(self, worker: _Worker) -> Any:
+        if worker.ocr is None:
             with self._load_lock:
-                if self._ocr is None:
+                if worker.ocr is None:
                     logger.info("PaddleOCR 모델 로딩 (lang=%s) - 처음 한 번은 모델을 내려받느라 오래 걸립니다", self._lang)
                     options = {}
                     if self._det_max_side > 0:
@@ -167,7 +216,7 @@ class PaddleOcrEngine:
                         options["doc_orientation_classify_model_name"] = settings.ocr_orientation_model
                     from paddleocr import PaddleOCR  # 지연 import: 설치 안 된 환경에서도 서버·테스트가 뜬다
 
-                    self._ocr = PaddleOCR(
+                    worker.ocr = PaddleOCR(
                         lang=self._lang,
                         ocr_version=settings.ocr_version,
                         text_detection_model_name=settings.ocr_detection_model,
@@ -181,7 +230,7 @@ class PaddleOcrEngine:
                         use_textline_orientation=True,
                         **options,
                     )
-        return self._ocr
+        return worker.ocr
 
     def recognize(
         self,
@@ -189,23 +238,64 @@ class PaddleOcrEngine:
         *,
         judge: Callable[[list[OcrBox]], Verdict] | None = None,
         rank: Callable[[list[OcrBox]], Any] | None = None,
+        wait: float = 0,
+        ticket: int | None = None,
     ) -> list[OcrBox]:
         """사진을 읽는다. 방향 판별 모델이 사진을 먼저 바로 세운다.
 
-        judge가 있고 결과가 GOOD이 아니면 다시 읽어 본다 (모두 같은 잠금 안에서).
+        엔진이 모두 바쁘면 wait초까지 순서를 기다린다. 줄이 가득 찼거나 시간이 지나면 OcrBusyError. (wait=0이면 기다리지 않는다)
+        ticket은 요청 번호(base.next_ticket)다. 같은 번호의 사진은 한 사람의 것이라, 번호가 작은 사람의 사진을 모두 읽은
+        다음에 다음 사람 차례다. 안 주면 이 사진 한 장이 새 번호를 받는다.
+
+        judge가 있고 결과가 GOOD이 아니면 다시 읽어 본다 (같은 엔진에서 이어서).
         1. 대비를 높인 사진으로 한 번 더 읽는다. GOOD이면 그것을 쓴다.
         2. 둘 중 하나라도 UPRIGHT면 방향은 맞다. 원래 결과를(원래가 DOUBTFUL이면 대비를 높인 결과를) 쓴다.
         3. 둘 다 DOUBTFUL이면 방향 판별이 틀렸을 수 있다. 사진을 90°, 270°, 180° 돌려(판별 없이) 읽고 GOOD인 첫 결과를 쓴다.
         4. 끝내 GOOD이 없으면 rank가 가장 큰 결과. 같으면 먼저 읽은 것(처음 → 대비 → 90° → 270° → 180°)을 쓴다.
            rank가 없으면 글자를 가장 많이·확실하게 읽은 결과.
         """
+        job = _Job(next_ticket() if ticket is None else ticket, image_path, judge, rank)
+        with self._lock:
+            if all(worker.busy for worker in self._workers) and (wait <= 0 or len(self._queue) >= settings.ocr_queue_max):
+                raise OcrBusyError("OCR is busy")
+            heapq.heappush(self._queue, (job.ticket, next(self._arrivals), job))
+            self._dispatch()
+        if not job.begun.wait(wait):
+            with self._lock:
+                if not job.begun.is_set():  # 시간이 다 된 바로 그 순간에 배정되었다면 그대로 읽는다
+                    self._queue = [entry for entry in self._queue if entry[2] is not job]
+                    heapq.heapify(self._queue)
+                    raise OcrBusyError("OCR is busy")
+        return job.future.result()
+
+    def _dispatch(self) -> None:
+        """놀고 있는 엔진마다 줄의 맨 앞 사진을 배정한다. self._lock을 잡은 채로 부른다."""
+        while self._queue:
+            worker = next((worker for worker in self._workers if not worker.busy), None)
+            if worker is None:
+                return
+            _, _, job = heapq.heappop(self._queue)
+            worker.busy = True
+            job.begun.set()
+            worker.executor.submit(self._run, worker, job)
+
+    def _run(self, worker: _Worker, job: _Job) -> None:
+        """엔진의 전용 스레드에서 도는 부분."""
+        try:
+            job.future.set_result(self._read(worker, job.image_path, job.judge, job.rank))
+        except BaseException as error:  # noqa: BLE001 - 부른 쪽에 그대로 전한다
+            job.future.set_exception(error)
+        finally:
+            with self._lock:
+                worker.busy = False
+                self._dispatch()
+
+    def _read(self, worker: _Worker, image_path: str, judge: Any, rank: Any) -> list[OcrBox]:
         import numpy as np
         from PIL import Image
 
-        if not self._predict_lock.acquire(blocking=False):
-            raise OcrBusyError("OCR is busy")
         try:
-            ocr = self._load()
+            ocr = self._load(worker)
             # 경로 대신 배열: Windows의 비ASCII 경로도 지원한다.
             with Image.open(image_path) as image:
                 bgr = np.ascontiguousarray(np.asarray(image.convert("RGB"))[:, :, ::-1])
@@ -213,13 +303,11 @@ class PaddleOcrEngine:
                 boxes = boxes_from_results(list(ocr.predict(bgr)))
             else:
                 boxes = self._read_carefully(ocr, bgr, judge, rank or text_weight)
-            self._ready = True
+            worker.ready = True
             return boxes
         except Exception:
-            self._ready = False
+            worker.ready = False
             raise
-        finally:
-            self._predict_lock.release()
 
     @staticmethod
     def _read_carefully(
@@ -260,8 +348,11 @@ class PaddleOcrEngine:
             image = Image.new("RGB", (900, 220), "white")
             ImageDraw.Draw(image).text((40, 70), "FOODIARY OCR 12345", fill="black", font=ImageFont.load_default(size=48))
             image.save(path, "JPEG", quality=95)
-            if not self.recognize(str(path)):
-                self._ready = False
+            # 엔진마다 자기 스레드에서 읽어 본다 (모델 로딩은 한 번에 하나씩이라 엔진 수만큼 걸린다)
+            futures = [worker.executor.submit(self._read, worker, str(path), None, None) for worker in self._workers]
+            if not all(future.result() for future in futures):
+                for worker in self._workers:
+                    worker.ready = False
                 raise RuntimeError("OCR warmup returned no text")
             if settings.app_env == "production":
                 from app.services.ocr.manifest import verify_model_files
@@ -269,7 +360,8 @@ class PaddleOcrEngine:
                 try:
                     verify_model_files()
                 except Exception:
-                    self._ready = False
+                    for worker in self._workers:
+                        worker.ready = False
                     raise
 
 

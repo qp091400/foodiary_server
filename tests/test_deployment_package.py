@@ -24,7 +24,7 @@ def test_release_excludes_secrets_and_preserves_dockerignore(tmp_path, monkeypat
     package_release.main()
     with tarfile.open(output) as archive:
         names = set(archive.getnames())
-        assert {".dockerignore", "app/main.py", "deploy/.env.production.example"} <= names
+        assert {".dockerignore", "app/main.py", "deploy/.env.production.example", "recipe-package.json"} <= names
         assert not {".env.production", "app/.env", "app/private.key", "app/private.pem"} & names
         assert "deploy/client.secrets.json" not in names
         assert "app/.cloudrun/secrets/DATABASE_URL" not in names

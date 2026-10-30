@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     ocr_orientation_model: str = "PP-LCNet_x1_0_doc_ori"
     ocr_models_dir: str = ""  # Cloud Run: 검증한 모델을 이미지에 포함한 디렉터리
     ocr_cpu_threads: int = Field(2, ge=1, le=16)
+    ocr_engines: int = Field(1, ge=1, le=8)  # 사진을 동시에 읽는 OCR 엔진 수. 엔진마다 메모리를 약 2GB 쓴다
     # 인텔 CPU 가속(oneDNN). 실제 영수증 6장에서 결과는 줄 단위로 같고 한 장 18~29초 → 1.4~2.8초, 최대 메모리 6.9GB → 1.9GB
     ocr_enable_mkldnn: bool = True
     ocr_warmup: bool = False
@@ -50,6 +51,11 @@ class Settings(BaseSettings):
     rate_limit_scope: Literal["ip", "global"] = "ip"
     auth_requests_per_minute: int = Field(30, ge=1, le=1000)
     ocr_requests_per_minute: int = Field(10, ge=1, le=100)
+    # OCR는 한 번에 한 장이라 여러 사람이 동시에 올리면 줄을 선다. 줄에서 기다리는 한도와 기다리는 사진 수의 한도
+    ocr_queue_wait_seconds: int = Field(100, ge=0, le=600)  # TODO: balance
+    ocr_queue_max: int = Field(40, ge=0, le=200)  # TODO: balance
+    # 사진 여러 장 업로드 한 요청이 쓸 수 있는 시간. 넘으면 아직 시작 못 한 사진은 "다시 올려 주세요"로 돌려준다 (Cloud Run 제한 180초보다 짧게)
+    batch_seconds: int = Field(150, ge=1, le=600)  # TODO: balance
 
     foodsafety_api_key: str = ""  # 비우면 바코드 조회 비활성
     recipe_data_dir: str = "recipe_data"  # 별도 볼륨; 원본/색인은 Git에 넣지 않는다

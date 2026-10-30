@@ -110,8 +110,8 @@
     <label class="drop" id="drop">
       <input type="file" id="file" accept="image/*" multiple>
       <strong>영수증 사진 선택 (여러 장 가능)</strong>
-      <span class="for-mouse">눌러서 고르거나 여기로 끌어다 놓으세요. 한 번에 5장까지</span>
-      <span class="for-touch">앨범에 있는 사진을 고릅니다. 한 번에 5장까지</span>
+      <span class="for-mouse">눌러서 고르거나 여기로 끌어다 놓으세요. 여러 장도 한 번에</span>
+      <span class="for-touch">앨범에 있는 사진을 고릅니다. 여러 장도 한 번에</span>
     </label>
   </div>
 
@@ -331,7 +331,29 @@ function render(data) {
   $("result").hidden = false;
 }
 
-const MAX_FILES = 5; // 서버의 MAX_BATCH_FILES와 같다
+const MAX_FILES = 100; // 한 번에 고를 수 있는 사진 수. 서버 한 요청은 더 적게 받아서(CHUNK_*) 이 수를 나눠 보낸다
+const CHUNK_FILES = 10; // 서버 한 요청에 담는 사진 수 (서버 한도 MAX_BATCH_FILES보다 훨씬 적게)
+const CHUNK_BYTES = 20 * 1024 * 1024; // 한 요청의 크기. Cloud Run은 요청 하나가 32MiB까지라서 여유를 둔다
+const MAX_TRIES = 3; // 서버가 "바쁨/시간 부족"(503, 429)으로 돌려준 사진은 이만큼까지 자동으로 다시 보낸다
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// 이미 줄인 사진들을 한 요청에 담을 만큼씩 나눈다 (장수와 크기 둘 다 넘지 않게)
+function chunked(items) {
+  const chunks = [];
+  let current = [], bytes = 0;
+  for (const item of items) {
+    const size = item.upload.data.size || 0;
+    if (current.length && (current.length >= CHUNK_FILES || bytes + size > CHUNK_BYTES)) {
+      chunks.push(current);
+      current = [];
+      bytes = 0;
+    }
+    current.push(item);
+    bytes += size;
+  }
+  if (current.length) chunks.push(current);
+  return chunks;
+}
 let shown = []; // 지금 화면에 있는 사진별 결과: { url, name, ok, data, message }
 
 // 사진별 결과 중 i번째를 보여 준다. 실패한 사진은 사유만 보여 준다.
@@ -402,12 +424,19 @@ async function recognize(selected) {
   const started = Date.now();
   $("status").textContent = "사진 준비 중…";
   $("status").hidden = false;
-  const uploads = await Promise.all(files.map(shrink));
+  const uploads = [];
+  for (const [index, file] of files.entries()) {
+    // 한꺼번에 줄이면 사진이 많을 때 브라우저 메모리를 너무 쓴다. 한 장씩 줄인다
+    if (many) $("status").textContent = `사진 준비 중… ${index + 1}/${files.length}`;
+    uploads.push(await shrink(file));
+  }
 
+  let readCount = 0; // 서버가 끝낸 사진 수 (진행 표시용)
+  let phase = ""; // 다시 보내는 중이면 그 안내
   const tick = () => {
     const seconds = Math.floor((Date.now() - started) / 1000);
     $("status").textContent = many
-      ? `${files.length}장을 한 장씩 읽는 중… ${seconds}초 (장마다 몇 초씩 걸립니다)`
+      ? `${readCount}/${files.length}장 읽음 · ${phase || "한 장씩 읽는 중"}… ${seconds}초 (다른 사람 사진을 기다리면 더 걸려요)`
       : `인식 중… ${seconds}초 (30~60초 걸릴 수 있습니다)`;
   };
   tick();
@@ -426,15 +455,42 @@ async function recognize(selected) {
 
   try {
     if (many) {
-      const body = new FormData();
-      uploads.forEach((upload) => body.append("files", upload.data, upload.name));
-      const { results } = await post(`${ENDPOINT}/batch`, body);
-      const entries = results.map((r) => ({
-        url: URL.createObjectURL(files[r.index]),
-        ok: r.ok,
-        data: r.result,
-        message: `사진 ${r.index + 1}: ${r.detail || "읽지 못했어요"}` + (r.retry_after ? ` (${r.retry_after}초 뒤에 다시 올려 보세요)` : ""),
-      }));
+      const entries = new Array(files.length);
+      const items = uploads.map((upload, index) => ({ index, upload }));
+      for (const chunk of chunked(items)) {
+        let pending = chunk;
+        for (let attempt = 1; pending.length; attempt++) {
+          const body = new FormData();
+          pending.forEach((item) => body.append("files", item.upload.data, item.upload.name));
+          const { results } = await post(`${ENDPOINT}/batch`, body);
+          const retry = [];
+          let wait = 0;
+          for (const r of results) {
+            const item = pending[r.index];
+            const busy = !r.ok && (r.status_code === 503 || r.status_code === 429);
+            if (busy && attempt < MAX_TRIES) {
+              retry.push(item);
+              wait = Math.max(wait, r.retry_after || 0);
+              continue;
+            }
+            entries[item.index] = {
+              url: URL.createObjectURL(files[item.index]),
+              ok: r.ok,
+              data: r.result,
+              message: `사진 ${item.index + 1}: ${r.detail || "읽지 못했어요"}` + (busy ? " (잠시 뒤에 이 사진만 다시 올려 보세요)" : ""),
+            };
+            readCount++;
+          }
+          pending = retry;
+          if (pending.length) {
+            // 서버가 "바쁨"이나 "시간 부족"으로 돌려준 사진만 알려준 시간만큼 기다렸다가 다시 보낸다
+            phase = `${pending.length}장은 서버가 바빠서 다시 보내는 중`;
+            tick();
+            await sleep(Math.min(15, wait) * 1000);
+            phase = "";
+          }
+        }
+      }
       showResults(entries, seconds(), note);
     } else {
       const body = new FormData();
