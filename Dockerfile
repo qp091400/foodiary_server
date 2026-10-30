@@ -53,3 +53,4 @@ FROM runtime AS development
 # Named context supplied by scripts.start_with_recipes; contains no GitHub credentials.
 COPY --from=recipe_seed / /opt/recipe-seed/
 ENTRYPOINT ["sh", "/app/deploy/development-entrypoint.sh"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
