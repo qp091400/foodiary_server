@@ -5,11 +5,8 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
-from unittest.mock import patch
-import zipfile
 
 from scripts.initialize_recipe_data import initialize
-from scripts.start_with_recipes import prepare_seed, main
 
 
 class InitializationTests(unittest.TestCase):
@@ -70,53 +67,6 @@ class InitializationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'sidecars'):
             initialize(self.seed, self.target)
         assert not (self.target / 'recipes.sqlite3').exists()
-
-    def test_build_context_contains_only_verified_recipe_files(self):
-        package = self.root / 'package.zip'
-        with zipfile.ZipFile(package, 'w') as z:
-            z.write(self.db, 'recipes.sqlite3')
-            z.write(self.seed / 'manifest.json', 'manifest.json')
-            z.writestr('not-for-image.txt', 'extra')
-        destination = self.root / 'build-context'
-        with patch('scripts.start_with_recipes.EXPECTED_SHA256', self.manifest['sha256']):
-            prepare_seed(package, destination)
-        assert {p.name for p in destination.iterdir()} == {'recipes.sqlite3', 'manifest.json'}
-
-    def test_unexpected_release_is_rejected(self):
-        package = self.root / 'package.zip'
-        with zipfile.ZipFile(package, 'w') as z:
-            z.write(self.seed / 'manifest.json', 'manifest.json')
-        with self.assertRaisesRegex(ValueError, 'pinned'):
-            prepare_seed(package, self.root / 'build-context')
-
-
-    def test_start_passes_only_data_context_to_compose(self):
-        def run_compose(command, cwd, env, check):
-            assert command[-3:] == ['up', '-d', '--build']
-            seed = Path(env['FOODIARY_RECIPE_SEED_DIR'])
-            assert (seed / 'manifest.json').exists()
-            assert seed.name == 'seed'
-            assert '--build-arg' not in command
-        def seed_package(package, destination):
-            destination.mkdir()
-            (destination / 'manifest.json').write_text('{}')
-        with patch('sys.argv', ['start_with_recipes']), patch(
-                'scripts.start_with_recipes.download_release', return_value=Path('/tmp/package.zip')) as download, patch(
-                'scripts.start_with_recipes.prepare_seed', side_effect=seed_package), patch(
-                'scripts.start_with_recipes.subprocess.run', side_effect=run_compose) as run:
-            main()
-        assert download.call_count == 1
-        assert run.call_count == 1
-        assert not Path(run.call_args.kwargs['env']['FOODIARY_RECIPE_SEED_DIR']).exists()
-
-    def test_download_failure_never_starts_compose(self):
-        with patch('sys.argv', ['start_with_recipes']), patch(
-                'scripts.start_with_recipes.download_release', side_effect=ValueError('access denied')), patch(
-                'scripts.start_with_recipes.subprocess.run') as run:
-            with self.assertRaises(SystemExit) as error:
-                main()
-        assert error.exception.code == 1
-        run.assert_not_called()
 
 
 if __name__ == '__main__':

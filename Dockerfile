@@ -1,4 +1,12 @@
 # syntax=docker/dockerfile:1
+# Offline seed validation is isolated from the application build cache.
+FROM python:3.11-slim-bookworm AS recipe-data
+WORKDIR /check
+COPY recipe-package.json ./
+COPY scripts/install_recipe_package.py scripts/verify_recipe_seed.py ./scripts/
+COPY --from=recipe_seed / /opt/recipe-seed/
+RUN python -m scripts.verify_recipe_seed /opt/recipe-seed
+
 FROM python:3.11-slim-bookworm AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -50,7 +58,7 @@ ENV OCR_MODELS_DIR=/opt/foodiary-models \
 CMD ["python", "/app/scripts/cloudrun_entrypoint.py"]
 
 FROM runtime AS development
-# Named context supplied by scripts.start_with_recipes; contains no GitHub credentials.
-COPY --from=recipe_seed / /opt/recipe-seed/
+# Verified local data; no downloads or GitHub credentials during Docker builds.
+COPY --from=recipe-data /opt/recipe-seed/ /opt/recipe-seed/
 ENTRYPOINT ["sh", "/app/deploy/development-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

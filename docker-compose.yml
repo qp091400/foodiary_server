@@ -18,7 +18,7 @@ services:
       context: .
       target: development
       additional_contexts:
-        recipe_seed: ${FOODIARY_RECIPE_SEED_DIR:-./deploy/recipe-seed}
+        recipe_seed: ./recipe_data/image-seed
     env_file:
       - path: .env
         required: false # .env가 없으면 기본값으로 뜬다

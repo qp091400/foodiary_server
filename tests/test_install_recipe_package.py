@@ -74,16 +74,16 @@ def test_sidecars_prevent_replace(tmp_path):
 
 def test_download_and_preserve_existing(tmp_path):
     def fake_download(command, check):
-        assert command[:4] == ['gh', 'release', 'download', 'recipes-v4']
-        assert command[command.index('--repo') + 1] == 'yuyunsj/foodiary-data'
+        assert command[:4] == ['gh', 'release', 'download', 'test-release']
+        assert command[command.index('--repo') + 1] == 'test-owner/test-data'
         destination = Path(command[command.index('--dir') + 1])
-        (destination / 'Foodiary-recipes-20261029-v4.zip').write_bytes(b'package')
+        (destination / 'recipes-test.zip').write_bytes(b'package')
     with patch('scripts.install_recipe_package.shutil.which', return_value='/bin/gh'), patch(
             'scripts.install_recipe_package.subprocess.run', side_effect=fake_download) as run:
-        result = download_release(tmp_path)
+        result = download_release(tmp_path, 'test-owner/test-data', 'test-release', 'recipes-test.zip')
         assert result.read_bytes() == b'package'
         with unittest.TestCase().assertRaisesRegex(ValueError, 'already exists'):
-            download_release(tmp_path)
+            download_release(tmp_path, 'test-owner/test-data', 'test-release', 'recipes-test.zip')
         assert run.call_count == 1
 
 
@@ -91,7 +91,7 @@ def test_failed_download_cleans_staging(tmp_path):
     with patch('scripts.install_recipe_package.shutil.which', return_value='/bin/gh'), patch(
             'scripts.install_recipe_package.subprocess.run', side_effect=subprocess.CalledProcessError(1, 'gh')):
         with unittest.TestCase().assertRaisesRegex(ValueError, 'GitHub download failed'):
-            download_release(tmp_path)
+            download_release(tmp_path, 'test-owner/test-data', 'test-release', 'recipes-test.zip')
     assert list(tmp_path.iterdir()) == []
 
 

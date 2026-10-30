@@ -95,14 +95,35 @@ def install(package, directory, apply=False):
             print(f'Installed: {target}')
 
 
-DEFAULT_REPOSITORY = 'yuyunsj/foodiary-data'
-DEFAULT_RELEASE = 'recipes-v4'
-DEFAULT_ASSET = 'Foodiary-recipes-20261029-v4.zip'
+PACKAGE_CONFIG = Path(__file__).resolve().parents[1] / 'recipe-package.json'
 
 
-def download_release(directory, repository=DEFAULT_REPOSITORY,
-                     release=DEFAULT_RELEASE, asset=DEFAULT_ASSET):
-    """Use gh's existing login; never read or pass tokens to the container."""
+def load_package_config(path=None):
+    config = json.loads((path or PACKAGE_CONFIG).read_text(encoding='utf-8'))
+    for key in ('repository', 'release', 'asset', 'package_version', 'sha256'):
+        if not isinstance(config.get(key), str) or not config[key]:
+            raise ValueError(f'Missing or invalid recipe package setting: {key}')
+    if len(config['sha256']) != 64 or any(c not in '0123456789abcdef' for c in config['sha256']):
+        raise ValueError('Invalid recipe package SHA-256')
+    if not isinstance(config.get('quality_version'), int):
+        raise ValueError('Missing recipe quality version')
+    return config
+
+
+def check_manifest(manifest, config):
+    for key in ('package_version', 'sha256', 'quality_version'):
+        if manifest.get(key) != config[key]:
+            raise ValueError(f'Prepared recipe {key} differs from recipe-package.json; '
+                             'run python3 -m scripts.prepare_recipes')
+
+
+def download_release(directory, repository=None, release=None, asset=None):
+    """Use gh's existing login; defaults come from recipe-package.json."""
+    if None in (repository, release, asset):
+        config = load_package_config()
+        repository = repository or config['repository']
+        release = release or config['release']
+        asset = asset or config['asset']
     if Path(asset).name != asset or not asset.endswith('.zip') or any(c in asset for c in '*?[]'):
         raise ValueError('Asset must be an exact ZIP filename')
     if shutil.which('gh') is None:
@@ -132,9 +153,9 @@ def download_release(directory, repository=DEFAULT_REPOSITORY,
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('package', type=Path, nargs='?', help='Local ZIP; omit to download the pinned GitHub release')
-    parser.add_argument('--repo', default=DEFAULT_REPOSITORY)
-    parser.add_argument('--release', default=DEFAULT_RELEASE)
-    parser.add_argument('--asset', default=DEFAULT_ASSET)
+    parser.add_argument('--repo', help='Override recipe-package.json repository')
+    parser.add_argument('--release', help='Override recipe-package.json release')
+    parser.add_argument('--asset', help='Override recipe-package.json asset')
     parser.add_argument('--download-dir', type=Path,
                         default=Path.home() / '.cache' / 'foodiary' / 'recipes')
     parser.add_argument('--download-only', action='store_true', help='Download ZIP for later installation (e.g. Docker)')

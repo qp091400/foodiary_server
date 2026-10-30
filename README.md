@@ -27,16 +27,20 @@ Oracle Always Free ARM 서버 배포가 필요하면 [deploy/ORACLE.md](deploy/O
 
 ### docker compose (권장)
 
+최초 한 번 데이터를 준비한 뒤, Docker 빌드와 실행은 Compose로 수행합니다.
+
 ```bash
 cp .env.example .env        # 없어도 기본값으로 뜹니다
-gh auth login               # 최초 한 번, 비공개 foodiary-data 저장소 접근 권한 필요
-python3 -m scripts.start_with_recipes
+gh auth login               # 다운로드할 GitHub 계정에 비공개 데이터 저장소 접근 권한 필요
+python3 -m scripts.prepare_recipes
+docker compose up --build -d
 ```
 
-- Python 3.11+, GitHub CLI, Docker Compose 2.17+가 필요합니다. 실행 명령은 고정된 레시피 ZIP을 받아 검증하고 데이터만 이미지에 포함한 뒤 개발 서버를 백그라운드로 시작합니다.
-- 이미 ZIP이 있다면 `python3 -m scripts.start_with_recipes --package /absolute/path/to/package.zip`으로 실행할 수 있습니다(gh 불필요).
-- 이후 동일 이미지 재시작은 `docker compose up -d`로 가능합니다. 재빌드는 위 Python 명령을 사용하세요. 로그는 `docker compose logs -f api`로 확인합니다.
-- 시작 시 레시피가 같으면 유지하고, 다르면 기존 레시피 DB만 백업 후 교체합니다. 코드에서 고정한 이전 이미지로 돌아가면 레시피도 그 이미지 버전으로 돌아갑니다.
+- 데이터 준비에는 Python 3.11+와 GitHub CLI가 필요합니다. 이미 ZIP이 있다면 `python3 -m scripts.prepare_recipes --package /absolute/path/to/package.zip`으로 준비할 수 있습니다(gh 불필요).
+- 준비 스크립트는 다운로드와 검증만 수행합니다. 검증된 DB는 Git에서 제외된 `recipe_data/image-seed/`에 보관하고, 다운로드 ZIP과 임시 파일은 정리합니다. 같은 데이터가 준비돼 있으면 다시 다운로드하지 않습니다.
+- 평소 코드 변경은 **`docker compose up --build -d`**로 반영합니다. 이때 데이터 다운로드나 gh 인증은 수행하지 않습니다. Docker Compose 2.17+가 필요합니다. 재시작만 할 때는 `docker compose up -d`, 로그 확인은 `docker compose logs -f api`를 사용합니다.
+- 데이터 버전은 저장소 루트의 [recipe-package.json](recipe-package.json) 한 파일에서 관리합니다. 갱신 시 이 파일을 변경하고 `python3 -m scripts.prepare_recipes` → `docker compose up --build -d`를 실행합니다. 빌드는 준비된 DB가 이 설정과 맞는지 오프라인으로 검사합니다.
+- 서버 시작 시 레시피가 같으면 유지하고, 다르면 기존 레시피 DB만 백업 후 교체합니다. 이전 이미지로 돌아가면 레시피도 그 이미지 버전으로 돌아갑니다.
 - API: <http://localhost:8000>, Swagger: <http://localhost:8000/docs>
 - 첫 빌드는 PaddleOCR 설치 때문에 5~10분 걸립니다.
 - **첫 영수증 업로드는 모델을 내려받느라 느립니다** (인터넷 필요, Hugging Face에서 받습니다). 모델은 `paddle_models` 볼륨에 남아 재시작해도 다시 받지 않습니다.
