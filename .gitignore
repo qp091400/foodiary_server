@@ -20,3 +20,11 @@ recipe_data/
 # VS Code Dev Containers 개인 설정
 .devcontainer/
 .devcontainer.json
+
+*.zip
+
+*.sqlite3
+
+*.sqlite3-*
+
+*.sqlite3.backup-*

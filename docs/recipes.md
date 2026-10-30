@@ -8,7 +8,7 @@
 `.env`의 `MAFRA_API_KEY`를 설정한다. 키는 앱이나 Git에 넣지 않는다.
 
 ```sh
-docker compose up -d --build
+python3 -m scripts.start_with_recipes
 docker compose run --rm --no-deps --volume /absolute/path/to/csvs:/imports:ro api python -m scripts.import_recipe_sources --mafra --csv /imports/TB_RECIPE_SEARCH-220701.csv /imports/TB_RECIPE_SEARCH-231130.csv /imports/TB_RECIPE_SEARCH_241226.csv /imports/TB_RECIPE_SEARCH_251231.csv
 ```
 
@@ -115,7 +115,7 @@ FOODSAFETY_API_KEY=발급받은_키
 ```
 
 ```sh
-docker compose up -d --build
+python3 -m scripts.start_with_recipes
 docker compose run --rm --no-deps api python -m scripts.import_recipes
 ```
 
@@ -154,3 +154,97 @@ docker compose run --rm --no-deps api pytest -q tests/test_recipes.py
 ```
 
 실제 계정의 식재료/예시 데이터를 만드는 코드나 seed는 포함하지 않는다. 테스트는 독립 SQLite DB를 사용한다.
+
+## 개발 Docker 자동 설치 (권장)
+
+```sh
+gh auth login
+python3 -m scripts.start_with_recipes
+```
+
+비공개 foodiary-data 저장소 접근 권한, 호스트 Python 3.11+, gh,
+Docker Compose 2.17+와 실행 중인 Docker가 필요하다.
+명령은 recipes-v4의 고정 ZIP을 임시 폴더에 받고, 코드에 고정된 DB SHA-256과
+패키지 검증을 통과한 recipes.sqlite3와 manifest만 별도 빌드 컨텍스트로 전달한다.
+이미지에는 압축을 푼 약 870MB DB가 추가된다. GitHub 인증정보는 호스트 gh에서만
+사용하며 빌드 인자·이미지·컨테이너로 전달하지 않는다.
+이미 받은 ZIP은 `python3 -m scripts.start_with_recipes --package /absolute/path/to/package.zip`으로
+사용할 수 있다. 이 경우 gh와 GitHub 연결이 필요 없다(이미지 빌드에는 네트워크가 필요할 수 있다).
+
+서버 실행 전에 /opt/recipe-seed의 DB와 recipe_data 볼륨의 DB를 비교한다.
+없거나 체크섬이 다르면 새 자료를 검증한 뒤 기존 DB를 백업하고 원자적으로 교체한다.
+같은 자료면 백업/교체 없이 시작한다. 검증 실패나 SQLite sidecar가 있으면 서버 시작을
+중단하고 기존 파일을 유지한다. 수집/재검사 등 작성 작업을 동시에 실행하지 않는다.
+pgdata, uploads, .env는 데이터 설치 과정에서 수정하지 않는다.
+백업 파일은 recipe_data 볼륨에 남으며 자동 삭제하지 않는다.
+
+이 자동 초기화는 개발용 development 타깃과 docker-compose.yml에 적용한다.
+운영/Cloud Run 타깃에는 적용하지 않는다. 운영은 영속 마운트와 권한을 별도로 구성해야 한다.
+이미지를 공유할 때도 데이터 출처의 이용 조건에 따라 비공개로 보관한다.
+기존 이미지 실행은 `docker compose up -d`, 재빌드는 위 Python 명령을 사용한다.
+직접 `docker compose up --build`하면 seed가 없는 이미지가 생성되어 시작이 거부될 수 있다.
+버전 갱신은 install_recipe_package.py의 기본 릴리스/파일명과
+start_with_recipes.py의 EXPECTED_SHA256을 함께 변경한 후 재빌드한다.
+고정 버전보다 다른 자료가 볼륨에 있어도 이미지 자료로 백업 후 교체하므로
+로컬에서 재수집한 DB를 유지하려면 이 자동 초기화 이미지를 사용하지 않는다.
+
+## 팀 공유 ZIP 수동 설치 (Docker 없이 / 문제 해결용)
+
+비공개 배포 저장소: https://github.com/yuyunsj/foodiary-data/releases/tag/recipes-v4
+저장소 접근 권한과 호스트의 GitHub CLI 로그인이 필요하다. 토큰을 코드나 앱에 넣지 않는다.
+로컬 서버에서는 ZIP 인자를 생략하면 고정된 recipes-v4 릴리스를 다운로드하고 검증한다.
+
+```sh
+gh auth login
+python3 scripts/install_recipe_package.py --data-dir /absolute/server/recipe_data --apply
+```
+
+--apply를 생략하면 다운로드와 검증만 한다. 기본 다운로드 위치는
+~/.cache/foodiary/recipes이며 --download-dir로 변경할 수 있다.
+기존 ZIP은 자동으로 덮어쓰거나 재사용하지 않는다. 재실행 시 출력된 ZIP 경로를
+위치 인자로 넘기면 재다운로드 없이 검증/설치한다. 버전을 바꿀 때는 --release와
+--asset을 함께 지정한다. --repo로 다른 비공개 배포 저장소도 지정할 수 있다.
+
+Docker에서는 호스트에서 먼저 다운로드한 뒤 컨테이너 안에서 설치한다.
+컨테이너에 gh나 GitHub 인증정보를 넣을 필요가 없다. 서버 저장소 루트에서 실행한다.
+
+```sh
+python3 scripts/install_recipe_package.py --download-only
+docker compose run --rm --no-deps --entrypoint python -v "$HOME/.cache/foodiary/recipes/Foodiary-recipes-20261029-v4.zip:/imports/recipes.zip:ro" -v "$PWD/scripts/install_recipe_package.py:/tmp/install_recipe_package.py:ro" api /tmp/install_recipe_package.py /imports/recipes.zip --apply
+```
+
+--download-only는 다운로드만 수행한다. 체크섬/DB 검증은 두 번째 명령에서 수행한다.
+
+
+서버·앱의 레시피 개선 코드가 포함된 main을 먼저 사용한다. 이 스크립트는
+코드를 pull하거나 수정하지 않는다. Python 3.11 이상에서 추가 패키지 없이 실행한다.
+ZIP은 Git 밖에 보관한다. 로컬 서버는 실제 설정과 동일한 경로를 명시한다
+(`.env`를 자동으로 읽지는 않는다).
+
+```sh
+python3 scripts/install_recipe_package.py ~/Downloads/Foodiary-recipes-20261029-v4.zip --data-dir /absolute/server/recipe_data
+# 검증 성공 후 같은 명령에 --apply를 붙여 설치
+```
+
+개발용 Docker Compose에서는 실제 api 서비스의 recipe_data 볼륨 안에서 실행한다.
+서버 저장소 루트에서 다음 명령을 실행한다. 이미지가 없으면 먼저
+`python3 -m scripts.start_with_recipes`로 이미지를 준비한다. 컨테이너 설치 명령에는 호스트 Python이 필요 없다.
+
+```sh
+docker compose run --rm --no-deps --entrypoint python -v "$HOME/Downloads/Foodiary-recipes-20261029-v4.zip:/imports/recipes.zip:ro" -v "$PWD/scripts/install_recipe_package.py:/tmp/install_recipe_package.py:ro" api /tmp/install_recipe_package.py /imports/recipes.zip
+# 검증 성공 후 위 명령 끝에 --apply 추가
+```
+
+기본 실행은 체크섬·크기·SQLite 무결성·테이블·스키마·건수·품질 버전과
+추천 대상의 최소 재료 수를 검증한다. 대상 폴더에 임시 파일과 설치 잠금 파일을
+만들지만 기존 DB는 바꾸지 않는다. 압축 해제용 약 870MB, 적용 시 기존 DB 백업을
+포함한 여유 공간이 필요하다. --apply는 검증한 파일을 같은 파일시스템에서
+원자적으로 교체하며 기존 DB는 recipes.sqlite3.backup-<UTC 시각>으로 보존한다.
+실패하면 기존 DB는 유지된다. 수집/재검사 등 다른 DB 작성 작업과 동시에 실행하지 않는다.
+manifest 체크섬은 파일 손상을 검사하며 배포자의 신원을 인증하지는 않는다.
+신뢰하는 팀 공유 경로의 ZIP을 사용한다.
+
+사용자 DB·업로드·환경 설정은 수정하지 않으며 볼륨 삭제나 서버 재시작도 하지 않는다.
+적용 후 앱에서 추천을 새로 요청해 실제 결과를 확인한다. 추천 API 검증은 별도다.
+운영 compose에는 현재 recipe_data 마운트가 없으므로 이 개발용 명령을 그대로
+사용하지 말고 운영 영속 저장소와 쓰기 권한을 먼저 구성해야 한다.

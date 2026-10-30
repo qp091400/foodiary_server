@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 FROM python:3.11-slim-bookworm AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -49,3 +50,6 @@ ENV OCR_MODELS_DIR=/opt/foodiary-models \
 CMD ["python", "/app/scripts/cloudrun_entrypoint.py"]
 
 FROM runtime AS development
+# Named context supplied by scripts.start_with_recipes; contains no GitHub credentials.
+COPY --from=recipe_seed / /opt/recipe-seed/
+ENTRYPOINT ["sh", "/app/deploy/development-entrypoint.sh"]

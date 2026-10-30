@@ -29,13 +29,18 @@ Oracle Always Free ARM 서버 배포가 필요하면 [deploy/ORACLE.md](deploy/O
 
 ```bash
 cp .env.example .env        # 없어도 기본값으로 뜹니다
-docker compose up --build
+gh auth login               # 최초 한 번, 비공개 foodiary-data 저장소 접근 권한 필요
+python3 -m scripts.start_with_recipes
 ```
 
+- Python 3.11+, GitHub CLI, Docker Compose 2.17+가 필요합니다. 실행 명령은 고정된 레시피 ZIP을 받아 검증하고 데이터만 이미지에 포함한 뒤 개발 서버를 백그라운드로 시작합니다.
+- 이미 ZIP이 있다면 `python3 -m scripts.start_with_recipes --package /absolute/path/to/package.zip`으로 실행할 수 있습니다(gh 불필요).
+- 이후 동일 이미지 재시작은 `docker compose up -d`로 가능합니다. 재빌드는 위 Python 명령을 사용하세요. 로그는 `docker compose logs -f api`로 확인합니다.
+- 시작 시 레시피가 같으면 유지하고, 다르면 기존 레시피 DB만 백업 후 교체합니다. 코드에서 고정한 이전 이미지로 돌아가면 레시피도 그 이미지 버전으로 돌아갑니다.
 - API: <http://localhost:8000>, Swagger: <http://localhost:8000/docs>
 - 첫 빌드는 PaddleOCR 설치 때문에 5~10분 걸립니다.
 - **첫 영수증 업로드는 모델을 내려받느라 느립니다** (인터넷 필요, Hugging Face에서 받습니다). 모델은 `paddle_models` 볼륨에 남아 재시작해도 다시 받지 않습니다.
-- 볼륨: `pgdata`(DB), `uploads`(영수증 이미지), `paddle_models`(OCR 모델 캐시)
+- 볼륨: `pgdata`(사용자 DB), `uploads`(영수증 이미지), `paddle_models`(OCR 모델 캐시), `recipe_data`(레시피 DB)
 - **PaddleOCR 모델 캐시 경로**: 컨테이너(root)의 `/root/.paddlex/official_models/` (= `~/.paddlex`). 실제 실행 로그로 확인했고, 받는 모델은 `PP-OCRv5_server_det`, `korean_PP-OCRv5_mobile_rec`, `PP-LCNet_x1_0_textline_ori` 세 개입니다.
 - 확인한 버전: Python 3.11, `paddlepaddle==3.2.2`, `paddleocr==3.7.0`. paddlepaddle 3.3.1은 CPU 추론에서 오류가 나서 3.2.2로 고정했습니다 ([requirements-ocr.txt](requirements-ocr.txt)).
 

@@ -26,3 +26,9 @@ uploads
 recipe_data
 *.db
 fridge-receipt-backend-prompt.md
+
+*.sqlite3
+
+*.sqlite3-*
+
+*.sqlite3.backup-*
