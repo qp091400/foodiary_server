@@ -1,0 +1,11 @@
+{
+  "repository": "yuyunsj/foodiary-data",
+  "release": "recommendation-demo-v1",
+  "asset": "Foodiary-recommendation-demo-v1.zip",
+  "model_version": "16498301425cbef78805dc3645469390faee97e6ef9ce495a42dfa448c179a0a",
+  "sha256": "4c354a36140685898219136815b0575f9e4991a078a28c5c8a6f68b7da49ffbd",
+  "ranking_sha256": "ef134033b7b0490aef1995372ca6c0689ee60c286c07545caf619fe870ea8d25",
+  "recipe_package_sha256": "72110d581b1b3c48ede6661df446f9b7d894a0801fb729bba8dc255d6073958a",
+  "deployment_mode": "demo",
+  "research_gates_passed": false
+}
