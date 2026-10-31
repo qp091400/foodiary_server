@@ -42,3 +42,25 @@ def test_tracked_weights_and_recipe_pin_cannot_silently_drift(package):
     root,archive=package
     (root/'recommendation-model.json').write_text('changed')
     with pytest.raises(ValueError,match='Tracked model'):prepare(root,archive)
+
+def test_cloud_build_stages_once_per_pinned_release_without_deploying(package,monkeypatch):
+    from scripts import cloudrun
+    from tests.test_cloudrun import config as deployment_config
+    from scripts.prepare_recommendation_model import FILES
+    root,archive=package;prepare(root,archive)
+    monkeypatch.setattr(cloudrun,'ROOT',root)
+    deployment=cloudrun.Deployment(deployment_config(),root/'cloud-state')
+    calls=[]
+    def missing_cache(*args,**kwargs):
+        calls.append(args)
+        return None
+    monkeypatch.setattr(deployment,'gcloud',missing_cache)
+    location=deployment.ensure_recommendation_seed()
+    assert '/recommendation-seed/' in location
+    assert len([call for call in calls if call[:2]==('storage','cp')])==len(FILES)
+    assert calls[-1][-1]==location+'/manifest.json'
+    def uploaded(*args,**kwargs):
+        assert args[:2]==('storage','ls')
+        return '\n'.join(location+'/'+name for name in FILES)
+    monkeypatch.setattr(deployment,'gcloud',uploaded)
+    assert deployment.ensure_recommendation_seed()==location
