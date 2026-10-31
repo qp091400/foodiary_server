@@ -9,7 +9,7 @@ import httpx
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("base_url", help="https://foodiary.kr/api")
+    parser.add_argument("base_url", help="https://api.foodiary.kr")
     args = parser.parse_args()
     url = urlsplit(args.base_url)
     if url.scheme != "https" or not url.hostname or url.username or url.password or url.query or url.fragment or url.path not in {"", "/", "/api", "/api/"}:

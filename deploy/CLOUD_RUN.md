@@ -209,6 +209,34 @@ gcloud scheduler jobs delete foodiary-keepalive --location asia-northeast1
 
 색인까지는 며칠에서 몇 주 걸리고 검색 순위는 보장되지 않는다.
 
+### API에 전용 주소 붙이기 (api.foodiary.kr)
+
+웹은 `foodiary.kr`(Firebase), API는 `api.foodiary.kr`(Cloud Run 도메인 매핑)로 나눠 붙이는 방법이다. 프록시가 필요 없고 `/api` 같은 접두어도 생기지 않는다. 아래 `gcloud` 명령은 [Cloud Run 도메인 매핑 문서](https://cloud.google.com/run/docs/mapping-custom-domains)를 따른 것이며, 이 저장소의 테스트는 `add-host`까지만 확인한다. 매핑 기능은 문서에서 **Preview(운영 사용 비권장)** 로 표시되어 있다. 문제가 생기면 `run.app` 주소는 그대로 동작하므로 매핑을 지우고 `run.app`을 계속 쓰면 된다.
+
+1. **Google에 도메인 소유 확인**(한 번만): Google Search Console에서 **도메인** 유형으로 `foodiary.kr`을 추가하면 TXT 값을 준다. 가비아 DNS에 **새 TXT 행으로 추가**한다(Firebase가 만든 TXT와 `A` 레코드는 지우지 않는다). 확인이 끝났는지는 Cloud Shell에서 `gcloud domains list-user-verified`로 본다. 같은 확인이 검색 등록에도 쓰인다.
+2. **도메인 매핑 만들기**(Cloud Shell):
+
+   ```sh
+   gcloud beta run domain-mappings create --service foodiary --domain api.foodiary.kr --region asia-northeast1
+   gcloud beta run domain-mappings describe --domain api.foodiary.kr --region asia-northeast1
+   ```
+
+   `describe` 결과의 `resourceRecords`에 나온 `CNAME` 값(보통 `ghs.googlehosted.com.`)을 가비아에 **호스트 `api`, 타입 CNAME**으로 입력한다. 값은 출력된 그대로 쓴다. 서비스 이름과 리전은 `.cloudrun/config.json`과 같게 한다.
+3. **서버가 새 주소를 받아 주게 하기**: 서버는 허용 목록에 없는 `Host`를 400으로 거절한다. 매핑만 만들고 이 단계를 빼면 인증서가 발급돼도 `https://api.foodiary.kr`이 400을 돌려준다. 코드를 받은 뒤:
+
+   ```sh
+   cd ~/foodiary-cloudrun
+   python3 scripts/cloudrun.py add-host api.foodiary.kr
+   python3 scripts/cloudrun.py deploy      # 설정만 바뀌었으므로 build 없이
+   python3 scripts/cloudrun.py publish
+   ```
+
+   `add-host`는 있던 주소를 지우지 않고(소문자로, 끝의 `.`과 중복은 정리) 클라우드에는 아무것도 하지 않는다. `https://`나 경로, `*`가 들어 있으면 아무것도 바꾸지 않고 거절한다. `deploy`는 직전 `release`가 남긴 이미지와 마이그레이션 기록(`.cloudrun/`)을 그대로 쓰므로 `build`와 `migrate`는 필요 없다. 그 기록이 없으면(폴더를 지웠다면) `release`로 한다. `deploy`는 서비스를 잠시 IAM 비공개로 되돌리므로 `publish`까지 끝나야 다시 열린다.
+4. **기다린 뒤 확인**: 인증서는 15분에서 24시간쯤 걸린다. `gcloud beta run domain-mappings describe ...`의 상태가 `Ready`가 되면 `curl -i https://api.foodiary.kr/health`가 200이어야 한다. 가비아에서 레코드를 넣기 전에 조회한 적이 있으면 이 PC나 통신사 DNS가 "없음"을 한동안 기억해 열리지 않을 수 있다(수 시간). 다른 네트워크나 브라우저의 보안 DNS로 확인한다.
+5. **웹이 새 API 주소를 쓰게 하기**: 웹을 다시 내보낼 때 `EXPO_PUBLIC_API_URL=https://api.foodiary.kr`로 빌드해 Firebase Hosting에 올린다. `foodiary.kr`은 CORS 허용 목록에 이미 있다. 이 값을 바꾸기 전까지 웹은 `run.app` 주소를 계속 쓰므로 3단계까지는 서비스에 영향이 없다.
+
+`cloudrun.py`의 `verify`와 `publish`는 계속 `run.app` 주소로 점검한다. 응답에는 `X-Robots-Tag: noindex`가 붙으므로 `api.foodiary.kr`도 검색에 나오지 않는다.
+
 ## 5. 업데이트·복구
 
 소스 변경 후 `build → migrate → deploy → verify → publish`를 실행한다. `deploy`는 다시 IAM 비공개로 바꾸므로
@@ -233,7 +261,6 @@ cd ~/foodiary-cloudrun && python3 scripts/cloudrun.py release
 이미지 교체만으로 DB가 되돌아가지는 않는다. 스키마 변경과 이전 이미지의 호환성도 확인한다.
 
 Neon 복원 기능과 별도로 DB 덤프와 사진을 외부에 보관하고 복원을 시험한다.
-Oracle용 `scripts/backup.sh`는 Compose 전용이므로 Cloud Run 백업에 사용하지 않는다.
 사진은 인증된 Cloud Shell에서 `gcloud storage cp --recursive gs://BUCKET_NAME ./private-receipt-backup`으로 복사할 수 있다.
 덤프는 DB 버전과 호환되는 `pg_dump`를 사용하고 DB 암호를 명령 인자·터미널 로그에 남기지 않는다.
 사진 버킷에는 보존 중인 영수증을 나이만으로 자동 삭제하는 규칙을 설정하지 않는다.
@@ -251,32 +278,3 @@ gcloud storage ls 'gs://<프로젝트>-<서비스>-builds/recipe-seed/*/'  # 레
 참조: [Storage 볼륨](https://docs.cloud.google.com/run/docs/configuring/services/cloud-storage-volume-mounts),
 [메모리 설정](https://docs.cloud.google.com/run/docs/configuring/services/memory-limits),
 [개발자 크레딧 적용](https://developers.google.com/profile/help/benefits#google-cloud-credits).
-
-## 도메인 하나에서 웹과 API 제공 (기존 API 서비스가 프록시)
-
-프로젝트가 다른 Firebase Hosting도 기존 Cloud Run API 서비스에서 HTTP로 전달할 수 있다.
-Firebase에 Cloud Run rewrite를 추가하는 방식은 사용하지 않는다.
-배포 설정 JSON에 다음 두 필드를 추가한다(비밀값이 아님).
-
-```json
-{
-  "web_upstream": "https://foodiary-app-ef2b5.web.app",
-  "public_origin": "https://foodiary.kr"
-}
-```
-
-기존 설정의 나머지 필드는 유지한다. `web_upstream`을 비우면 기존 API 전용 동작을 유지한다.
-활성화하면 `/api/*`는 같은 서비스의 API로, 나머지 GET/HEAD는 웹 upstream으로 전달한다.
-상태 검사 `/health`, `/ready`는 기존 Cloud Run 검사와 호환되도록 API에서 처리한다.
-API 토큰과 Cookie는 정적 웹 upstream으로 보내지 않는다.
-
-앱/웹은 `EXPO_PUBLIC_API_URL=https://foodiary.kr/api`로 새로 빌드한다.
-게이트웨이 모드에서는 이전 `/auth/login` 같은 비접두사 API 주소가 동작하지 않으므로
-기존 모바일 클라이언트도 `/api` 주소로 갱신해야 한다.
-운영 API 코드 재배포 후 `foodiary.kr`을 이 Cloud Run 서비스의 사용자 도메인으로 연결하고,
-웹도 새 API 주소로 빌드하여 기존 Firebase Hosting에 배포한다.
-DNS를 Cloud Run의 조회 시점 IP에 직접 고정하지 말고 사용자 도메인 연결에서 안내한 레코드를 사용한다.
-기존에 도메인이 Firebase에 연결돼 있으면 기존 연결을 확인하고 Cloud Run 쪽으로 이전해야 한다.
-`web_upstream`은 루프 방지를 위해 사용자 도메인 대신 Firebase의 원래 `.web.app` 주소를 사용한다.
-
-이 저장소의 코드 수정만으로 Cloud Run 재배포, 사용자 도메인 연결, DNS 변경이 수행되지는 않는다.

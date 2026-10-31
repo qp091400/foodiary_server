@@ -38,20 +38,6 @@ services:
       # PaddleOCR 모델 캐시: 재시작할 때 다시 내려받지 않는다
       - paddle_models:/root/.paddlex
 
-  proxy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-    environment:
-      WEB_UPSTREAM: ${LOCAL_WEB_UPSTREAM:-host.docker.internal:8081}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - ./deploy/Caddyfile.local:/etc/caddy/Caddyfile:ro
-    depends_on:
-      - api
-
 volumes:
   pgdata:
   uploads:
