@@ -16,6 +16,8 @@ router = APIRouter(prefix="/fridges/{fridge_id}/recipes", tags=["레시피"])
 
 class Selection(BaseModel):
     item_ids: list[int] = Field(max_length=1000)
+    offset: int = Field(0, ge=0, le=1000000)
+    seed: int | None = Field(None, ge=0, le=2147483647)
 
 
 @router.post("/recommendations")
@@ -28,7 +30,7 @@ def recommendations(payload: Selection, access: FridgeAccess = Depends(get_fridg
         raise HTTPException(409, "선택한 식품이 변경됐어요. 냉장고 목록을 새로 불러와 주세요.")
     expired = [f for f in foods if f.expiry_date and f.expiry_date < today()]
     usable = [f for f in foods if f not in expired]
-    result = recipe_store.recommendations(usable)
+    result = recipe_store.recommendations(usable, offset=payload.offset, seed=payload.seed)
     summaries = rating_summaries(db, [recipe["id"] for recipe in result["recipes"]])
     for recipe in result["recipes"]:
         rating = summaries[recipe["id"]]
