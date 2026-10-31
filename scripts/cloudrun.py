@@ -30,6 +30,7 @@ RELEASE_STEPS = ("build", "migrate", "deploy", "publish")
 # The database goes first: manifest.json marks the upload as complete.
 RECIPE_SEED_FILES = ("recipes.sqlite3", "manifest.json")
 IMAGE_TAG = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]{0,127}")
+EMAIL = re.compile(r"[^@\s<>\"]+@[^@\s<>\"]+\.[A-Za-z]{2,}")
 HOSTNAME = re.compile(r"(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}")
 APIS = ("run.googleapis.com", "cloudbuild.googleapis.com", "artifactregistry.googleapis.com",
         "secretmanager.googleapis.com", "iam.googleapis.com", "storage.googleapis.com")
@@ -495,6 +496,22 @@ def set_share_link_base(config_path: Path, address: str) -> str:
     return base
 
 
+def set_mail_account(config_path: Path, address: str, password: str) -> str:
+    """Send verification mail from another account: the SMTP login and the From address change together and its app password replaces the old one."""
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    address = address.strip().lower()
+    password = "".join(password.split())  # Gmail shows app passwords in groups of four letters
+    if not EMAIL.fullmatch(address):
+        raise ValueError("Use a plain email address such as foodiarynoreply@gmail.com")
+    if not password or (config.get("smtp_host") == "smtp.gmail.com" and not re.fullmatch(r"[A-Za-z]{16}", password)):
+        raise ValueError("A Gmail app password is 16 letters (spaces are ignored). Create one under Google Account > Security > 2-Step Verification > App passwords")
+    updated = {**config, "smtp_user": address, "mail_from": address}
+    validate_config(updated)
+    save_private(config_path.parent / "secrets" / "SMTP_PASSWORD", password)
+    save_private(config_path, json.dumps(updated, indent=2) + "\n")
+    return address
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=ROOT / ".cloudrun" / "config.json")
@@ -513,6 +530,8 @@ def main() -> None:
     add_host.add_argument("hosts", nargs="+", help="host names only: no https:// and no path")
     share_base = commands.add_parser("set-share-link-base", help="Set the web address fridge share links and QR codes open, e.g. https://foodiary.kr/share/. Run deploy and publish afterwards")
     share_base.add_argument("address", help="HTTPS address of the app's /share/ page")
+    mail = commands.add_parser("set-mail-account", help="Send verification mail from another Gmail account; asks for its app password. Run secrets, deploy and publish afterwards")
+    mail.add_argument("address", help="the account's email address, e.g. foodiarynoreply@gmail.com")
     release = commands.add_parser("release", help="build, migrate, deploy and publish in one go (private from deploy until publish ends)")
     release.add_argument("--image", metavar="TAG", help="deploy the image the GitHub trigger already built for this tag "
                                                         "(the 7-character commit id, or latest) instead of building here")
@@ -530,6 +549,10 @@ def main() -> None:
         if args.action == "add-host":
             hosts = add_hosts(args.config, args.hosts)
             print("The service answers for these extra host names: " + ", ".join(hosts) + "\nRun deploy and publish to apply. No cloud resources were changed.")
+            return
+        if args.action == "set-mail-account":
+            address = set_mail_account(args.config, args.address, getpass.getpass("App password of that account (hidden, 16 letters): "))
+            print(f"Verification mail will be sent from {address}.\nRun secrets, deploy and publish to apply. No cloud resources were changed.")
             return
         if args.action == "set-share-link-base":
             base = set_share_link_base(args.config, args.address)

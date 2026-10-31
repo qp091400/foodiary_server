@@ -764,3 +764,49 @@ def test_set_share_link_base_is_an_offline_cli_command(tmp_path, monkeypatch, ca
     cloudrun.main()
     assert json.loads(path.read_text())["share_link_base"] == "https://foodiary.kr/share/"
     assert "https://foodiary.kr/share/<token>" in capsys.readouterr().out
+
+
+# ── 인증 메일을 보내는 계정 바꾸기 ────────────────────────────────────────
+
+
+def write_secrets(tmp_path):
+    folder = tmp_path / "secrets"
+    folder.mkdir()
+    for key, value in (("DATABASE_URL", "db"), ("JWT_SECRET", "j" * 48), ("SMTP_PASSWORD", "oldpasswordxxxxx")):
+        (folder / key).write_text(value)
+    return folder
+
+
+def test_set_mail_account_changes_login_sender_and_app_password_only(tmp_path):
+    path, folder = write_config(tmp_path), write_secrets(tmp_path)
+    before = json.loads(path.read_text())
+    assert cloudrun.set_mail_account(path, " FoodiaryNoReply@Gmail.com ", "abcd efgh ijkl mnop") == "foodiarynoreply@gmail.com"
+    after = json.loads(path.read_text())
+    assert (after["smtp_user"], after["mail_from"]) == ("foodiarynoreply@gmail.com", "foodiarynoreply@gmail.com")
+    assert {k: v for k, v in after.items() if k not in ("smtp_user", "mail_from")} == {k: v for k, v in before.items() if k not in ("smtp_user", "mail_from")}
+    assert (folder / "SMTP_PASSWORD").read_text() == "abcdefghijklmnop"  # Gmail이 보여 주는 띄어쓰기는 뺀다
+    assert (folder / "JWT_SECRET").read_text() == "j" * 48 and (folder / "DATABASE_URL").read_text() == "db"  # 다른 비밀값은 그대로
+    assert cloudrun.environment(after)["MAIL_FROM"] == "foodiarynoreply@gmail.com"
+
+
+@pytest.mark.parametrize("address, password", [
+    ("foodiarynoreply", "abcdefghijklmnop"), ("a b@gmail.com", "abcdefghijklmnop"), ("Foodiary <x@gmail.com>", "abcdefghijklmnop"),
+    ("foodiarynoreply@gmail.com", ""), ("foodiarynoreply@gmail.com", "abcdefghijklmno"), ("foodiarynoreply@gmail.com", "abcd1234efgh5678"),
+])
+def test_set_mail_account_rejects_bad_input_without_changing_anything(tmp_path, address, password):
+    path, folder = write_config(tmp_path), write_secrets(tmp_path)
+    before, secret = path.read_text(), (folder / "SMTP_PASSWORD").read_text()
+    with pytest.raises(ValueError):
+        cloudrun.set_mail_account(path, address, password)
+    assert path.read_text() == before and (folder / "SMTP_PASSWORD").read_text() == secret
+
+
+def test_set_mail_account_is_an_offline_cli_command_that_hides_the_password(tmp_path, monkeypatch, capsys):
+    path, folder = write_config(tmp_path), write_secrets(tmp_path)
+    monkeypatch.setattr(cloudrun.shutil, "which", lambda name: pytest.fail("set-mail-account must not look for or run gcloud"))
+    monkeypatch.setattr(cloudrun.getpass, "getpass", lambda prompt: "wxyz wxyz wxyz wxyz")
+    monkeypatch.setattr(cloudrun.sys, "argv", ["cloudrun", "--config", str(path), "set-mail-account", "foodiarynoreply@gmail.com"])
+    cloudrun.main()
+    assert json.loads(path.read_text())["smtp_user"] == "foodiarynoreply@gmail.com" and (folder / "SMTP_PASSWORD").read_text() == "wxyzwxyzwxyzwxyz"
+    out = capsys.readouterr().out
+    assert "foodiarynoreply@gmail.com" in out and "wxyz" not in out  # 비밀번호는 화면에 찍지 않는다

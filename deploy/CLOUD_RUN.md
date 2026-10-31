@@ -251,6 +251,26 @@ python3 scripts/cloudrun.py publish
 - 끝의 `/`는 없으면 붙여 준다. HTTPS 주소만 받는다. 클라우드에는 아무것도 하지 않고 다음 `deploy`(또는 `release`)부터 적용된다.
 - QR은 요청할 때마다 그때의 주소로 만든다. 이미 인쇄하거나 보낸 QR의 주소는 바뀌지 않으니 오래 쓸 주소를 넣는다. `foodiary.kr` 인증서가 나오기 전이면 `https://foodiary-app-ef2b5.web.app/share/`로 시작해도 된다(같은 웹 앱이라 나중에 바꿔도 옛 QR이 계속 열린다).
 
+### 인증 메일을 보내는 계정 바꾸기
+
+회원가입·아이디 찾기·비밀번호 재설정 메일은 Gmail SMTP로 보낸다. 보내는 계정을 바꾸려면 그 계정의 **앱 비밀번호**가 필요하다(계정의 로그인 비밀번호가 아니다).
+
+1. 새 계정으로 Google 계정 → 보안에서 **2단계 인증**을 켠다. 그다음 같은 화면의 **앱 비밀번호**에서 16글자 비밀번호를 만든다(이름은 아무거나, 예: `foodiary-server`). 한 번만 보이니 바로 쓴다.
+2. Cloud Shell에서:
+
+   ```sh
+   cd ~/foodiary-cloudrun
+   python3 scripts/cloudrun.py set-mail-account foodiarynoreply@gmail.com   # 앱 비밀번호를 묻는다. 입력해도 화면에 보이지 않는다
+   python3 scripts/cloudrun.py secrets     # 비밀값을 Secret Manager에 새 버전으로 올린다
+   python3 scripts/cloudrun.py deploy
+   python3 scripts/cloudrun.py publish
+   ```
+
+- `set-mail-account`는 로그인 계정(`smtp_user`)과 보낸 사람 주소(`mail_from`)를 함께 바꾸고, 앱 비밀번호의 띄어쓰기는 빼고 저장한다. 클라우드에는 아무것도 하지 않는다.
+- `secrets`는 DB 주소, JWT 키도 같은 값으로 새 버전을 올린다. 값이 같으니 로그인한 사용자는 그대로다.
+- 받은편지함에는 보낸 사람이 `Foodiary`로 보인다. 보낸 사람 사진은 그 Google 계정의 프로필 사진이다(받는 메일 앱에 따라 보이지 않을 수 있다).
+- 바꾼 뒤 회원가입 화면에서 인증 메일을 한 번 받아 본다. 메일이 오지 않으면 Cloud Run 로그에서 `메일 발송 실패`를 찾는다(앱 비밀번호가 틀리면 `Username and Password not accepted`가 남는다).
+
 ## 5. 업데이트·복구
 
 소스 변경 후 `build → migrate → deploy → verify → publish`를 실행한다. `deploy`는 다시 IAM 비공개로 바꾸므로
