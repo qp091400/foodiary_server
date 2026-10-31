@@ -1,4 +1,4 @@
-"""one fixed share link per fridge; friends, view-only access, change requests and invite codes are gone
+"""one fixed share link per fridge; everyone invited edits; friends, view-only access, change requests and invite codes are gone
 
 Revision ID: 0009
 Revises: 0008
@@ -21,7 +21,17 @@ ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 
 
 def upgrade() -> None:
-    # 친구, 보기만 하는 권한, 변경 요청, 예전 공유 링크와 초대코드를 지운다. 고칠 수 있는 멤버(fridge_members)는 그대로 남는다.
+    # 초대받은 사람은 모두 함께 고친다. 보기만 하던 사람(fridge_viewers)은 고칠 수 있는 멤버가 되어 접근을 잃지 않는다.
+    # 이미 멤버이거나 주인인 사람은 다시 넣지 않고, 들어온 날짜(joined_at)는 보기 권한을 받은 날짜를 그대로 쓴다.
+    op.execute("""
+        INSERT INTO fridge_members (fridge_id, user_id, role, joined_at)
+        SELECT v.fridge_id, v.user_id, 'member', v.created_at
+        FROM fridge_viewers v
+        WHERE NOT EXISTS (
+            SELECT 1 FROM fridge_members m WHERE m.fridge_id = v.fridge_id AND m.user_id = v.user_id
+        )
+    """)
+    # 친구, 보기만 하는 권한, 변경 요청, 예전 공유 링크와 초대코드를 지운다. 멤버(fridge_members)는 그대로 남는다.
     op.drop_index('ix_change_requests_fridge_id_status', table_name='change_requests')
     op.drop_index(op.f('ix_change_requests_requester_id'), table_name='change_requests')
     op.drop_table('change_requests')
@@ -45,7 +55,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # 표와 칸만 되살린다. 지운 친구 관계, 보기 권한, 변경 요청, '친구에게' 공개 설정은 돌아오지 않는다.
+    # 표와 칸만 되살린다. 지운 친구 관계, 변경 요청, '친구에게' 공개 설정은 돌아오지 않고, 보기 전용이던 사람은 멤버로 남는다(접근은 빼앗지 않는다).
     with op.batch_alter_table('fridges') as batch:
         batch.drop_constraint(op.f('uq_fridges_share_token'), type_='unique')
         batch.drop_column('share_token')
