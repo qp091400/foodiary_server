@@ -323,13 +323,15 @@ def test_an_item_leaves_the_alerts_when_it_is_eaten_discarded_or_given_a_later_d
     assert summary(client, world["alice"])["expiring_items"] == 0 and expiring(client, world["alice"])["items"] == []
 
 
-def test_every_fridge_i_am_a_member_of_counts_but_view_only_friends_and_strangers_see_nothing(client, world):
+def test_invited_participants_receive_expiry_alerts_but_strangers_do_not(client, world):
     second = client.post("/fridges", headers=world["alice"]["headers"], json={"name": "김치냉장고"}).json()["id"]
     add_item(client, world["alice"], world["fridge_id"], "본냉장고 우유", 1)
     add_item(client, world["alice"], second, "김치냉장고 김치", 2)
     names = {i["name"]: i["fridge_name"] for i in expiring(client, world["alice"])["items"]}
     assert names["김치냉장고 김치"] == "김치냉장고" and set(names) == {"본냉장고 우유", "김치냉장고 김치"}
-    for viewer in ("bob", "carol"):  # bob은 보기만 하는 친구, carol은 아무 관계가 없다
+    assert summary(client, world["bob"])["expiring_items"] == 1
+    assert [i["name"] for i in expiring(client, world["bob"])["items"]] == ["본냉장고 우유"]
+    for viewer in ("carol",):
         assert summary(client, world[viewer])["expiring_items"] == 0
         assert expiring(client, world[viewer])["items"] == []
 

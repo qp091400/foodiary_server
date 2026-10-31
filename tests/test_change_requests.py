@@ -42,11 +42,11 @@ def item(client, world, item_id):
 
 
 @pytest.mark.parametrize("kind", ["add", "consume", "discard"])
-def test_view_only_participants_cannot_send_new_change_requests(client, world, kind):
+def test_participants_use_inventory_instead_of_change_requests(client, world, kind):
     body = {"kind": kind, "quantity": 1}
     if kind == "add": body["name"] = "추가 식품"
     else: body["item_id"] = world["milk"]
-    assert send(client, world["bob"], world, **body).status_code == 403
+    assert send(client, world["bob"], world, **body).status_code == 400
     assert received(client, world) == []
 
 

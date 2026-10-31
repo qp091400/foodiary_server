@@ -27,7 +27,7 @@ def test_participant_can_leave_and_rejoin_without_affecting_owner(client, permis
     link = client.post(f"/fridges/{fridge}/share-links", headers=auth(owner), json={"permission": permission}).json()
     assert client.post(f"/share-links/{link['token']}/join", headers=auth(guest)).status_code == 200
     listed = client.get("/shared-fridges", headers=auth(guest)).json()
-    assert [(row["id"], row["my_permission"]) for row in listed] == [(fridge, permission)]
+    assert [(row["id"], row["my_permission"]) for row in listed] == [(fridge, "editor")]
     assert client.delete(f"/shared-fridges/{fridge}", headers=auth(owner)).status_code == 404
     assert client.delete(f"/shared-fridges/{fridge}", headers=auth(guest)).status_code == 204
     assert client.get("/shared-fridges", headers=auth(guest)).json() == []

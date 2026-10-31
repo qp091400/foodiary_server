@@ -565,7 +565,9 @@ class MonthlyStats(BaseModel):
 
 # ── 참여자 초대 · 구버전 변경 요청 · 공개 프로필 · 커뮤니티 ────────────────
 
-Permission = Literal["viewer", "editor"]  # viewer: 보기만 / editor: 함께 관리
+Permission = Literal["editor"]  # 모든 초대 참여자는 함께 관리
+# 구버전 앱의 viewer 요청도 함께 관리로 전환한다.
+InvitePermission = Annotated[Permission, BeforeValidator(lambda value: "editor" if value == "viewer" else value)]
 
 
 class PublicUser(BaseModel):
@@ -581,7 +583,7 @@ class PublicUser(BaseModel):
 
 
 class ShareLinkCreate(BaseModel):
-    permission: Permission = "viewer"
+    permission: InvitePermission = "editor"
     expires_in_days: int = Field(7, ge=1, le=90, description="링크가 살아 있는 날 수")
     max_uses: int | None = Field(None, ge=1, le=100, description="이 링크로 들어올 수 있는 사람 수. 비우면 제한 없음")
 
@@ -620,7 +622,7 @@ class AccessOut(BaseModel):
 
 
 class AccessUpdate(BaseModel):
-    permission: Permission
+    permission: InvitePermission
 
 
 class SharedFridgeOut(BaseModel):

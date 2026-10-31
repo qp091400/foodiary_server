@@ -304,7 +304,7 @@ class Report(Base):
 
 
 class FridgeViewer(Base):
-    """냉장고를 볼 수만 있는 친구. 변경 요청은 보낼 수 있다. 고칠 수 있는 친구는 FridgeMember(role=member)다."""
+    """구버전 보기 전용 참여자. 0009에서 FridgeMember로 전환한 뒤 비운다."""
 
     __tablename__ = "fridge_viewers"
 
@@ -314,14 +314,14 @@ class FridgeViewer(Base):
 
 
 class FridgeShareLink(Base):
-    """냉장고 공유 링크. 링크로 들어온 사람은 주인과 친구가 되고, permission만큼의 권한을 받는다."""
+    """냉장고 초대 링크. 참여자는 모두 재고를 함께 관리한다."""
 
     __tablename__ = "fridge_share_links"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     fridge_id: Mapped[int] = mapped_column(ForeignKey("fridges.id", ondelete="CASCADE"), index=True)
     token: Mapped[str] = mapped_column(String(32), unique=True)
-    permission: Mapped[str] = mapped_column(String(10))  # viewer(보기, 변경 요청) / editor(주인처럼 고치기)
+    permission: Mapped[str] = mapped_column(String(10))  # editor (참여자는 모두 함께 관리)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     expires_at: Mapped[datetime]
     max_uses: Mapped[int | None]  # 비우면 횟수 제한 없음

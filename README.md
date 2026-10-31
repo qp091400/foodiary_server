@@ -275,15 +275,17 @@ curl "$API/fridges/$FRIDGE/purchases/summary?group_by=item" -H "Authorization: B
 ### 냉장고 참여자 초대
 
 ```bash
-# 주인이 초대 생성: viewer(보기만) / editor(함께 관리)
+# 주인이 초대 생성: 모든 참여자는 함께 관리
 curl -X POST $API/fridges/$FRIDGE/share-links -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' -d '{"permission":"editor","expires_in_days":7}'
+  -H 'Content-Type: application/json' -d '{"expires_in_days":7}'
 # 응답 token을 앱의 /share/{token} 링크로 전달. 상대가 로그인 후 참여한다.
 curl -X POST $API/share-links/$SHARE_TOKEN/join -H "Authorization: Bearer $GUEST_TOKEN"
 # 초대받은 냉장고와 주인이 관리하는 참여자 목록
 curl $API/shared-fridges -H "Authorization: Bearer $GUEST_TOKEN"
 curl $API/fridges/$FRIDGE/access -H "Authorization: Bearer $TOKEN"
 ```
+
+기존 보기 전용 참여자는 Alembic `0009`에서 정식 멤버로 전환되며, 기존 링크도 수정 가능한 초대로 바뀝니다. 구버전 클라이언트의 `viewer` 요청은 `editor`로 처리합니다. 앱의 참여자 내보내기·나가기는 냉장고 설정에 있습니다.
 
 전체 엔드포인트는 `/docs`(Swagger)에서 볼 수 있습니다.
 

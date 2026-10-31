@@ -1,4 +1,4 @@
-"""친구와 공유 링크: 링크로 들어오면 친구가 되고 냉장고를 볼 수 있다. 권한은 보기(viewer)와 고치기(editor) 둘이다."""
+"""친구와 공유 링크: 링크로 들어오면 친구가 되고 냉장고를 볼 수 있다. 참여자는 모두 재고를 함께 관리한다."""
 
 from datetime import datetime, timedelta
 
@@ -74,7 +74,7 @@ def test_the_old_ways_to_find_people_are_gone(client, people):
 
 def test_create_and_list_links(client, people, monkeypatch):
     link = make_link(client, people["alice"])
-    assert (link["permission"], link["max_uses"], link["use_count"], link["url"]) == ("viewer", None, 0, None)
+    assert (link["permission"], link["max_uses"], link["use_count"], link["url"]) == ("editor", None, 0, None)
     assert len(link["token"]) >= 20
     assert 6 <= (expires_at(link) - utcnow()).days <= 7  # 기본 7일
     monkeypatch.setattr(settings, "share_link_base", "https://example.com/join/")
@@ -106,22 +106,22 @@ def test_links_are_limited_per_fridge(client, people, monkeypatch):
 # ── 링크로 들어오기 ──────────────────────────────────────────────────────
 
 
-def test_joining_gives_only_fridge_view_access(client, people):
+def test_joining_gives_fridge_inventory_edit_access(client, people):
     alice, bob = people["alice"], people["bob"]
     link = make_link(client, alice)
     preview = client.get(f"/share-links/{link['token']}", headers=bob["headers"]).json()
-    assert preview["owner"]["nickname"] == "alice" and preview["permission"] == "viewer" and preview["my_permission"] == "none"
+    assert preview["owner"]["nickname"] == "alice" and preview["permission"] == "editor" and preview["my_permission"] == "none"
     assert client.get("/friends", headers=bob["headers"]).status_code == 404  # 미리 보기만으로는 아무것도 달라지지 않는다
     joined = join(client, bob, link)
     assert joined.status_code == 200
-    assert joined.json()["permission"] == "viewer" and joined.json()["fridge_id"] == alice["fridge_id"]
+    assert joined.json()["permission"] == "editor" and joined.json()["fridge_id"] == alice["fridge_id"]
     shown = client.get(f"/users/{alice['id']}/fridges", headers=bob["headers"]).json()  # 냉장고가 비공개여도 링크로 받은 권한으로 보인다
     assert [(f["id"], f["visibility"], f["my_permission"], f["can_request_changes"]) for f in shown] == [
-        (alice["fridge_id"], "private", "viewer", False)
+        (alice["fridge_id"], "private", "editor", False)
     ]
     assert client.get(f"/users/{alice['id']}/fridges/{alice['fridge_id']}/items", headers=bob["headers"]).status_code == 200
     assert client.get(f"/users/{alice['id']}/fridges", headers=people["carol"]["headers"]).json() == []  # 링크 없는 사람은 못 본다
-    assert client.get(f"/share-links/{link['token']}", headers=bob["headers"]).json()["my_permission"] == "viewer"
+    assert client.get(f"/share-links/{link['token']}", headers=bob["headers"]).json()["my_permission"] == "editor"
 
 
 def test_joining_twice_changes_nothing_and_is_not_counted(client, people):
@@ -163,7 +163,7 @@ def test_revoking_a_link_does_not_take_back_access_already_given(client, people)
     link = make_link(client, people["alice"])
     join(client, people["bob"], link)
     client.delete(f"/fridges/{people['alice']['fridge_id']}/share-links/{link['id']}", headers=people["alice"]["headers"])
-    assert client.get(f"/users/{people['alice']['id']}/fridges", headers=people["bob"]["headers"]).json()[0]["my_permission"] == "viewer"
+    assert client.get(f"/users/{people['alice']['id']}/fridges", headers=people["bob"]["headers"]).json()[0]["my_permission"] == "editor"
 
 
 def test_editor_invitation_allows_inventory_management(client, people):
@@ -191,20 +191,20 @@ def test_links_only_raise_a_permission_never_lower_it(client, people):
 # ── 주인이 친구별 권한을 관리 ────────────────────────────────────────────
 
 
-def test_owner_manages_participant_permissions(client, people):
+def test_legacy_permission_updates_never_downgrade_participants(client, people):
     alice, bob, carol = people["alice"], people["bob"], people["carol"]
     join(client, bob, make_link(client, alice))
     join(client, carol, make_link(client, alice, permission="editor"))
     url = f"/fridges/{alice['fridge_id']}/access"
     listed = client.get(url, headers=alice["headers"]).json()
-    assert sorted((a["user"]["nickname"], a["permission"]) for a in listed) == [("bob", "viewer"), ("carol", "editor")]
-    assert client.post(f"/fridges/{alice['fridge_id']}/items", headers=bob["headers"], json={"name": "몰래"}).status_code == 404  # 보기 권한은 못 고친다
+    assert sorted((a["user"]["nickname"], a["permission"]) for a in listed) == [("bob", "editor"), ("carol", "editor")]
+    assert client.post(f"/fridges/{alice['fridge_id']}/items", headers=bob["headers"], json={"name": "함께 추가"}).status_code == 201  # 보기 권한은 못 고친다
     up = client.patch(f"{url}/{bob['id']}", headers=alice["headers"], json={"permission": "editor"})
     assert up.status_code == 200 and up.json()["permission"] == "editor"
     assert client.post(f"/fridges/{alice['fridge_id']}/items", headers=bob["headers"], json={"name": "이제는 된다"}).status_code == 201
     down = client.patch(f"{url}/{carol['id']}", headers=alice["headers"], json={"permission": "viewer"})
-    assert down.json()["permission"] == "viewer"
-    assert client.post(f"/fridges/{alice['fridge_id']}/items", headers=carol["headers"], json={"name": "못 한다"}).status_code == 404
+    assert down.json()["permission"] == "editor"
+    assert client.post(f"/fridges/{alice['fridge_id']}/items", headers=carol["headers"], json={"name": "계속 수정 가능"}).status_code == 201
     assert client.get(f"/users/{alice['id']}/fridges", headers=carol["headers"]).json()[0]["can_request_changes"] is False
     assert client.patch(f"{url}/{bob['id']}", headers=alice["headers"], json={"permission": "editor"}).status_code == 200  # 같은 권한으로 바꿔도 괜찮다
 

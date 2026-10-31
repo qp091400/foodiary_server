@@ -3103,7 +3103,7 @@
         "tags": [
           "공유 링크"
         ],
-        "summary": "권한 바꾸기: viewer(보기만) / editor(함께 관리) (주인만)",
+        "summary": "구버전 호환: 참여자는 항상 함께 관리 (주인만)",
         "operationId": "change_access_fridges__fridge_id__access__user_id__patch",
         "security": [
           {
@@ -4856,10 +4856,7 @@
           },
           "permission": {
             "type": "string",
-            "enum": [
-              "viewer",
-              "editor"
-            ],
+            "const": "editor",
             "title": "Permission"
           },
           "since": {
@@ -4879,10 +4876,7 @@
         "properties": {
           "permission": {
             "type": "string",
-            "enum": [
-              "viewer",
-              "editor"
-            ],
+            "const": "editor",
             "title": "Permission"
           }
         },
@@ -7100,10 +7094,7 @@
           },
           "permission": {
             "type": "string",
-            "enum": [
-              "viewer",
-              "editor"
-            ],
+            "const": "editor",
             "title": "Permission"
           }
         },
@@ -8617,12 +8608,9 @@
         "properties": {
           "permission": {
             "type": "string",
-            "enum": [
-              "viewer",
-              "editor"
-            ],
+            "const": "editor",
             "title": "Permission",
-            "default": "viewer"
+            "default": "editor"
           },
           "expires_in_days": {
             "type": "integer",
@@ -8673,10 +8661,7 @@
           },
           "permission": {
             "type": "string",
-            "enum": [
-              "viewer",
-              "editor"
-            ],
+            "const": "editor",
             "title": "Permission"
           },
           "created_at": {
@@ -8727,10 +8712,7 @@
           },
           "permission": {
             "type": "string",
-            "enum": [
-              "viewer",
-              "editor"
-            ],
+            "const": "editor",
             "title": "Permission"
           },
           "my_permission": {
