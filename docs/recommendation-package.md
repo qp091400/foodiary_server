@@ -1,5 +1,6 @@
 # Recommendation model in the existing data repository
 
+- Encoder revision/text configuration: `recommendation-encoder.json`; reusable 32D PCA: `recommendation-projection.npz` (~50 KB), checksum pinned alongside weights. No retraining is needed to encode a new recipe with the identical coordinate space.
 - Tracked small weights: `recommendation-model.json` (14,110 bytes).
 - Pinned Release: `recommendation-package.json`.
 - Data repository: `yuyunsj/foodiary-data` (existing private repository).

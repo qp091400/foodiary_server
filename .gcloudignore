@@ -20,6 +20,8 @@
 !/recipe-package.json
 !/recommendation-package.json
 !/recommendation-model.json
+!/recommendation-encoder.json
+!/recommendation-projection.npz
 
 .git/
 .venv/

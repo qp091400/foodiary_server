@@ -7,5 +7,6 @@
   "ranking_sha256": "ef134033b7b0490aef1995372ca6c0689ee60c286c07545caf619fe870ea8d25",
   "recipe_package_sha256": "72110d581b1b3c48ede6661df446f9b7d894a0801fb729bba8dc255d6073958a",
   "deployment_mode": "demo",
-  "research_gates_passed": false
+  "research_gates_passed": false,
+  "projection_sha256": "636674c06568a27bd5da3eba16a2189756b1158edacb4c9883d712d9ef8bee15"
 }

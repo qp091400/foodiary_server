@@ -23,6 +23,7 @@ def config(root=ROOT):
     value=json.loads((root/'recommendation-package.json').read_text())
     for key in ['sha256','ranking_sha256','recipe_package_sha256']:
         if len(value[key])!=64 or any(c not in '0123456789abcdef' for c in value[key]):raise ValueError('Invalid recommendation checksum')
+    if value.get('projection_sha256') and digest(root/'recommendation-projection.npz')!=value['projection_sha256']:raise ValueError('Tracked encoder projection checksum mismatch')
     if digest(root/'recommendation-model.json')!=value['ranking_sha256']:raise ValueError('Tracked model differs from recommendation package')
     if json.loads((root/'recipe-package.json').read_text())['sha256']!=value['recipe_package_sha256']:raise ValueError('Recommendation catalogue version differs from recipe-package.json')
     return value

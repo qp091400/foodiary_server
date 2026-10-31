@@ -61,7 +61,7 @@ RUN python -m scripts.verify_recipe_seed /opt/recipe-seed
 
 FROM python:3.11-slim-bookworm AS cloudrun-recommendations
 WORKDIR /check
-COPY recommendation-model.json recommendation-package.json recipe-package.json ./
+COPY recommendation-model.json recommendation-package.json recommendation-projection.npz recipe-package.json ./
 COPY scripts/prepare_recommendation_model.py scripts/install_recipe_package.py ./scripts/
 COPY recipe_data/recommendation-seed/ /opt/recommendation-model/
 RUN python -m scripts.prepare_recommendation_model --verify /opt/recommendation-model
