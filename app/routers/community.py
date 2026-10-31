@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.deps import get_current_user
-from app.models import Comment, Post, PostLike, PostPhoto, User
+from app.models import Comment, Post, PostLike, PostPhoto, RecipeReview, User
 from app.routers.receipts import load_image, read_upload
 from app.schemas import (
     CommentCreate,
@@ -22,6 +22,9 @@ from app.schemas import (
     LikeOut,
     MessageResponse,
     PostCreate,
+    PostBoard,
+    PostUpdate,
+    PostReviewOut,
     PostList,
     PostOut,
     PostPhotoOut,
@@ -51,6 +54,8 @@ def _decorate(db: Session, rows: list[tuple[Post, User]], me: User) -> list[Post
     liked: set[int] = set()
     comments: dict[int, int] = {}
     photos: dict[int, list[PostPhotoOut]] = {}
+    review_ids = [post.review_id for post, _ in rows if post.review_id is not None]
+    reviews = {review.id: review for review in db.scalars(select(RecipeReview).where(RecipeReview.id.in_(review_ids))).all()} if review_ids else {}
     if ids:
         likes = dict(db.execute(select(PostLike.post_id, func.count()).where(PostLike.post_id.in_(ids)).group_by(PostLike.post_id)).all())
         liked = set(db.scalars(select(PostLike.post_id).where(PostLike.post_id.in_(ids), PostLike.user_id == me.id)).all())
@@ -67,6 +72,11 @@ def _decorate(db: Session, rows: list[tuple[Post, User]], me: User) -> list[Post
             author=PublicUser.of(author),
             title=post.title,
             body=post.body,
+            board=post.board,
+            review=PostReviewOut(id=review.id, recipe_id=review.recipe_id, recipe_name=review.recipe_name, rating=review.rating)
+            if (review := reviews.get(post.review_id)) else None,
+            updated_at=post.updated_at,
+            can_edit=post.author_id == me.id and post.review_id is None,
             created_at=post.created_at,
             mine=post.author_id == me.id,
             can_delete=post.author_id == me.id or me.is_admin,
@@ -110,11 +120,11 @@ def _too_many(what: str, limit: int) -> HTTPException:
 @router.post("", response_model=PostOut, status_code=201, summary="글쓰기 (사진은 글을 쓴 뒤 POST /posts/{id}/photos로 붙인다)")
 def create_post(payload: PostCreate, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
     recent = db.scalar(
-        select(func.count()).select_from(Post).where(Post.author_id == me.id, Post.created_at >= utcnow() - timedelta(hours=1))
+        select(func.count()).select_from(Post).where(Post.author_id == me.id, Post.review_id.is_(None), Post.created_at >= utcnow() - timedelta(hours=1))
     )
     if recent >= POSTS_PER_HOUR:
         raise _too_many("글", POSTS_PER_HOUR)
-    post = Post(author_id=me.id, title=payload.title, body=payload.body)
+    post = Post(author_id=me.id, title=payload.title, body=payload.body, board=payload.board)
     db.add(post)
     db.commit()
     return _decorate(db, [(post, me)], me)[0]
@@ -122,12 +132,15 @@ def create_post(payload: PostCreate, me: User = Depends(get_current_user), db: S
 
 @router.get("", response_model=PostList, summary="글 목록 (최신순). 다음 쪽은 before_id에 next_before_id를 넣어 부른다")
 def list_posts(
+    board: PostBoard | None = Query(None, description="general: 자유게시판, recipe: 레시피게시판. 생략하면 전체"),
     before_id: int | None = Query(None, ge=1, description="이 번호보다 오래된 글부터"),
     limit: int = Query(20, ge=1, le=50),
     me: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     query = select(Post, User).join(User, User.id == Post.author_id).where(Post.deleted_at.is_(None))
+    if board is not None:
+        query = query.where(Post.board == board)
     if before_id is not None:
         query = query.where(Post.id < before_id)
     rows = db.execute(query.order_by(Post.id.desc()).limit(limit + 1)).all()
@@ -138,6 +151,22 @@ def list_posts(
 @router.get("/{post_id}", response_model=PostOut, summary="글 하나 보기")
 def get_post(post_id: int, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return _decorate(db, [_live_post(db, post_id)], me)[0]
+
+
+@router.patch("/{post_id}", response_model=PostOut, summary="내 글의 제목·본문·게시판 수정")
+def update_post(post_id: int, payload: PostUpdate, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    post, author = _live_post(db, post_id)
+    if post.author_id != me.id:
+        raise HTTPException(status_code=403, detail="내가 쓴 글만 수정할 수 있어요.")
+    if post.review_id is not None:
+        raise HTTPException(status_code=409, detail="자동 등록된 후기는 레시피의 내 후기에서 수정해 주세요.")
+    changes = payload.model_dump(exclude_unset=True)
+    if any(getattr(post, key) != value for key, value in changes.items()):
+        for key, value in changes.items():
+            setattr(post, key, value)
+        post.updated_at = utcnow()
+        db.commit()
+    return _decorate(db, [(post, author)], me)[0]
 
 
 @router.delete("/{post_id}", status_code=204, summary="글 지우기 (쓴 사람 또는 관리자). 붙인 사진도 함께 지워진다")

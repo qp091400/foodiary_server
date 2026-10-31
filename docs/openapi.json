@@ -3013,6 +3013,28 @@
         ],
         "parameters": [
           {
+            "name": "board",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "general",
+                    "recipe"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "general: 자유게시판, recipe: 레시피게시판. 생략하면 전체",
+              "title": "Board"
+            },
+            "description": "general: 자유게시판, recipe: 레시피게시판. 생략하면 전체"
+          },
+          {
             "name": "before_id",
             "in": "query",
             "required": false,
@@ -3091,6 +3113,61 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "커뮤니티"
+        ],
+        "summary": "내 글의 제목·본문·게시판 수정",
+        "operationId": "update_post_posts__post_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "post_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Post Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostUpdate"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -4347,7 +4424,7 @@
           "files": {
             "items": {
               "type": "string",
-              "contentMediaType": "application/octet-stream"
+              "format": "binary"
             },
             "type": "array",
             "title": "Files",
@@ -4364,7 +4441,7 @@
         "properties": {
           "file": {
             "type": "string",
-            "contentMediaType": "application/octet-stream",
+            "format": "binary",
             "title": "File"
           }
         },
@@ -4378,7 +4455,7 @@
         "properties": {
           "file": {
             "type": "string",
-            "contentMediaType": "application/octet-stream",
+            "format": "binary",
             "title": "File",
             "description": "영수증 사진 (jpg/png/webp, 최대 10MB)"
           }
@@ -4394,7 +4471,7 @@
           "files": {
             "items": {
               "type": "string",
-              "contentMediaType": "application/octet-stream"
+              "format": "binary"
             },
             "type": "array",
             "title": "Files",
@@ -4680,6 +4757,18 @@
             "type": "number",
             "exclusiveMinimum": 0.0,
             "title": "Quantity"
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "개",
+              "g",
+              "kg",
+              "ml",
+              "L"
+            ],
+            "title": "Unit",
+            "default": "개"
           },
           "unit_price": {
             "anyOf": [
@@ -5285,6 +5374,18 @@
             "title": "Quantity",
             "default": 1
           },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "개",
+              "g",
+              "kg",
+              "ml",
+              "L"
+            ],
+            "title": "Unit",
+            "default": "개"
+          },
           "category": {
             "anyOf": [
               {
@@ -5441,6 +5542,11 @@
           "remaining_quantity": {
             "type": "number",
             "title": "Remaining Quantity"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit",
+            "default": "개"
           },
           "unit_price": {
             "anyOf": [
@@ -5690,6 +5796,24 @@
               }
             ],
             "title": "Remaining Quantity"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "개",
+                  "g",
+                  "kg",
+                  "ml",
+                  "L"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
           },
           "unit_price": {
             "anyOf": [
@@ -6024,6 +6148,15 @@
             "maxLength": 2000,
             "minLength": 1,
             "title": "Body"
+          },
+          "board": {
+            "type": "string",
+            "enum": [
+              "general",
+              "recipe"
+            ],
+            "title": "Board",
+            "default": "general"
           }
         },
         "type": "object",
@@ -6078,6 +6211,39 @@
             "type": "string",
             "title": "Body"
           },
+          "board": {
+            "type": "string",
+            "enum": [
+              "general",
+              "recipe"
+            ],
+            "title": "Board"
+          },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PostReviewOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "can_edit": {
+            "type": "boolean",
+            "title": "Can Edit"
+          },
           "created_at": {
             "type": "string",
             "title": "Created At"
@@ -6116,6 +6282,10 @@
           "author",
           "title",
           "body",
+          "board",
+          "review",
+          "updated_at",
+          "can_edit",
           "created_at",
           "mine",
           "can_delete",
@@ -6143,6 +6313,81 @@
           "url"
         ],
         "title": "PostPhotoOut"
+      },
+      "PostReviewOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "recipe_id": {
+            "type": "string",
+            "title": "Recipe Id"
+          },
+          "recipe_name": {
+            "type": "string",
+            "title": "Recipe Name"
+          },
+          "rating": {
+            "type": "integer",
+            "title": "Rating"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "recipe_id",
+          "recipe_name",
+          "rating"
+        ],
+        "title": "PostReviewOut"
+      },
+      "PostUpdate": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body"
+          },
+          "board": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "general",
+                  "recipe"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Board"
+          }
+        },
+        "type": "object",
+        "title": "PostUpdate"
       },
       "PublicUser": {
         "properties": {
@@ -6252,6 +6497,11 @@
           "quantity": {
             "type": "number",
             "title": "Quantity"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit",
+            "default": "개"
           },
           "unit_price": {
             "anyOf": [
@@ -6698,6 +6948,11 @@
           "quantity": {
             "type": "number",
             "title": "Quantity"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit",
+            "default": "개"
           },
           "unit_price": {
             "anyOf": [
@@ -7665,13 +7920,6 @@
           "type": {
             "type": "string",
             "title": "Error Type"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "ctx": {
-            "type": "object",
-            "title": "Context"
           }
         },
         "type": "object",

@@ -17,12 +17,20 @@ def remove_photo_file(photo: PostPhoto) -> None:
     (Path(settings.upload_dir) / photo.path).unlink(missing_ok=True)
 
 
-def delete_post(db: Session, post: Post, by_user_id: int) -> None:
-    """글을 지운 것으로 표시하고(누가 지웠는지 남긴다) 붙인 사진은 파일째 지운다. 댓글은 글과 함께 안 보이게 된다."""
+def _mark_post_deleted(db: Session, post: Post, by_user_id: int) -> None:
     post.deleted_at, post.deleted_by = utcnow(), by_user_id
     for photo in db.scalars(select(PostPhoto).where(PostPhoto.post_id == post.id)).all():
         remove_photo_file(photo)
         db.delete(photo)
+
+
+def delete_post(db: Session, post: Post, by_user_id: int) -> None:
+    """후기에서 자동 등록된 글은 원본 후기와 함께 지운다."""
+    _mark_post_deleted(db, post, by_user_id)
+    if post.review_id is not None:
+        review = db.get(RecipeReview, post.review_id)
+        if review is not None and review.deleted_at is None:
+            review.deleted_at, review.deleted_by = post.deleted_at, by_user_id
     db.commit()
 
 
@@ -33,6 +41,9 @@ def delete_comment(db: Session, comment: Comment, by_user_id: int) -> None:
 
 def delete_review(db: Session, review: RecipeReview, by_user_id: int) -> None:
     review.deleted_at, review.deleted_by = utcnow(), by_user_id
+    post = db.scalar(select(Post).where(Post.review_id == review.id, Post.deleted_at.is_(None)))
+    if post is not None:
+        _mark_post_deleted(db, post, by_user_id)
     db.commit()
 
 

@@ -109,3 +109,44 @@ def test_text_is_stored_trimmed_and_not_interpreted(client, users):
 def test_login_is_required(client, method, path):
     kwargs = {"json": {"title": "a", "body": "b"}} if method == "post" else {}
     assert getattr(client, method)(path, **kwargs).status_code in (401, 403)
+
+
+def test_edit_title_body_and_board_preserves_interactions(client, users):
+    headers = users["minsu"]["headers"]
+    post = write(client, users["minsu"]).json()
+    path = f"/posts/{post['id']}"
+    client.put(path + "/like", headers=users["jiyeon"]["headers"])
+    client.post(path + "/comments", headers=users["jiyeon"]["headers"], json={"body": "댓글"})
+    assert post["board"] == "general" and post["can_edit"] and post["review"] is None
+    for name in ("jiyeon", "boss"):
+        assert client.patch(path, headers=users[name]["headers"], json={"title": "수정"}).status_code == 403
+    edited = client.patch(path, headers=headers, json={"title": "  새 제목  "}).json()
+    assert edited["title"] == "새 제목" and edited["body"] == post["body"] and edited["updated_at"]
+    edited = client.patch(path, headers=headers, json={"body": "새 내용", "board": "recipe"}).json()
+    assert (edited["like_count"], edited["comment_count"]) == (1, 1)
+    assert client.get("/posts?board=general", headers=headers).json()["posts"] == []
+    assert client.get("/posts?board=recipe", headers=headers).json()["posts"][0]["body"] == "새 내용"
+    assert client.delete(path, headers=headers).status_code == 204
+    assert client.patch(path, headers=headers, json={"title": "수정"}).status_code == 404
+
+
+@pytest.mark.parametrize("payload", [{}, {"title": None}, {"body": None}, {"board": None}, {"title": "  "}, {"body": "x" * 2001}, {"title": "x" * 101}, {"board": "unknown"}])
+def test_invalid_edits_are_rejected(client, users, payload):
+    post = write(client, users["minsu"]).json()
+    assert client.patch(f"/posts/{post['id']}", headers=users["minsu"]["headers"], json=payload).status_code == 422
+
+
+def test_board_filter_pagination_and_validation(client, users):
+    headers = users["minsu"]["headers"]
+    ids = []
+    for board in ("recipe", "general", "recipe", "general", "recipe"):
+        post = client.post("/posts", headers=headers, json={"title": "제목", "body": "본문", "board": board}).json()
+        if board == "recipe":
+            ids.append(post["id"])
+    first = client.get("/posts?board=recipe&limit=2", headers=headers).json()
+    assert [p["id"] for p in first["posts"]] == ids[:0:-1]
+    next_page = client.get(f'/posts?board=recipe&before_id={first["next_before_id"]}', headers=headers).json()
+    assert [p["id"] for p in next_page["posts"]] == ids[:1]
+    assert next_page["next_before_id"] is None
+    assert client.get("/posts?board=unknown", headers=headers).status_code == 422
+    assert client.patch("/posts/1", json={"title": "제목"}).status_code in (401, 403)

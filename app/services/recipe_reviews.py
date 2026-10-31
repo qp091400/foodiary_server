@@ -5,8 +5,20 @@ from collections.abc import Iterable
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import RecipeReview
+from app.models import Post, RecipeReview
 from app.schemas import RatingSummary
+
+
+def sync_review_post(db: Session, review: RecipeReview) -> None:
+    """후기 저장과 같은 트랜잭션에서 게시글 하나를 생성하거나 갱신한다."""
+    db.flush()
+    post = db.scalar(select(Post).where(Post.review_id == review.id))
+    if post is None:
+        post = Post(author_id=review.author_id, review_id=review.id, board="recipe", created_at=review.created_at)
+        db.add(post)
+    post.title = f"{review.recipe_name[:90]} 요리 후기"
+    post.body = review.body or f"별점 {review.rating}점을 남겼어요."
+    post.updated_at = review.updated_at
 
 
 def rating_summaries(db: Session, recipe_ids: Iterable[str]) -> dict[str, RatingSummary]:

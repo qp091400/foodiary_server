@@ -70,6 +70,54 @@ def test_saving_the_same_review_again_is_not_an_edit(client, users):
     assert again.status_code == 200 and again.json()["updated_at"] is None
 
 
+def test_review_is_automatically_published_once_and_updates_in_place(client, users):
+    me = users["minsu"]
+    review = rate(client, me, rating=4, body="맛있어요").json()
+    posts = client.get("/posts?board=recipe", headers=me["headers"]).json()["posts"]
+    assert len(posts) == 1
+    post = posts[0]
+    assert post["review"] == {"id": review["id"], "recipe_id": "1", "recipe_name": "달걀양파볶음", "rating": 4}
+    assert post["body"] == "맛있어요" and not post["can_edit"]
+    assert client.get("/posts?board=general", headers=me["headers"]).json()["posts"] == []
+    path = f'/posts/{post["id"]}'
+    assert client.patch(path, headers=me["headers"], json={"body": "따로 고침"}).status_code == 409
+    client.put(path + "/like", headers=users["jiyeon"]["headers"])
+    rate(client, me, rating=2, body="다시 먹으니 짜요")
+    rate(client, me, rating=2, body="다시 먹으니 짜요")
+    updated = client.get(path, headers=me["headers"]).json()
+    assert (updated["body"], updated["review"]["rating"], updated["like_count"]) == ("다시 먹으니 짜요", 2, 1)
+    assert updated["updated_at"]
+    assert len(client.get("/posts?board=recipe", headers=me["headers"]).json()["posts"]) == 1
+
+
+@pytest.mark.parametrize("delete_from", ["review", "post", "admin_review_report", "admin_post_report"])
+def test_deleting_review_or_its_post_keeps_both_hidden(client, users, delete_from):
+    me = users["minsu"]
+    review = rate(client, me, rating=3).json()
+    post = client.get("/posts?board=recipe", headers=me["headers"]).json()["posts"][0]
+    assert post["body"] == "별점 3점을 남겼어요."
+    post_path = f'/posts/{post["id"]}'
+    review_path = f'/recipes/1/reviews/{review["id"]}'
+    if delete_from.startswith("admin"):
+        target = review_path if delete_from == "admin_review_report" else post_path
+        assert client.post(target + "/report", headers=users["jiyeon"]["headers"], json={"reason": "spam"}).status_code == 201
+        reports = client.get("/admin/reports", headers=users["boss"]["headers"]).json()
+        assert reports
+        result = client.post(f'/admin/reports/{reports[0]["id"]}/resolve', headers=users["boss"]["headers"], json={"action": "delete"})
+        assert result.status_code == 200
+    else:
+        result = client.delete(review_path if delete_from == "review" else post_path, headers=me["headers"])
+        assert result.status_code == 204
+    assert client.get(post_path, headers=me["headers"]).status_code == 404
+    assert client.get("/posts", headers=me["headers"]).json()["posts"] == []
+    assert listing(client, me).json()["summary"]["count"] == 0
+    assert client.get("/recipes/reviews/mine", headers=me["headers"]).json()["reviews"] == []
+    # A fresh review gets one fresh post; the old post remains deleted.
+    assert rate(client, me, rating=5, body="다시 요리했어요").status_code == 201
+    fresh = client.get("/posts", headers=me["headers"]).json()["posts"]
+    assert len(fresh) == 1 and fresh[0]["id"] != post["id"]
+
+
 def test_a_rating_alone_is_a_review(client, users):
     for extra in ({}, {"body": None}, {"body": ""}, {"body": "   "}):
         response = rate(client, users["minsu"], rating=5, **extra)

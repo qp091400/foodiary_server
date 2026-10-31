@@ -179,12 +179,18 @@ class Post(Base):
     """커뮤니티 글. 지운 글은 deleted_at을 채워 두고 보여 주지 않는다 (누가 지웠는지 남긴다)."""
 
     __tablename__ = "posts"
-    __table_args__ = (Index("ix_posts_deleted_at_id", "deleted_at", "id"),)
+    __table_args__ = (
+        Index("ix_posts_deleted_at_id", "deleted_at", "id"),
+        Index("ix_posts_board_deleted_id", "board", "deleted_at", "id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     author_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     title: Mapped[str] = mapped_column(String(100))
     body: Mapped[str] = mapped_column(Text)
+    board: Mapped[str] = mapped_column(String(10), default="general", server_default="general")
+    review_id: Mapped[int | None] = mapped_column(ForeignKey("recipe_reviews.id", ondelete="SET NULL"), unique=True)
+    updated_at: Mapped[datetime | None]
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     deleted_at: Mapped[datetime | None]
     deleted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))

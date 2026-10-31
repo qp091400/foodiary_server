@@ -13,7 +13,7 @@ from app.models import RecipeReview, User
 from app.schemas import MessageResponse, MyReviewList, PublicUser, ReportCreate, ReviewList, ReviewOut, ReviewWrite
 from app.services import recipe_store
 from app.services.community import delete_review, file_report
-from app.services.recipe_reviews import rating_summaries
+from app.services.recipe_reviews import rating_summaries, sync_review_post
 from app.timeutil import utcnow
 
 router = APIRouter(prefix="/recipes", tags=["레시피 후기"])
@@ -129,6 +129,7 @@ def write_review(recipe_id: str, payload: ReviewWrite, response: Response, me: U
             review.rating, review.body, review.updated_at = payload.rating, payload.body, utcnow()
         review.recipe_name = name
     try:
+        sync_review_post(db, review)
         db.commit()
     except IntegrityError:  # 같은 사람이 같은 레시피에 동시에 두 번 보냈다
         db.rollback()

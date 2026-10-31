@@ -635,11 +635,32 @@ class SharedItemOut(SizeFields):
 
 PostTitle = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 PostBody = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+PostBoard = Literal["general", "recipe"]
 
 
 class PostCreate(BaseModel):
     title: PostTitle
     body: PostBody
+    board: PostBoard = "general"
+
+
+class PostUpdate(BaseModel):
+    title: PostTitle | None = None
+    body: PostBody | None = None
+    board: PostBoard | None = None
+
+    @model_validator(mode="after")
+    def supplied_fields_are_not_null(self):
+        if not self.model_fields_set or any(getattr(self, key) is None for key in self.model_fields_set):
+            raise ValueError("수정할 제목, 본문 또는 게시판을 입력해 주세요.")
+        return self
+
+
+class PostReviewOut(BaseModel):
+    id: int
+    recipe_id: str
+    recipe_name: str
+    rating: int
 
 
 class PostPhotoOut(BaseModel):
@@ -652,6 +673,10 @@ class PostOut(BaseModel):
     author: PublicUser
     title: str
     body: str
+    board: PostBoard
+    review: PostReviewOut | None
+    updated_at: UtcDatetime | None
+    can_edit: bool
     created_at: UtcDatetime
     mine: bool  # 내가 쓴 글
     can_delete: bool  # 내가 쓴 글이거나 내가 관리자
