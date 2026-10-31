@@ -23,7 +23,7 @@ from app.schemas import (
     PublicUser,
 )
 from app.security import create_access_token, create_refresh_token, hash_password, verify_password
-from app.services.fridge_access import can_request_changes, fridge_permission
+from app.services.fridge_access import fridge_permission
 
 router = APIRouter(prefix="/users", tags=["사용자"])
 
@@ -108,12 +108,12 @@ def change_password(
 
 # ── 남의 냉장고 보기 ─────────────────────────────────────────────────────
 
-@router.get("/{user_id}/profile", summary="공개 프로필 (로그인 필요)")
-def public_profile(user_id: int, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@router.get("/{user_id}/profile", response_model=PublicUser, summary="공개 프로필 (로그인 필요)")
+def public_profile(user_id: int, _me: User = Depends(get_current_user), db: Session = Depends(get_db)):
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(404, detail="사용자를 찾을 수 없어요.")
-    return PublicUser.of(user).model_dump()
+    return PublicUser.of(user)
 
 NO_SUCH_USER = "그런 사용자를 찾을 수 없어요."
 
@@ -145,10 +145,9 @@ def list_user_fridges(user_id: int, me: User = Depends(get_current_user), db: Se
         SharedFridgeOut(
             id=fridge.id,
             name=fridge.name,
-            visibility="private" if fridge.visibility == "friends" else fridge.visibility,
+            visibility=fridge.visibility,
             item_count=counts.get(fridge.id, 0),
             my_permission=permission,
-            can_request_changes=can_request_changes(db, me.id, fridge, permission),
         )
         for fridge, permission in visible
     ]

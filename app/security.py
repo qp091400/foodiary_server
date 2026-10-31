@@ -1,4 +1,4 @@
-"""bcrypt, JWT, 인증코드/초대코드 생성."""
+"""bcrypt, JWT, 인증코드 생성."""
 
 import hashlib
 import hmac
@@ -14,9 +14,6 @@ from app.models import User
 
 ALGORITHM = "HS256"
 VERIFY_TOKEN_MINUTES = 15
-# 헷갈리는 글자(0/O, 1/I/L)를 뺀 초대코드용 문자
-INVITE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
-INVITE_CODE_LENGTH = 8
 BCRYPT_ROUNDS = 12
 
 
@@ -75,6 +72,3 @@ def hash_verification_code(email: str, purpose: str, code: str) -> str:
     message = f"{email}:{purpose}:{code}".encode("utf-8")
     return hmac.new(settings.jwt_secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
-
-def generate_invite_code() -> str:
-    return "".join(secrets.choice(INVITE_ALPHABET) for _ in range(INVITE_CODE_LENGTH))

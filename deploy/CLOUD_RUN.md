@@ -237,6 +237,20 @@ gcloud scheduler jobs delete foodiary-keepalive --location asia-northeast1
 
 `cloudrun.py`의 `verify`와 `publish`는 계속 `run.app` 주소로 점검한다. 응답에는 `X-Robots-Tag: noindex`가 붙으므로 `api.foodiary.kr`도 검색에 나오지 않는다.
 
+### 냉장고 공유 링크와 QR이 여는 주소
+
+서버는 냉장고 공유 링크의 QR을 만든다. QR에는 휴대폰 카메라로 찍으면 바로 열리는 전체 주소(`https://웹주소/share/토큰`)가 들어가야 해서, 서버에 웹 앱의 `/share/` 주소를 알려 준다. 이 설정이 없으면 공유 링크 API는 토큰만 돌려주고(앱이 주소를 만든다) QR 요청은 503이다.
+
+```sh
+cd ~/foodiary-cloudrun
+python3 scripts/cloudrun.py set-share-link-base https://foodiary.kr/share/
+python3 scripts/cloudrun.py deploy      # 설정만 바뀌었으면 build 없이. 새 코드와 함께라면 release
+python3 scripts/cloudrun.py publish
+```
+
+- 끝의 `/`는 없으면 붙여 준다. HTTPS 주소만 받는다. 클라우드에는 아무것도 하지 않고 다음 `deploy`(또는 `release`)부터 적용된다.
+- QR은 요청할 때마다 그때의 주소로 만든다. 이미 인쇄하거나 보낸 QR의 주소는 바뀌지 않으니 오래 쓸 주소를 넣는다. `foodiary.kr` 인증서가 나오기 전이면 `https://foodiary-app-ef2b5.web.app/share/`로 시작해도 된다(같은 웹 앱이라 나중에 바꿔도 옛 QR이 계속 열린다).
+
 ## 5. 업데이트·복구
 
 소스 변경 후 `build → migrate → deploy → verify → publish`를 실행한다. `deploy`는 다시 IAM 비공개로 바꾸므로

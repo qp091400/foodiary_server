@@ -76,6 +76,10 @@ def validate_config(config: dict) -> None:
     for host in config.get("hosts", []):
         if not isinstance(host, str) or not HOSTNAME.fullmatch(host):
             raise ValueError("hosts must be plain lowercase host names such as api.example.com (no https://, path or *)")
+    if config.get("share_link_base"):
+        url = urlsplit(config["share_link_base"])
+        if url.scheme != "https" or not url.hostname or url.username or url.password or url.query or url.fragment or not url.path.endswith("/"):
+            raise ValueError("share_link_base must be an HTTPS address ending in / such as https://foodiary.kr/share/")
     for key in ("smtp_host", "smtp_user", "mail_from"):
         if not config.get(key) or any(c in config[key] for c in "\r\n\x00"):
             raise ValueError(f"Invalid or missing {key}")
@@ -104,6 +108,7 @@ def environment(config: dict) -> dict[str, str]:
     return dict(
         APP_ENV="production", DEV_TOOLS="false", AUTO_CREATE_TABLES="false",
         TRUSTED_HOSTS=",".join(dict.fromkeys(hosts)),
+        SHARE_LINK_BASE=config.get("share_link_base", ""),  # the app page share links and QR codes open. Without it the server cannot make QR codes
         CORS_ORIGINS=",".join(config["origins"]), UPLOAD_DIR="/app/uploads", MAX_UPLOAD_MB="10",
         OCR_ENGINE="paddle", OCR_LANG="korean", OCR_DET_MAX_SIDE="1280", OCR_CPU_THREADS="4", OCR_ENGINES="2",
         OCR_ORIENTATION_MODEL="PP-LCNet_x1_0_doc_ori",
@@ -479,6 +484,17 @@ def add_hosts(config_path: Path, hosts: list[str]) -> list[str]:
     return merged
 
 
+def set_share_link_base(config_path: Path, address: str) -> str:
+    """Set the web address fridge share links and QR codes open (the app's /share/<token> page) without touching the rest of the private config."""
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    base = address.strip()
+    base = base if base.endswith("/") else base + "/"
+    validate_config({**config, "share_link_base": base})
+    config["share_link_base"] = base
+    save_private(config_path, json.dumps(config, indent=2) + "\n")
+    return base
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=ROOT / ".cloudrun" / "config.json")
@@ -495,6 +511,8 @@ def main() -> None:
     add_origin.add_argument("origins", nargs="+", help="HTTPS origins without a path")
     add_host = commands.add_parser("add-host", help="Let the service answer for another host name, e.g. api.foodiary.kr (a domain mapped to it). Run deploy and publish afterwards")
     add_host.add_argument("hosts", nargs="+", help="host names only: no https:// and no path")
+    share_base = commands.add_parser("set-share-link-base", help="Set the web address fridge share links and QR codes open, e.g. https://foodiary.kr/share/. Run deploy and publish afterwards")
+    share_base.add_argument("address", help="HTTPS address of the app's /share/ page")
     release = commands.add_parser("release", help="build, migrate, deploy and publish in one go (private from deploy until publish ends)")
     release.add_argument("--image", metavar="TAG", help="deploy the image the GitHub trigger already built for this tag "
                                                         "(the 7-character commit id, or latest) instead of building here")
@@ -512,6 +530,10 @@ def main() -> None:
         if args.action == "add-host":
             hosts = add_hosts(args.config, args.hosts)
             print("The service answers for these extra host names: " + ", ".join(hosts) + "\nRun deploy and publish to apply. No cloud resources were changed.")
+            return
+        if args.action == "set-share-link-base":
+            base = set_share_link_base(args.config, args.address)
+            print(f"Share links and QR codes will open {base}<token>\nRun deploy and publish to apply. No cloud resources were changed.")
             return
         deployment = Deployment(json.loads(args.config.read_text(encoding="utf-8")), args.config.parent)
         if args.action == "plan":

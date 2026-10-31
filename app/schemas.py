@@ -229,7 +229,7 @@ Visibility = Literal["private", "public"]
 
 
 class FridgeUpdate(BaseModel):
-    """바꿀 것만 보낸다. name은 이름, visibility는 멤버가 아닌 사람에게 보일 범위(private 참여자만 / public 모두)."""
+    """바꿀 것만 보낸다. name은 이름, visibility는 멤버가 아닌 사람에게 보일 범위(private 나만 / public 로그인한 모두가 읽기만)."""
 
     name: FridgeName | None = None
     visibility: Visibility | None = None
@@ -261,15 +261,6 @@ class MemberOut(BaseModel):
 
 class FridgeDetail(FridgeOut):
     members: list[MemberOut]
-
-
-class InviteOut(BaseModel):
-    code: str
-    expires_at: UtcDatetime
-
-
-class JoinRequest(BaseModel):
-    code: Annotated[str, StringConstraints(strip_whitespace=True, to_upper=True, min_length=1, max_length=16)]
 
 
 # ── 식품 ─────────────────────────────────────────────────────────────────
@@ -563,15 +554,11 @@ class MonthlyStats(BaseModel):
     top_discarded: list[DiscardedCategory]
 
 
-# ── 참여자 초대 · 구버전 변경 요청 · 공개 프로필 · 커뮤니티 ────────────────
-
-Permission = Literal["editor"]  # 모든 초대 참여자는 함께 관리
-# 구버전 앱의 viewer 요청도 함께 관리로 전환한다.
-InvitePermission = Annotated[Permission, BeforeValidator(lambda value: "editor" if value == "viewer" else value)]
+# ── 공유 링크 · 남의 냉장고 · 커뮤니티 ──────────────────────────────────
 
 
 class PublicUser(BaseModel):
-    """다른 사람에게 보여도 되는 프로필 정보. 이메일·로그인 아이디는 넣지 않는다."""
+    """다른 사람에게 보여도 되는 정보. 이메일·아이디는 넣지 않는다. 닉네임은 겹칠 수 있다."""
 
     id: int
     nickname: str
@@ -582,47 +569,26 @@ class PublicUser(BaseModel):
         return cls(id=user.id, nickname=user.nickname, avatar_url=user.avatar_url)
 
 
-class ShareLinkCreate(BaseModel):
-    permission: InvitePermission = "editor"
-    expires_in_days: int = Field(7, ge=1, le=90, description="링크가 살아 있는 날 수")
-    max_uses: int | None = Field(None, ge=1, le=100, description="이 링크로 들어올 수 있는 사람 수. 비우면 제한 없음")
-
-
 class ShareLinkOut(BaseModel):
-    id: int
+    """냉장고의 공유 링크. 냉장고마다 하나이고, 주인이 바꾸기 전까지 같다."""
+
     token: str
-    url: str | None  # 서버에 SHARE_LINK_BASE가 설정되어 있을 때만. 아니면 앱이 token으로 링크를 만든다
-    permission: Permission
-    created_at: UtcDatetime
-    expires_at: UtcDatetime
-    max_uses: int | None
-    use_count: int
+    url: str | None  # 서버에 SHARE_LINK_BASE가 설정되어 있을 때만. 아니면 앱이 token으로 링크를 만든다(QR은 이 주소가 있어야 만든다)
 
 
 class ShareLinkPreview(BaseModel):
-    """링크를 눌렀을 때 "○○님의 냉장고를 볼까요?"를 보여 주는 용도."""
+    """링크를 열었을 때 "○○님의 냉장고 [이름]에 들어갈까요?"를 보여 주는 용도."""
 
-    owner: PublicUser
+    fridge_id: int
     fridge_name: str
-    permission: Permission
-    my_permission: Literal["none", "viewer", "editor"]  # 이미 가진 권한
+    owner: PublicUser
+    member_count: int
+    already_member: bool  # 이미 멤버(주인 포함)면 들어오기 대신 바로 그 냉장고를 열면 된다
 
 
 class JoinResult(BaseModel):
-    owner: PublicUser
-    fridge_id: int
-    fridge_name: str
-    permission: Permission  # 지금 내가 가진 권한 (이미 더 높은 권한이 있으면 그대로)
-
-
-class AccessOut(BaseModel):
-    user: PublicUser
-    permission: Permission
-    since: UtcDatetime
-
-
-class AccessUpdate(BaseModel):
-    permission: InvitePermission
+    fridge: FridgeOut  # 내 냉장고 목록(GET /fridges)의 한 줄과 같은 모양
+    joined: bool  # 이번에 새로 들어왔으면 True, 이미 멤버였으면 False
 
 
 class SharedFridgeOut(BaseModel):
@@ -632,61 +598,7 @@ class SharedFridgeOut(BaseModel):
     name: str
     visibility: Visibility
     item_count: int
-    my_permission: Literal["owner", "editor", "viewer"]
-    can_request_changes: bool  # 구버전 클라이언트 호환용. 새 요청은 항상 비활성이다.
-
-
-ChangeKind = Literal["add", "consume", "discard"]  # 추가 / 먹음 / 버림
-ChangeStatus = Literal["pending", "approved", "declined", "cancelled"]
-ChangeNote = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
-
-
-class ChangeRequestCreate(BaseModel):
-    """주인에게 보내는 변경 요청. add는 name(과 선택으로 quantity, category, storage, expiry_date), consume·discard는 item_id(와 선택으로 quantity)."""
-
-    model_config = ConfigDict(allow_inf_nan=False)
-
-    fridge_id: int
-    kind: ChangeKind
-    item_id: int | None = None
-    quantity: float | None = Field(None, gt=0, description="추가할 수량(기본 1) / 먹거나 버린 수량(비우면 남은 양 전부)")
-    name: ItemName | None = None
-    category: CategoryKey = None
-    storage: Storage | None = None
-    expiry_date: date | None = None
-    note: ChangeNote | None = None
-
-    @model_validator(mode="after")
-    def _fits_the_kind(self):
-        if self.kind == "add":
-            if self.name is None:
-                raise ValueError("추가 요청에는 name이 필요합니다.")
-            if self.item_id is not None:
-                raise ValueError("추가 요청에는 item_id를 보내지 않습니다.")
-        else:
-            if self.item_id is None:
-                raise ValueError(f"{self.kind} 요청에는 item_id가 필요합니다.")
-            if any(value is not None for value in (self.name, self.category, self.storage, self.expiry_date)):
-                raise ValueError("먹음·버림 요청에는 item_id와 quantity만 보냅니다.")
-        return self
-
-
-class ChangeRequestOut(BaseModel):
-    id: int
-    fridge_id: int
-    fridge_name: str
-    requester: PublicUser
-    kind: ChangeKind
-    item_id: int | None
-    item_name: str | None  # 요청할 때의 품목 이름 (add면 만들 품목 이름)
-    quantity: float | None
-    category: str | None
-    storage: str | None
-    expiry_date: date | None
-    note: str | None
-    status: ChangeStatus
-    created_at: UtcDatetime
-    handled_at: UtcDatetime | None
+    my_permission: Literal["owner", "editor", "viewer"]  # viewer: 멤버가 아니라 '모두에게' 공개된 것을 구경만 한다
 
 
 class SharedItemOut(SizeFields):
@@ -864,9 +776,7 @@ class MyReviewList(BaseModel):
 class NotificationSummary(BaseModel):
     """아이콘에 붙일 숫자. 앱을 열 때와 돌아올 때 이것만 부르면 된다."""
 
-    pending_change_requests: int  # 내 냉장고에 들어와 아직 답하지 않은 변경 요청
     expiring_items: int  # 내가 멤버인 냉장고들에서 소비기한이 3일 이내로 남았거나 이미 지난 식품
-    unread_change_results: int  # 내가 보낸 변경 요청 중 승인·거절된 것 가운데 아직 확인하지 않은 것
     unread_comments: int  # 내 글에 달린 새 댓글
     total: int
 
@@ -889,23 +799,6 @@ class CommentNotificationList(BaseModel):
 
 class CommentsRead(BaseModel):
     up_to_id: int | None = Field(None, ge=1, description="화면에 보여 준 가장 새 댓글 번호. 비우면 지금까지 달린 것 모두")
-
-
-class ChangeResultOut(ChangeRequestOut):
-    """내가 보낸 변경 요청의 결과(승인·거절)."""
-
-    owner: PublicUser | None  # 처리한 사람 (냉장고 주인)
-    unread: bool  # 아직 확인하지 않은 결과
-
-
-class ChangeResultList(BaseModel):
-    requests: list[ChangeResultOut]  # 최신순
-    next_before_id: int | None  # 다음 쪽은 before_id=이 값으로 부른다. 없으면 마지막이다
-    unread_count: int
-
-
-class ChangeResultsRead(BaseModel):
-    ids: list[int] | None = Field(None, max_length=200, description="확인한 요청 번호들. 비우면 지금까지 처리된 결과 모두")
 
 
 class ExpiringItemOut(BaseModel):

@@ -731,3 +731,36 @@ def test_add_host_is_an_offline_cli_command(tmp_path, monkeypatch, capsys):
     cloudrun.main()
     assert json.loads(path.read_text())["hosts"] == ["api.foodiary.kr"]
     assert "api.foodiary.kr" in capsys.readouterr().out
+
+
+# ── 공유 링크와 QR이 여는 웹 앱 주소 ─────────────────────────────────────
+
+
+def test_share_link_base_reaches_the_server_only_when_set(tmp_path):
+    assert cloudrun.environment(config())["SHARE_LINK_BASE"] == ""  # 없으면 서버는 토큰만 주고 QR은 만들지 않는다
+    path = write_config(tmp_path)
+    before = json.loads(path.read_text())
+    assert cloudrun.set_share_link_base(path, " https://foodiary.kr/share ") == "https://foodiary.kr/share/"  # 끝의 /는 붙여 준다
+    after = json.loads(path.read_text())
+    assert after["share_link_base"] == "https://foodiary.kr/share/" and {k: v for k, v in after.items() if k != "share_link_base"} == before
+    assert cloudrun.environment(after)["SHARE_LINK_BASE"] == "https://foodiary.kr/share/"
+    assert cloudrun.set_share_link_base(path, "https://foodiary-app-ef2b5.web.app/share/") == "https://foodiary-app-ef2b5.web.app/share/"  # 바꿀 수 있다
+
+
+@pytest.mark.parametrize("bad", ["http://foodiary.kr/share/", "foodiary.kr/share/", "https://foodiary.kr/share/?a=1", "https://u:p@foodiary.kr/share/",
+                                 "https:///share/", "https://foodiary.kr/share/#x"])
+def test_share_link_base_must_be_a_plain_https_address(tmp_path, bad):
+    path = write_config(tmp_path)
+    before = path.read_text()
+    with pytest.raises(ValueError):
+        cloudrun.set_share_link_base(path, bad)
+    assert path.read_text() == before
+
+
+def test_set_share_link_base_is_an_offline_cli_command(tmp_path, monkeypatch, capsys):
+    path = write_config(tmp_path)
+    monkeypatch.setattr(cloudrun.shutil, "which", lambda name: pytest.fail("set-share-link-base must not look for or run gcloud"))
+    monkeypatch.setattr(cloudrun.sys, "argv", ["cloudrun", "--config", str(path), "set-share-link-base", "https://foodiary.kr/share/"])
+    cloudrun.main()
+    assert json.loads(path.read_text())["share_link_base"] == "https://foodiary.kr/share/"
+    assert "https://foodiary.kr/share/<token>" in capsys.readouterr().out

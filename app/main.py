@@ -18,7 +18,6 @@ from app.middleware import SecurityMiddleware
 from app.routers import (
     admin,
     auth,
-    change_requests,
     community,
     dev,
     fridges,
@@ -78,7 +77,7 @@ register_error_handlers(app)
 app.add_middleware(SecurityMiddleware)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_host_list)
 
-for module in (auth, users, fridges, items, receipts, recipes, recipe_reviews, products, stats, sharing, change_requests, community, notifications, admin, dev):
+for module in (auth, users, fridges, items, receipts, recipes, recipe_reviews, products, stats, sharing, community, notifications, admin, dev):
     app.include_router(module.router)
 app.include_router(dev.test_router)
 

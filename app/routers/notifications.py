@@ -1,4 +1,4 @@
-"""알림 아이콘: 처리할 변경 요청, 소비기한 임박 식품, 내가 보낸 변경 요청의 결과, 내 글에 달린 댓글을 한곳에서 센다. 푸시 알림이 아니라 앱이 열려 있을 때 부르는 조회다."""
+"""알림 아이콘: 소비기한 임박 식품과 내 글에 달린 댓글을 한곳에서 센다. 푸시 알림이 아니라 앱이 열려 있을 때 부르는 조회다."""
 
 from datetime import timedelta
 
@@ -8,12 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import get_current_user
-from app.models import ChangeRequest, Comment, FoodItem, Fridge, FridgeMember, Post, User
-from app.routers.change_requests import _out as change_request_out
+from app.models import Comment, FoodItem, Fridge, FridgeMember, Post, User
 from app.schemas import (
-    ChangeResultList,
-    ChangeResultOut,
-    ChangeResultsRead,
     CommentNotificationList,
     CommentNotificationOut,
     CommentsRead,
@@ -23,7 +19,7 @@ from app.schemas import (
     PublicUser,
 )
 from app.services.expiry import label_of
-from app.timeutil import today, utcnow
+from app.timeutil import today
 
 router = APIRouter(prefix="/notifications", tags=["알림"])
 
@@ -35,13 +31,8 @@ def _comments_on_my_posts(me: User) -> list:
     return [Post.author_id == me.id, Post.deleted_at.is_(None), Comment.deleted_at.is_(None), Comment.author_id != me.id]
 
 
-def _my_results(me: User) -> list:
-    """내가 보낸 변경 요청 중 주인이 승인하거나 거절한 것 (내가 취소한 것과 친구가 끊겨 취소된 것은 결과가 아니다)."""
-    return [ChangeRequest.requester_id == me.id, ChangeRequest.status.in_(("approved", "declined"))]
-
-
 def _expiring(me: User) -> list:
-    """내가 멤버(주인이나 고치기 권한)인 냉장고들의 남은 식품 중 소비기한이 임박했거나 지난 것. 보기만 하는 친구의 냉장고는 뺀다."""
+    """내가 멤버(주인이나 공유 링크로 들어온 사람)인 냉장고들의 남은 식품 중 소비기한이 임박했거나 지난 것. 공개 냉장고를 구경만 하는 것은 뺀다."""
     return [
         FridgeMember.user_id == me.id,
         FoodItem.status == "active",
@@ -56,28 +47,17 @@ def _expiring_count(db: Session, me: User) -> int:
 
 
 def _summary(db: Session, me: User) -> NotificationSummary:
-    pending = db.scalar(
-        select(func.count()).select_from(ChangeRequest).join(Fridge, Fridge.id == ChangeRequest.fridge_id)
-        .where(Fridge.owner_id == me.id, ChangeRequest.status == "pending")
-    )
     unread = db.scalar(
         select(func.count())
         .select_from(Comment)
         .join(Post, Post.id == Comment.post_id)
         .where(*_comments_on_my_posts(me), Comment.id > me.comments_seen_id)
     )
-    results = db.scalar(select(func.count()).select_from(ChangeRequest).where(*_my_results(me), ChangeRequest.result_seen_at.is_(None)))
     expiring = _expiring_count(db, me)
-    return NotificationSummary(
-        pending_change_requests=pending,
-        expiring_items=expiring,
-        unread_change_results=results,
-        unread_comments=unread,
-        total=pending + expiring + results + unread,
-    )
+    return NotificationSummary(expiring_items=expiring, unread_comments=unread, total=expiring + unread)
 
 
-@router.get("/summary", response_model=NotificationSummary, summary="아이콘에 붙일 숫자: 답하지 않은 변경 요청 수, 소비기한 임박 식품 수, 내 요청의 새 결과 수, 새 댓글 수")
+@router.get("/summary", response_model=NotificationSummary, summary="아이콘에 붙일 숫자: 소비기한 임박 식품 수, 새 댓글 수")
 def summary(me: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return _summary(db, me)
 
@@ -130,47 +110,6 @@ def mark_comments_read(payload: CommentsRead | None = None, me: User = Depends(g
     db.execute(update(User).where(User.id == me.id, User.comments_seen_id < upto).values(comments_seen_id=upto))
     db.commit()
     db.refresh(me)
-    return _summary(db, me)
-
-
-@router.get(
-    "/change-results",
-    response_model=ChangeResultList,
-    summary="내가 보낸 변경 요청의 결과(승인·거절) 목록 (최신순). 다음 쪽은 before_id에 next_before_id를 넣어 부른다",
-)
-def list_change_results(
-    before_id: int | None = Query(None, ge=1, description="이 번호보다 오래된 요청부터"),
-    limit: int = Query(20, ge=1, le=50),
-    me: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    query = select(ChangeRequest).where(*_my_results(me))
-    if before_id is not None:
-        query = query.where(ChangeRequest.id < before_id)
-    rows = db.scalars(query.order_by(ChangeRequest.id.desc()).limit(limit + 1)).all()
-    page = rows[:limit]
-    owners = {user.id: user for user in db.scalars(select(User).where(User.id.in_({row.handled_by for row in page if row.handled_by}))).all()}
-    return ChangeResultList(
-        requests=[
-            ChangeResultOut(
-                **change_request_out(db, row).model_dump(),
-                owner=PublicUser.of(owners[row.handled_by]) if row.handled_by in owners else None,
-                unread=row.result_seen_at is None,
-            )
-            for row in page
-        ],
-        next_before_id=page[-1].id if len(rows) > limit else None,
-        unread_count=_summary(db, me).unread_change_results,
-    )
-
-
-@router.post("/change-results/read", response_model=NotificationSummary, summary="변경 요청 결과를 확인함으로 표시하고 새 숫자를 돌려준다 (ids만, 비우면 지금까지 모두)")
-def mark_change_results_read(payload: ChangeResultsRead | None = None, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    query = update(ChangeRequest).where(*_my_results(me), ChangeRequest.result_seen_at.is_(None)).values(result_seen_at=utcnow())
-    if payload and payload.ids is not None:
-        query = query.where(ChangeRequest.id.in_(payload.ids))
-    db.execute(query)
-    db.commit()
     return _summary(db, me)
 
 

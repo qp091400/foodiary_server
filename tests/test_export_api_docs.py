@@ -17,13 +17,13 @@ def test_every_route_of_the_app_is_in_the_page_and_the_json(tmp_path):
     page = (tmp_path / "api.html").read_text(encoding="utf-8")
     assert spec == json.loads(json.dumps(app.openapi()))  # 서버가 실제로 내는 명세와 같다
     operations = [(method, path) for path, item in spec["paths"].items() for method in METHODS if method in item]
-    assert len(operations) > 80 and page.count('class="op"') == len(operations)
+    assert len(operations) > 70 and page.count('class="op"') == len(operations)  # 경로가 통째로 빠지지 않았는지 보는 하한선 (친구 기능을 지워 76개)
     for method, path in operations:
         assert f'<code class="path">{html.escape(path)}</code>' in page, (method, path)
-    for needed in ("/notifications/summary", "/notifications/expiring", "/shared-fridges", "/recipes/{recipe_id}/reviews/mine", "/api"):
-        assert any(path.startswith(needed) for _, path in operations) or needed == "/api"
-    assert "초대 링크로 냉장고 참여" in page and "로그인 필요" in page
-    assert not any(path.startswith("/friends") for _, path in operations)
+    for needed in ("/notifications/summary", "/notifications/expiring", "/share-links/{token}/join", "/fridges/{fridge_id}/share-link/qr", "/recipes/{recipe_id}/reviews/mine"):
+        assert any(path.startswith(needed) for _, path in operations), needed
+    assert "공유 링크 QR 이미지" in page and "로그인 필요" in page
+    assert not any(path.startswith(("/friends", "/change-requests", "/shared-fridges")) for _, path in operations)  # 친구 기능은 없어졌다
 
 
 def test_the_page_opens_by_itself_without_any_outside_file(tmp_path):

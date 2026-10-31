@@ -1,206 +1,133 @@
-"""냉장고별 참여자 초대 링크와 접근 권한 관리."""
+"""냉장고 공유 링크와 QR: 냉장고마다 링크가 하나 있고(에브리타임 시간표 공유처럼), 링크로 들어온 사람은 그 냉장고의 멤버가 되어
+주인처럼 고칠 수 있다. 들어온 냉장고는 내 냉장고 목록(GET /fridges)에 보인다. 친구 관계는 없다."""
 
+import io
 import secrets
-from datetime import timedelta
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import select, update
+import segno
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
-from app.deps import FridgeAccess, get_current_user, require_owner
-from app.models import Fridge, FridgeMember, FridgeShareLink, FridgeViewer, User, ChangeRequest
-from app.schemas import AccessOut, AccessUpdate, JoinResult, PublicUser, ShareLinkCreate, ShareLinkOut, ShareLinkPreview
-from app.services.fridge_access import explicit_permission
-from app.routers.users import list_user_fridges
-from app.timeutil import utcnow
+from app.deps import FridgeAccess, get_current_user, get_fridge_access, require_owner
+from app.models import Fridge, FridgeMember, User
+from app.routers.fridges import fridge_out
+from app.schemas import JoinResult, PublicUser, ShareLinkOut, ShareLinkPreview
+from app.services.fridge_access import member_permission
 
 router = APIRouter(tags=["공유 링크"])
 
-MAX_ACTIVE_LINKS = 20  # TODO: balance. 냉장고 하나에 살아 있는 링크 수
-LINK_NOT_FOUND = "링크가 올바르지 않거나 만료되었어요."
+LINK_NOT_FOUND = "링크가 올바르지 않거나 바뀌었어요. 냉장고 멤버에게 새 링크를 받아 주세요."
+QR_SCALE = 8  # QR 한 칸의 픽셀 수. 휴대폰 화면에 띄워 다른 휴대폰으로 찍기에 충분하다
+QR_MEDIA = {"png": "image/png", "svg": "image/svg+xml"}
 
 
-def _out(link: FridgeShareLink) -> ShareLinkOut:
+def _new_token() -> str:
+    return secrets.token_urlsafe(16)  # 22자. 아무거나 넣어 맞힐 수 없을 만큼 길다
+
+
+def _ensure_token(db: Session, fridge: Fridge) -> str:
+    """처음 공유할 때 링크를 만든다. 두 사람이 거의 동시에 눌러도 같은 링크(먼저 저장된 것)를 받는다."""
+    if fridge.share_token is None:
+        db.execute(update(Fridge).where(Fridge.id == fridge.id, Fridge.share_token.is_(None)).values(share_token=_new_token()))
+        db.commit()
+        db.refresh(fridge)
+    return fridge.share_token
+
+
+def _link(token: str) -> ShareLinkOut:
     base = settings.share_link_base
-    return ShareLinkOut(
-        id=link.id,
-        token=link.token,
-        url=base + link.token if base else None,
-        permission="editor",
-        created_at=link.created_at,
-        expires_at=link.expires_at,
-        max_uses=link.max_uses,
-        use_count=link.use_count,
-    )
+    return ShareLinkOut(token=token, url=base + token if base else None)
 
 
-def _usable(link: FridgeShareLink) -> bool:
-    return link.revoked_at is None and link.expires_at >= utcnow() and (link.max_uses is None or link.use_count < link.max_uses)
+# ── 멤버: 링크와 QR 받기 ────────────────────────────────────────────────
 
 
-# ── 주인: 링크 만들기와 관리 ─────────────────────────────────────────────
+@router.post(
+    "/fridges/{fridge_id}/share-link",
+    response_model=ShareLinkOut,
+    summary="공유 링크 받기 (멤버 누구나). 처음 누르면 만들어지고, 그다음부터는 같은 링크",
+)
+def share_link(access: FridgeAccess = Depends(get_fridge_access), db: Session = Depends(get_db)):
+    return _link(_ensure_token(db, access.fridge))
 
 
-@router.post("/fridges/{fridge_id}/share-links", response_model=ShareLinkOut, status_code=201, summary="공유 링크 만들기 (주인만)")
-def create_link(payload: ShareLinkCreate, access: FridgeAccess = Depends(require_owner), db: Session = Depends(get_db)):
-    alive = db.scalars(select(FridgeShareLink).where(FridgeShareLink.fridge_id == access.fridge.id, FridgeShareLink.revoked_at.is_(None))).all()
-    if sum(_usable(link) for link in alive) >= MAX_ACTIVE_LINKS:
-        raise HTTPException(status_code=429, detail=f"살아 있는 링크가 너무 많아요. 안 쓰는 링크를 지운 뒤에 만들어 주세요. (최대 {MAX_ACTIVE_LINKS}개)")
-    link = FridgeShareLink(
-        fridge_id=access.fridge.id,
-        token=secrets.token_urlsafe(16),
-        permission="editor",
-        expires_at=utcnow() + timedelta(days=payload.expires_in_days),
-        max_uses=payload.max_uses,
-    )
-    db.add(link)
+@router.get(
+    "/fridges/{fridge_id}/share-link/qr",
+    response_class=Response,
+    responses={200: {"content": {"image/png": {}, "image/svg+xml": {}}, "description": "공유 링크 주소를 담은 QR"}},
+    summary="공유 링크 QR 이미지 (멤버 누구나). 휴대폰 카메라로 찍으면 링크가 열린다. 링크가 아직 없으면 만든다",
+)
+def share_link_qr(
+    image: Literal["png", "svg"] = Query("png", alias="format", description="png(사진으로 저장하거나 보내기) / svg(화면에 크게 그리기)"),
+    access: FridgeAccess = Depends(get_fridge_access),
+    db: Session = Depends(get_db),
+):
+    url = _link(_ensure_token(db, access.fridge)).url
+    if url is None:  # 토큰만으로는 카메라가 열 수 있는 주소가 아니다
+        raise HTTPException(status_code=503, detail="서버에 공유 링크 주소(SHARE_LINK_BASE)가 설정되지 않아 QR을 만들 수 없어요.")
+    buffer = io.BytesIO()
+    segno.make(url, error="m", micro=False).save(buffer, kind=image, scale=QR_SCALE, border=4)
+    # 링크를 바꾸면 QR도 바뀌어야 해서 저장해 두지 않게 한다
+    return Response(buffer.getvalue(), media_type=QR_MEDIA[image], headers={"Cache-Control": "no-store"})
+
+
+@router.post(
+    "/fridges/{fridge_id}/share-link/reset",
+    response_model=ShareLinkOut,
+    summary="공유 링크 바꾸기 (주인만). 이전 링크와 QR로는 더 들어올 수 없다. 이미 들어온 멤버는 그대로",
+)
+def reset_share_link(access: FridgeAccess = Depends(require_owner), db: Session = Depends(get_db)):
+    access.fridge.share_token = _new_token()
     db.commit()
-    return _out(link)
-
-
-@router.get("/fridges/{fridge_id}/share-links", response_model=list[ShareLinkOut], summary="살아 있는 공유 링크 (주인만)")
-def list_links(access: FridgeAccess = Depends(require_owner), db: Session = Depends(get_db)):
-    links = db.scalars(
-        select(FridgeShareLink).where(FridgeShareLink.fridge_id == access.fridge.id, FridgeShareLink.revoked_at.is_(None)).order_by(FridgeShareLink.id)
-    ).all()
-    return [_out(link) for link in links if _usable(link)]
-
-
-@router.delete("/fridges/{fridge_id}/share-links/{link_id}", status_code=204, summary="공유 링크 없애기 (이미 들어온 사람의 권한은 그대로)")
-def revoke_link(link_id: int, access: FridgeAccess = Depends(require_owner), db: Session = Depends(get_db)):
-    link = db.get(FridgeShareLink, link_id)
-    if link is None or link.fridge_id != access.fridge.id or link.revoked_at is not None:
-        raise HTTPException(status_code=404, detail="링크를 찾을 수 없어요.")
-    link.revoked_at = utcnow()
-    db.commit()
-    return Response(status_code=204)
+    return _link(access.fridge.share_token)
 
 
 # ── 링크로 들어오는 사람 ─────────────────────────────────────────────────
 
 
-RANK = {None: 0, "viewer": 1, "editor": 2, "owner": 3}
-
-
-def _find(db: Session, token: str, me: User) -> tuple[FridgeShareLink, Fridge, User, str | None]:
-    """링크와 냉장고, 주인, 내가 이미 직접 받은 권한. 만료되었거나 다 쓴 링크도 이미 그만큼의 권한을 가진 사람에게는 열린다
-    (한 번 들어온 사람이 링크를 다시 눌렀을 때 "없는 링크"로 보이면 안 된다)."""
-    link = db.scalar(select(FridgeShareLink).where(FridgeShareLink.token == token))
-    fridge = db.get(Fridge, link.fridge_id) if link else None
-    owner = db.get(User, fridge.owner_id) if fridge else None
-    if owner is None:
+def _fridge_of(db: Session, token: str) -> Fridge:
+    fridge = db.scalar(select(Fridge).where(Fridge.share_token == token))
+    if fridge is None:
         raise HTTPException(status_code=404, detail=LINK_NOT_FOUND)
-    current = explicit_permission(db, me.id, fridge.id)
-    if not _usable(link) and RANK[current] < RANK["editor"]:
-        raise HTTPException(status_code=404, detail=LINK_NOT_FOUND)
-    return link, fridge, owner, current
+    return fridge
 
 
-@router.get("/share-links/{token}", response_model=ShareLinkPreview, summary="링크를 눌렀을 때 누구의 어떤 냉장고인지 미리 보기")
+@router.get("/share-links/{token}", response_model=ShareLinkPreview, summary="링크를 열었을 때: 누구의 어떤 냉장고인지, 내가 이미 멤버인지")
 def preview_link(token: str, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    link, fridge, owner, current = _find(db, token, me)
+    fridge = _fridge_of(db, token)
     return ShareLinkPreview(
-        owner=PublicUser.of(owner),
+        fridge_id=fridge.id,
         fridge_name=fridge.name,
-        permission="editor",
-        my_permission="editor" if current in ("owner", "editor") else current or "none",
+        owner=PublicUser.of(db.get(User, fridge.owner_id)),
+        member_count=db.scalar(select(func.count()).select_from(FridgeMember).where(FridgeMember.fridge_id == fridge.id)),
+        already_member=member_permission(db, me.id, fridge.id) is not None,
     )
 
 
-@router.post("/share-links/{token}/join", response_model=JoinResult, summary="초대 링크로 냉장고 참여")
+def _membership(db: Session, fridge_id: int, user_id: int) -> FridgeMember | None:
+    return db.scalar(select(FridgeMember).where(FridgeMember.fridge_id == fridge_id, FridgeMember.user_id == user_id))
+
+
+@router.post(
+    "/share-links/{token}/join",
+    response_model=JoinResult,
+    summary="링크로 들어오기: 그 냉장고의 멤버가 되어 주인처럼 고칠 수 있고, 내 냉장고 목록에 들어온다 (이미 멤버면 그대로)",
+)
 def join_link(token: str, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    link, fridge, owner, current = _find(db, token, me)
-    if owner.id == me.id:
-        raise HTTPException(status_code=400, detail="내 냉장고의 링크예요.")
-    if current != "editor":
-        if current == "viewer":
-            db.delete(db.get(FridgeViewer, (fridge.id, me.id)))
+    fridge = _fridge_of(db, token)
+    member = _membership(db, fridge.id, me.id)
+    joined = member is None
+    if joined:
         db.add(FridgeMember(fridge_id=fridge.id, user_id=me.id, role="member"))
-        link.use_count += 1
-    db.commit()
-    return JoinResult(owner=PublicUser.of(owner), fridge_id=fridge.id, fridge_name=fridge.name, permission="editor")
-
-
-# ── 주인: 누가 어떤 권한을 가졌는지 ──────────────────────────────────────
-
-
-@router.get("/fridges/{fridge_id}/access", response_model=list[AccessOut], summary="이 냉장고에 권한이 있는 사람들 (주인만)")
-def list_access(access: FridgeAccess = Depends(require_owner), db: Session = Depends(get_db)):
-    fridge_id = access.fridge.id
-    editors = db.execute(
-        select(User, FridgeMember.joined_at).join(FridgeMember, FridgeMember.user_id == User.id).where(FridgeMember.fridge_id == fridge_id, FridgeMember.role == "member")
-    ).all()
-    viewers = db.execute(
-        select(User, FridgeViewer.created_at).join(FridgeViewer, FridgeViewer.user_id == User.id).where(FridgeViewer.fridge_id == fridge_id)
-    ).all()
-    entries = [AccessOut(user=PublicUser.of(user), permission="editor", since=since) for user, since in editors] + [
-        AccessOut(user=PublicUser.of(user), permission="editor", since=since) for user, since in viewers
-    ]
-    return sorted(entries, key=lambda entry: (entry.since, entry.user.id))
-
-
-def _holder(db: Session, fridge_id: int, user_id: int) -> str:
-    current = explicit_permission(db, user_id, fridge_id)
-    if current not in ("editor", "viewer"):  # 주인이거나 권한이 없다
-        raise HTTPException(status_code=404, detail="이 냉장고에 권한이 있는 사람이 아니에요.")
-    return current
-
-
-@router.patch("/fridges/{fridge_id}/access/{user_id}", response_model=AccessOut, summary="구버전 호환: 참여자는 항상 함께 관리 (주인만)")
-def change_access(user_id: int, payload: AccessUpdate, access: FridgeAccess = Depends(require_owner), db: Session = Depends(get_db)):
-    fridge_id = access.fridge.id
-    current = _holder(db, fridge_id, user_id)
-    if current == "viewer":
-        db.delete(db.get(FridgeViewer, (fridge_id, user_id)))
-        db.add(FridgeMember(fridge_id=fridge_id, user_id=user_id, role="member"))
-        db.commit()
-    return AccessOut(
-        user=PublicUser.of(db.get(User, user_id)), permission="editor", since=_since(db, fridge_id, user_id, "editor")
-    )
-
-
-def _since(db: Session, fridge_id: int, user_id: int, permission: str):
-    if permission == "editor":
-        return db.scalar(select(FridgeMember.joined_at).where(FridgeMember.fridge_id == fridge_id, FridgeMember.user_id == user_id))
-    return db.scalar(select(FridgeViewer.created_at).where(FridgeViewer.fridge_id == fridge_id, FridgeViewer.user_id == user_id))
-
-
-@router.delete("/fridges/{fridge_id}/access/{user_id}", status_code=204, summary="이 냉장고의 권한 거두기 (주인만)")
-def remove_access(user_id: int, access: FridgeAccess = Depends(require_owner), db: Session = Depends(get_db)):
-    fridge_id = access.fridge.id
-    if _holder(db, fridge_id, user_id) == "editor":
-        db.delete(db.scalar(select(FridgeMember).where(FridgeMember.fridge_id == fridge_id, FridgeMember.user_id == user_id)))
-    else:
-        db.delete(db.get(FridgeViewer, (fridge_id, user_id)))
-    db.execute(update(ChangeRequest).where(ChangeRequest.fridge_id == fridge_id, ChangeRequest.requester_id == user_id, ChangeRequest.status == "pending").values(status="cancelled", handled_at=utcnow()))
-    db.commit()
-    return Response(status_code=204)
-
-
-@router.get("/shared-fridges", summary="초대받아 참여 중인 냉장고")
-def shared_fridges(me: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    owner_ids = set(db.scalars(select(Fridge.owner_id).join(FridgeMember, FridgeMember.fridge_id == Fridge.id).where(FridgeMember.user_id == me.id, Fridge.owner_id != me.id)).all())
-    owner_ids.update(db.scalars(select(Fridge.owner_id).join(FridgeViewer, FridgeViewer.fridge_id == Fridge.id).where(FridgeViewer.user_id == me.id)).all())
-    result = []
-    for owner_id in sorted(owner_ids):
-        owner = db.get(User, owner_id)
-        for fridge in list_user_fridges(owner_id, me, db):
-            if explicit_permission(db, me.id, fridge.id) in ("viewer", "editor"):
-                result.append({**fridge.model_dump(), "owner": PublicUser.of(owner).model_dump()})
-    return result
-
-
-@router.delete("/shared-fridges/{fridge_id}", status_code=204, summary="초대받은 냉장고에서 나가기")
-def leave_shared_fridge(fridge_id: int, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    permission = explicit_permission(db, me.id, fridge_id)
-    if permission not in ("viewer", "editor"):
-        raise HTTPException(status_code=404, detail="참여 중인 냉장고를 찾을 수 없어요.")
-    if permission == "viewer":
-        db.delete(db.get(FridgeViewer, (fridge_id, me.id)))
-    else:
-        db.delete(db.scalar(select(FridgeMember).where(FridgeMember.fridge_id == fridge_id, FridgeMember.user_id == me.id)))
-    db.execute(update(ChangeRequest).where(ChangeRequest.fridge_id == fridge_id, ChangeRequest.requester_id == me.id, ChangeRequest.status == "pending").values(status="cancelled", handled_at=utcnow()))
-    db.commit()
-    return Response(status_code=204)
+        try:
+            db.commit()
+        except IntegrityError:  # 같은 사람이 거의 동시에 두 번 눌렀다
+            db.rollback()
+            joined = False
+        member = _membership(db, fridge.id, me.id)
+    return JoinResult(fridge=fridge_out(db, fridge, member.role), joined=joined)
