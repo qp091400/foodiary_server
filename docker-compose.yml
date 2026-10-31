@@ -27,6 +27,7 @@ services:
       DATABASE_URL: postgresql+psycopg://fridge:fridge@db:5432/fridge
       UPLOAD_DIR: /app/uploads
       RECIPE_DATA_DIR: /app/recipe_data
+      RECOMMENDATION_MODEL_DIR: /opt/recommendation-model
     depends_on:
       db:
         condition: service_healthy
@@ -35,6 +36,7 @@ services:
     volumes:
       - uploads:/app/uploads
       - recipe_data:/app/recipe_data
+      - ./recipe_data/recommendation-seed:/opt/recommendation-model:ro
       # PaddleOCR 모델 캐시: 재시작할 때 다시 내려받지 않는다
       - paddle_models:/root/.paddlex
 

@@ -1,3 +1,20 @@
+# Current local environment: one app and one API
+
+The temporary split environment described below is retired. Use the existing accounts and PostgreSQL data:
+
+- App: http://localhost:8081 (`npm run start:local` in foodiary_app).
+- API: http://localhost:8000 (existing local Docker Compose API).
+- Model: read-only bind of `recipe_data/recommendation-seed` at `/opt/recommendation-model` in that API container.
+- No `.env.development.local` override is needed. `.env.local` remains on localhost:8000.
+- The 8082 app and 8001 fixture server have been stopped. `localdemo` belongs only to the retired fixture DB, not the existing account database.
+- No deployed service or remote database was changed. Container recreation preserves the existing PostgreSQL, recipe and upload volumes.
+
+Prepare the pinned model once using `python3 -m scripts.prepare_recommendation_model`, then start the normal `docker compose up -d` workflow. The local API now loads version `16498301425cbef78805dc3645469390faee97e6ef9ce495a42dfa448c179a0a` and its 32D embeddings.
+
+`node scripts/verify-local-app-connection.mjs` checks the actual development bundle's API address. Optional FOODIARY_LOCAL_USERNAME and FOODIARY_LOCAL_PASSWORD environment variables enable authenticated checks with an existing local account; no fixture credentials are assumed.
+
+## Historical isolated verification (not the current run instructions)
+
 # Local recommendation verification
 
 No deployment service, remote database, existing SSH tunnel on port 8000, existing Expo process on 8081, or app `.env.local` was modified. The checks use a separate HTTP API on 127.0.0.1:8001, a separate Expo web process on localhost:8082, and SQLite under `artifacts/local-recommendation-demo/demo.sqlite3`. Database migrations through 0019 were applied to that local file only. The full catalogue/model are read-only local files.
