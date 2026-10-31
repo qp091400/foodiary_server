@@ -330,6 +330,8 @@ http://openapi.foodsafetykorea.go.kr/api/{KEY}/C005/json/1/5/BAR_CD=880123456789
 
 친구 추가(친구 코드·링크, 닉네임), 냉장고마다 공개 범위(나만 / 친구들도 / 모두), 커뮤니티 글쓰기와 지우기(쓴 사람, 관리자)가 있습니다. 경로, 규칙, 관리자 만드는 법, 배포할 때 주의할 점은 [docs/community.md](docs/community.md)에 있습니다.
 
+레시피에 별점·후기를 남기는 기능과, 처리할 변경 요청·내 글에 달린 댓글을 알려 주는 알림 아이콘용 API는 [docs/recipe-reviews-notifications.md](docs/recipe-reviews-notifications.md)에 있습니다.
+
 ## 9. 향후 확장 (이번 범위 아님)
 
 - **푸시 알림(FCM)**: 지금은 임박 목록 조회 API만 있습니다. 매일 아침 임박 품목을 푸시하는 스케줄러를 붙일 수 있습니다.

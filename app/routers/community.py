@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.deps import get_current_user
-from app.models import Comment, Post, PostLike, PostPhoto, Report, User
+from app.models import Comment, Post, PostLike, PostPhoto, User
 from app.routers.receipts import load_image, read_upload
 from app.schemas import (
     CommentCreate,
@@ -28,7 +28,7 @@ from app.schemas import (
     PublicUser,
     ReportCreate,
 )
-from app.services.community import delete_comment, delete_post, remove_photo_file
+from app.services.community import delete_comment, delete_post, file_report, remove_photo_file
 from app.timeutil import utcnow
 
 router = APIRouter(prefix="/posts", tags=["커뮤니티"])
@@ -306,25 +306,13 @@ def remove_comment(post_id: int, comment_id: int, me: User = Depends(get_current
 # ── 신고 ─────────────────────────────────────────────────────────────────
 
 
-def _report(db: Session, me: User, target_type: str, target_id: int, target_author_id: int, payload: ReportCreate) -> MessageResponse:
-    if target_author_id == me.id:
-        raise HTTPException(status_code=400, detail="내가 쓴 것은 신고할 수 없어요.")
-    db.add(Report(reporter_id=me.id, target_type=target_type, target_id=target_id, reason=payload.reason, detail=payload.detail))
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="이미 신고했어요.") from None
-    return MessageResponse(message="신고했어요. 관리자가 확인할게요.")
-
-
 @router.post("/{post_id}/report", response_model=MessageResponse, status_code=201, summary="글 신고하기")
 def report_post(post_id: int, payload: ReportCreate, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
     post, _ = _live_post(db, post_id)
-    return _report(db, me, "post", post.id, post.author_id, payload)
+    return file_report(db, me, "post", post.id, post.author_id, payload)
 
 
 @router.post("/{post_id}/comments/{comment_id}/report", response_model=MessageResponse, status_code=201, summary="댓글 신고하기")
 def report_comment(post_id: int, comment_id: int, payload: ReportCreate, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
     comment, _ = _live_comment(db, post_id, comment_id)
-    return _report(db, me, "comment", comment.id, comment.author_id, payload)
+    return file_report(db, me, "comment", comment.id, comment.author_id, payload)

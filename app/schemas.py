@@ -587,6 +587,10 @@ class FriendOut(BaseModel):
     since: UtcDatetime
 
 
+class FriendAdd(BaseModel):
+    friend_code: Annotated[str, StringConstraints(strip_whitespace=True, to_upper=True, min_length=1, max_length=16)]  # 소문자로 넣어도 된다
+
+
 class ShareLinkCreate(BaseModel):
     permission: Permission = "viewer"
     expires_in_days: int = Field(7, ge=1, le=90, description="링크가 살아 있는 날 수")
@@ -789,18 +793,20 @@ class ReportCreate(BaseModel):
 
 
 class ReportTargetOut(BaseModel):
-    """신고된 글이나 댓글. 관리자가 지우기 전에 내용을 확인하는 용도."""
+    """신고된 글, 댓글, 레시피 후기. 관리자가 지우기 전에 내용을 확인하는 용도."""
 
-    post_id: int
+    post_id: int | None = None  # 글과 댓글이면 그 글 번호. 후기면 없다
+    recipe_id: str | None = None  # 후기면 그 레시피 번호
+    recipe_name: str | None = None
     author: PublicUser
-    text: str  # 글이면 제목과 본문, 댓글이면 본문 (앞부분)
+    text: str  # 글이면 제목과 본문, 댓글이면 본문, 후기면 별점과 본문 (앞부분)
     photo_count: int
     deleted: bool
 
 
 class AdminReportOut(BaseModel):
     id: int
-    target_type: Literal["post", "comment"]
+    target_type: Literal["post", "comment", "review"]
     target_id: int
     reason: ReportReason
     detail: str | None
@@ -814,3 +820,98 @@ class AdminReportOut(BaseModel):
 class ReportResolve(BaseModel):
     action: Literal["delete", "dismiss"]  # 대상을 지운다 / 문제없음으로 닫는다
 
+
+
+# ── 레시피 별점·후기 ─────────────────────────────────────────────────────
+
+
+def _blank_to_none(value: object) -> object:
+    return None if isinstance(value, str) and not value.strip() else value
+
+
+ReviewBody = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+
+
+class ReviewWrite(BaseModel):
+    rating: int = Field(ge=1, le=5, description="별점 1~5")
+    body: Annotated[ReviewBody | None, BeforeValidator(_blank_to_none)] = Field(None, description="후기 글. 비우거나 공백이면 별점만 남긴다")
+
+
+class RatingSummary(BaseModel):
+    average: float | None  # 소수 첫째 자리까지. 별점이 하나도 없으면 None
+    count: int
+    distribution: dict[str, int]  # "1"~"5"별로 몇 명이 줬는지 (별점 막대그래프용)
+
+
+class ReviewOut(BaseModel):
+    id: int
+    recipe_id: str
+    recipe_name: str
+    author: PublicUser
+    rating: int
+    body: str | None
+    created_at: UtcDatetime
+    updated_at: UtcDatetime | None  # 고친 적이 없으면 None
+    mine: bool
+    can_delete: bool  # 내가 쓴 후기이거나 내가 관리자
+
+
+class ReviewList(BaseModel):
+    summary: RatingSummary
+    my_review: ReviewOut | None  # 내가 이 레시피에 쓴 후기 (없으면 None). 목록에도 들어 있다
+    reviews: list[ReviewOut]  # 최신순
+    next_before_id: int | None  # 다음 쪽은 before_id=이 값으로 부른다. 없으면 마지막이다
+
+
+class MyReviewList(BaseModel):
+    reviews: list[ReviewOut]  # 최신순
+    next_before_id: int | None
+
+
+# ── 알림 아이콘 ──────────────────────────────────────────────────────────
+
+
+class NotificationSummary(BaseModel):
+    """아이콘에 붙일 숫자. 앱을 열 때와 돌아올 때 이것만 부르면 된다."""
+
+    pending_change_requests: int  # 내 냉장고에 들어와 아직 답하지 않은 변경 요청
+    unread_change_results: int  # 내가 보낸 변경 요청 중 승인·거절된 것 가운데 아직 확인하지 않은 것
+    unread_comments: int  # 내 글에 달린 새 댓글
+    total: int
+
+
+class CommentNotificationOut(BaseModel):
+    comment_id: int
+    post_id: int
+    post_title: str
+    commenter: PublicUser
+    body: str
+    created_at: UtcDatetime
+    unread: bool
+
+
+class CommentNotificationList(BaseModel):
+    comments: list[CommentNotificationOut]  # 최신순
+    next_before_id: int | None  # 다음 쪽은 before_id=이 값으로 부른다. 없으면 마지막이다
+    unread_count: int
+
+
+class CommentsRead(BaseModel):
+    up_to_id: int | None = Field(None, ge=1, description="화면에 보여 준 가장 새 댓글 번호. 비우면 지금까지 달린 것 모두")
+
+
+class ChangeResultOut(ChangeRequestOut):
+    """내가 보낸 변경 요청의 결과(승인·거절)."""
+
+    owner: PublicUser | None  # 처리한 사람 (냉장고 주인)
+    unread: bool  # 아직 확인하지 않은 결과
+
+
+class ChangeResultList(BaseModel):
+    requests: list[ChangeResultOut]  # 최신순
+    next_before_id: int | None  # 다음 쪽은 before_id=이 값으로 부른다. 없으면 마지막이다
+    unread_count: int
+
+
+class ChangeResultsRead(BaseModel):
+    ids: list[int] | None = Field(None, max_length=200, description="확인한 요청 번호들. 비우면 지금까지 처리된 결과 모두")

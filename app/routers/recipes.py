@@ -1,4 +1,4 @@
-"""추천에 선택한 식품의 소유권과 현재 상태를 서버에서 검증한다."""
+"""추천에 선택한 식품의 소유권과 현재 상태를 서버에서 검증한다. 추천 카드와 상세에는 레시피 별점도 함께 보낸다."""
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -6,8 +6,9 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import FridgeAccess, get_fridge_access
-from app.models import FoodItem
+from app.models import FoodItem, RecipeReview
 from app.services import recipe_store
+from app.services.recipe_reviews import rating_summaries
 from app.timeutil import today
 
 router = APIRouter(prefix="/fridges/{fridge_id}/recipes", tags=["레시피"])
@@ -27,12 +28,20 @@ def recommendations(payload: Selection, access: FridgeAccess = Depends(get_fridg
         raise HTTPException(409, "선택한 식품이 변경됐어요. 냉장고 목록을 새로 불러와 주세요.")
     expired = [f for f in foods if f.expiry_date and f.expiry_date < today()]
     usable = [f for f in foods if f not in expired]
-    return {**recipe_store.recommendations(usable), "excluded_expired": [f.name for f in expired]}
+    result = recipe_store.recommendations(usable)
+    summaries = rating_summaries(db, [recipe["id"] for recipe in result["recipes"]])
+    for recipe in result["recipes"]:
+        rating = summaries[recipe["id"]]
+        recipe["rating_average"], recipe["rating_count"] = rating.average, rating.count
+    return {**result, "excluded_expired": [f.name for f in expired]}
 
 
 @router.get("/{recipe_id}")
-def detail(recipe_id: str, access: FridgeAccess = Depends(get_fridge_access)):
+def detail(recipe_id: str, access: FridgeAccess = Depends(get_fridge_access), db: Session = Depends(get_db)):
     recipe = recipe_store.detail(recipe_id)
     if recipe is None:
         raise HTTPException(404, "레시피를 찾을 수 없습니다. 추천 목록을 다시 불러와 주세요.")
-    return recipe
+    mine = db.scalar(select(RecipeReview.id).where(RecipeReview.recipe_id == recipe_id, RecipeReview.author_id == access.user.id,
+                                                   RecipeReview.deleted_at.is_(None)))
+    # 후기 목록·쓰기는 /recipes/{recipe_id}/reviews. 여기서는 별점 요약과 내가 썼는지만 알려 준다.
+    return {**recipe, "rating": rating_summaries(db, [recipe_id])[recipe_id], "my_review_id": mine}

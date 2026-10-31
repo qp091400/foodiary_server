@@ -24,8 +24,10 @@ from app.routers import (
     friends,
     fridges,
     items,
+    notifications,
     products,
     receipts,
+    recipe_reviews,
     recipes,
     sharing,
     stats,
@@ -77,12 +79,13 @@ register_error_handlers(app)
 app.add_middleware(SecurityMiddleware)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_host_list)
 
-for module in (auth, users, fridges, items, receipts, recipes, products, stats, friends, sharing, change_requests, community, admin, dev):
+for module in (auth, users, fridges, items, receipts, recipes, recipe_reviews, products, stats, friends, sharing, change_requests, community, notifications, admin, dev):
     app.include_router(module.router)
 app.include_router(dev.test_router)
 
 
-@app.get("/health", tags=["상태"], summary="서버 상태 확인")
+@app.head("/health", include_in_schema=False)  # 외부 감시 서비스는 HEAD로 확인하는 경우가 많다
+@app.get("/health", tags=["상태"], summary="서버 상태 확인 (DB를 건드리지 않는다. 서버를 깨워 두려고 주기적으로 불러도 된다)")
 def health():
     return {"status": "ok"}
 

@@ -23,6 +23,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SECRET_KEYS = ("DATABASE_URL", "JWT_SECRET", "SMTP_PASSWORD")
 # Optional: when a version is recorded, the password-protected /receipt-test page is deployed.
 TEST_PASSWORD_KEY = "RECEIPT_TEST_PASSWORD"
+# publish verifies the private service before it opens it, so a separate verify step would only repeat that.
+RELEASE_STEPS = ("build", "migrate", "deploy", "publish")
 APIS = ("run.googleapis.com", "cloudbuild.googleapis.com", "artifactregistry.googleapis.com",
         "secretmanager.googleapis.com", "iam.googleapis.com", "storage.googleapis.com")
 
@@ -341,6 +343,39 @@ class Deployment:
         self.verify(private=False)
         print(service_url(self.config))
 
+    def previous_revision(self) -> str | None:
+        """The revision serving traffic now, noted before anything changes so a failed release can go back to it."""
+        try:
+            return self.gcloud("run", "services", "describe", self.service, f"--region={self.region}",
+                               "--format=value(status.latestReadyRevisionName)", capture=True, missing_ok=True) or None
+        except RuntimeError:
+            return None
+
+    def release(self) -> None:
+        """Ship the current source in one go: build, migrate, deploy, verify and publish. Stops at the first failure."""
+        previous = self.previous_revision()
+        print("The service is private from deploy until publish finishes."
+              + (f" Revision serving now: {previous}" if previous else ""), flush=True)
+        for number, step in enumerate(RELEASE_STEPS, 1):
+            print(f"\n[{number}/{len(RELEASE_STEPS)}] {step}", flush=True)
+            try:
+                getattr(self, step)()
+            except Exception:
+                print(self.failure_hint(step, previous), file=sys.stderr)
+                raise
+
+    def failure_hint(self, step: str, previous: str | None) -> str:
+        if step in ("build", "migrate"):
+            return f"Stopped at {step}. The running service was not changed. Fix the error and run release again."
+        hint = (f"Stopped at {step}. The service may be private now. Fix the error, then run deploy (if it did not finish) "
+                "and publish, one at a time, so the image is not built again.")
+        if previous:
+            hint += (f"\nTo go back to the previous revision:\n  gcloud run services update-traffic {self.service} "
+                     f"--region={self.region} --to-revisions={previous}=100\nIf the service is private, open it again:\n"
+                     f"  gcloud run services add-iam-policy-binding {self.service} --region={self.region} "
+                     "--member=allUsers --role=roles/run.invoker")
+        return hint
+
 
 def initialize(args, config_path: Path) -> None:
     if config_path.exists() or any((config_path.parent / "secrets" / key).exists() for key in SECRET_KEYS):
@@ -375,6 +410,7 @@ def main() -> None:
     init.add_argument("--origin", action="append", help="Frontend HTTPS origin; can be specified multiple times")
     for action in ("plan", "setup", "secrets", "build", "migrate", "deploy", "verify", "publish"):
         commands.add_parser(action)
+    commands.add_parser("release", help="build, migrate, deploy and publish in one go (private from deploy until publish ends)")
     test_password = commands.add_parser("test-password", help="Set (or --disable) the /receipt-test page password")
     test_password.add_argument("--disable", action="store_true", help="Turn the test page off at the next deploy")
     args = parser.parse_args()

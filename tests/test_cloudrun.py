@@ -298,3 +298,89 @@ def test_cloud_run_image_ships_the_recipe_database_without_opening_local_builds_
     build = (root / "deploy/cloudbuild.cloudrun.yaml").read_text(encoding="utf-8")
     assert "!recipe_data/image-seed" in build and "DOCKER_BUILDKIT=1" in build
     assert "recipe_data" in (root / ".dockerignore").read_text(encoding="utf-8")  # 개발 빌드 컨텍스트에는 계속 들어가지 않는다
+
+
+def stub_release_steps(deployment, monkeypatch, calls, previous="foodiary-00007-abc", failing=None):
+    monkeypatch.setattr(deployment, "previous_revision", lambda: previous)
+    for step in cloudrun.RELEASE_STEPS:
+        def run(step=step):
+            calls.append(step)
+            if step == failing:
+                raise RuntimeError(f"{step} failed")
+        monkeypatch.setattr(deployment, step, run)
+
+
+def test_release_runs_build_migrate_deploy_and_publish_in_order(tmp_path, monkeypatch, capsys):
+    deployment, _ = prepare_deployment(tmp_path)
+    calls = []
+    stub_release_steps(deployment, monkeypatch, calls)
+    deployment.release()
+    assert calls == ["build", "migrate", "deploy", "publish"]
+    out = capsys.readouterr().out
+    assert "foodiary-00007-abc" in out and "[1/4] build" in out and "[4/4] publish" in out
+
+
+@pytest.mark.parametrize("failing, ran", [("build", ["build"]), ("migrate", ["build", "migrate"]),
+                                          ("deploy", ["build", "migrate", "deploy"]),
+                                          ("publish", ["build", "migrate", "deploy", "publish"])])
+def test_release_stops_at_the_first_failure(tmp_path, monkeypatch, capsys, failing, ran):
+    deployment, _ = prepare_deployment(tmp_path)
+    calls = []
+    stub_release_steps(deployment, monkeypatch, calls, failing=failing)
+    with pytest.raises(RuntimeError, match=f"{failing} failed"):
+        deployment.release()
+    assert calls == ran
+    assert f"Stopped at {failing}" in capsys.readouterr().err
+
+
+def test_a_failure_before_deploy_says_the_service_is_untouched(tmp_path, monkeypatch, capsys):
+    deployment, _ = prepare_deployment(tmp_path)
+    stub_release_steps(deployment, monkeypatch, [], failing="migrate")
+    with pytest.raises(RuntimeError):
+        deployment.release()
+    err = capsys.readouterr().err
+    assert "was not changed" in err and "update-traffic" not in err
+
+
+def test_a_failure_after_deploy_shows_how_to_go_back(tmp_path, monkeypatch, capsys):
+    deployment, _ = prepare_deployment(tmp_path)
+    stub_release_steps(deployment, monkeypatch, [], failing="publish")
+    with pytest.raises(RuntimeError):
+        deployment.release()
+    err = capsys.readouterr().err
+    assert "may be private" in err
+    assert "update-traffic foodiary --region=asia-northeast1 --to-revisions=foodiary-00007-abc=100" in err
+    assert "--member=allUsers --role=roles/run.invoker" in err
+
+
+def test_first_release_has_no_revision_to_go_back_to(tmp_path, monkeypatch, capsys):
+    deployment, _ = prepare_deployment(tmp_path)
+    stub_release_steps(deployment, monkeypatch, [], previous=None, failing="deploy")
+    with pytest.raises(RuntimeError):
+        deployment.release()
+    assert "update-traffic" not in capsys.readouterr().err
+
+
+def test_previous_revision_is_best_effort(tmp_path, monkeypatch):
+    deployment, _ = prepare_deployment(tmp_path)
+    monkeypatch.setattr(deployment, "gcloud", lambda *args, **kwargs: "foodiary-00009-xyz")
+    assert deployment.previous_revision() == "foodiary-00009-xyz"
+    monkeypatch.setattr(deployment, "gcloud", lambda *args, **kwargs: None)  # 서비스가 아직 없다
+    assert deployment.previous_revision() is None
+    monkeypatch.setattr(deployment, "gcloud", lambda *args, **kwargs: "")
+    assert deployment.previous_revision() is None
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("gcloud run services failed")
+    monkeypatch.setattr(deployment, "gcloud", broken)
+    assert deployment.previous_revision() is None  # 못 알아내도 배포를 막지 않는다
+
+
+def test_release_is_a_cli_command(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(config()))
+    ran = []
+    monkeypatch.setattr(cloudrun.Deployment, "release", lambda self: ran.append(self.service))
+    monkeypatch.setattr(cloudrun.sys, "argv", ["cloudrun", "--config", str(config_path), "release"])
+    cloudrun.main()
+    assert ran == ["foodiary"]

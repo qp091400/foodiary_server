@@ -162,10 +162,50 @@ Cloud Run에서는 전달 IP 헤더를 신뢰하지 않으며 초기 요청 제�
 초기 소규모 시험용 보호다. 다중 인스턴스나 실제 사용자를 늘리기 전에는 공유 요청 제한과 트래픽 보호를 설계한다.
 주기적인 `/ready` 외부 감시는 Neon의 절전을 방해할 수 있으므로 무료 한도 시험 중에는 상시 폴링하지 않는다.
 
+### 서버가 자주 꺼지는 것처럼 느껴질 때 (콜드 스타트)
+
+최소 인스턴스를 두지 않으므로, 한동안 요청이 없으면 Cloud Run이 인스턴스를 내리고(보통 15분 안팎이지만 보장된 시간은 아니다) 그 뒤 첫 요청은 OCR 모델과 레시피 DB를 다시 올리느라 오래 걸린다. 서버가 죽는 것이 아니라 잠드는 것이다. 요청이 오면 다시 켜진다.
+
+- **앱이 켜져 있는 동안**: 앱이 켜질 때, 앞으로 돌아올 때, 그리고 5분마다 `GET /health`를 보낸다(`foodiary_app`의 `src/lib/api/keep-alive.ts`). 응답은 쓰지 않고 실패해도 무시하며, 뒤로 가 있는 동안에는 보내지 않는다. 로그인 화면을 보는 동안 서버가 먼저 깨어나므로 로그인이 덜 느려진다.
+- **앱을 아무도 안 쓰는 시간에도 깨워 두려면**: Cloud Scheduler가 5분마다 `/health`를 부르게 한다. Cloud Shell에서 한 번만 만든다(이 저장소의 `cloudrun.py`가 만들어 주지는 않는다).
+
+```sh
+gcloud services enable cloudscheduler.googleapis.com
+gcloud scheduler jobs create http foodiary-keepalive \
+  --location asia-northeast1 \
+  --schedule "*/5 * * * *" \
+  --http-method GET \
+  --uri "https://YOUR-SERVICE-URL/health"
+# 잠시 멈춤 / 다시 시작 / 없애기
+gcloud scheduler jobs pause foodiary-keepalive --location asia-northeast1
+gcloud scheduler jobs resume foodiary-keepalive --location asia-northeast1
+gcloud scheduler jobs delete foodiary-keepalive --location asia-northeast1
+```
+
+  `YOUR-SERVICE-URL`은 `publish`가 알려 주는 공개 주소다. 서비스를 `deploy`한 직후 `publish` 전까지는 IAM 비공개라 이 요청이 403을 받을 뿐 해롭지 않다. 리전은 서비스와 같게 둔다(서울이면 `asia-northeast3`).
+- **`/health`는 DB를 건드리지 않는다.** 그래서 Neon의 절전을 방해하지 않는다. 서버가 깨어 있어도 Neon이 5분쯤 쉬었다면 그 뒤 첫 DB 요청은 조금 느릴 수 있다. 위의 `/ready` 감시 금지는 그대로다(`/ready`는 DB를 건드린다). `HEAD /health`도 받으므로 외부 감시 서비스를 써도 된다.
+- 요청 기반 과금에서는 요청을 처리하지 않는 인스턴스의 CPU·RAM은 과금되지 않는다([요금](https://cloud.google.com/run/pricing)). 5분마다 가벼운 요청 하나는 요청 수 무료 한도에 비해 아주 작지만 이 구성에서 실제로 측정하지는 않았으니 청구 콘솔에서 확인한다. Cloud Scheduler는 결제 계정마다 작업 3개까지 무료다([요금](https://cloud.google.com/scheduler/pricing)).
+- 최소 인스턴스를 1로 두는 방법(`--min-instances 1`)도 있지만 CPU 8개·RAM 8GiB 인스턴스가 항상 떠 있게 되어 유휴 비용이 크다. 이 구성에서는 쓰지 않는다.
+
 ## 5. 업데이트·복구
 
 소스 변경 후 `build → migrate → deploy → verify → publish`를 실행한다. `deploy`는 다시 IAM 비공개로 바꾸므로
-현재 공개 서비스는 점검 시간에 업데이트한다. 이전 digest와 Secret Manager 버전을 기록해 둔다.
+현재 공개 서비스는 점검 시간에 업데이트한다.
+
+이 과정은 한 명령으로 실행할 수 있다. 새 압축본(`package_release.py`가 만든 것)을 Cloud Shell에 올린 뒤:
+
+```sh
+# 옛 소스를 지우되 설정·비밀(.cloudrun)과 레시피 DB(recipe_data)는 남긴다
+find ~/foodiary-cloudrun -mindepth 1 -maxdepth 1 ! -name .cloudrun ! -name recipe_data -exec rm -rf {} +
+tar -xzf ~/새-압축본.tar.gz -C ~/foodiary-cloudrun
+cd ~/foodiary-cloudrun && python3 scripts/cloudrun.py release
+```
+
+- `release`는 `build → migrate → deploy → publish`를 차례로 실행하고 **처음 실패한 단계에서 멈춘다**(`publish`가 공개 전에 `verify`와 같은 비공개 검사를 먼저 하므로 `verify`를 따로 부르지 않는다). 시작할 때 지금 트래픽을 받는 리비전 이름을 알려 주고, `deploy` 이후에 실패하면 그 리비전으로 되돌리는 명령을 보여 준다.
+- `build`와 `migrate`에서 실패하면 돌아가는 서비스는 바뀌지 않는다. `deploy`부터 `publish`가 끝날 때까지는 서비스가 비공개다.
+- `deploy` 뒤에 실패했으면 `build`를 다시 하지 않도록 `deploy`(끝나지 않았을 때), `publish`를 하나씩 실행한다.
+- 폴더를 통째로 지우지 않는다. `.cloudrun/`에는 설정과 비밀 파일이, `recipe_data/`에는 압축본에 들어 있지 않은 레시피 DB(약 830MB)가 있다. 통째로 지우면 `init`을 다시 해서 DB 주소와 SMTP 비밀번호를 입력해야 하고 JWT 키가 새로 만들어져 모든 사용자가 로그아웃되며, 레시피 DB도 다시 준비해야 한다.
+- 무엇이 지워질지 먼저 보려면 위 `find` 명령의 `-exec rm -rf {} +`를 `-print`로 바꿔 실행한다. 이전 digest와 Secret Manager 버전을 기록해 둔다.
 이미지 교체만으로 DB가 되돌아가지는 않는다. 스키마 변경과 이전 이미지의 호환성도 확인한다.
 
 Neon 복원 기능과 별도로 DB 덤프와 사진을 외부에 보관하고 복원을 시험한다.

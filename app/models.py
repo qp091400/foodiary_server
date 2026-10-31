@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import JSON, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import JSON, ForeignKey, Index, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -32,6 +32,8 @@ class User(Base):
     # 관리자: 남의 글도 지울 수 있다. scripts/set_admin.py로만 바꾼다
     is_admin: Mapped[bool] = mapped_column(default=False)
     avatar_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # 알림 아이콘: 내 글에 달린 댓글 중 이 번호까지는 봤다 (댓글 번호는 쓴 순서대로 커진다)
+    comments_seen_id: Mapped[int] = mapped_column(default=0)
 
     @property
     def avatar_url(self) -> str | None:
@@ -241,6 +243,34 @@ class Comment(Base):
     deleted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
 
 
+class RecipeReview(Base):
+    """레시피 별점과 후기. 한 사람이 한 레시피에 하나만 쓰고(지운 것은 빼고), 지운 후기는 글처럼 deleted_at을 채워 두고 보여 주지 않는다."""
+
+    __tablename__ = "recipe_reviews"
+    __table_args__ = (
+        Index("ix_recipe_reviews_recipe_deleted_id", "recipe_id", "deleted_at", "id"),
+        Index(
+            "uq_recipe_reviews_live_author",
+            "recipe_id",
+            "author_id",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    recipe_id: Mapped[str] = mapped_column(String(64))  # 레시피 자료의 번호. 레시피는 DB 표가 아니라 자료 파일이라 외래 키는 걸지 않는다
+    recipe_name: Mapped[str] = mapped_column(String(200))  # 쓸 때의 이름. 자료를 다시 가져와 레시피가 없어져도 무엇이었는지 남는다
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    rating: Mapped[int]  # 1~5
+    body: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime | None]  # 고친 적이 없으면 비어 있다
+    deleted_at: Mapped[datetime | None]
+    deleted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+
+
 class PostPhoto(Base):
     """글에 붙인 사진. 파일은 uploads/posts/{글 번호}/ 아래에 둔다."""
 
@@ -253,7 +283,7 @@ class PostPhoto(Base):
 
 
 class Report(Base):
-    """글이나 댓글 신고. 한 사람이 같은 대상을 한 번만 신고할 수 있고, 관리자가 지우거나 문제없음으로 처리한다."""
+    """글, 댓글, 레시피 후기 신고. 한 사람이 같은 대상을 한 번만 신고할 수 있고, 관리자가 지우거나 문제없음으로 처리한다."""
 
     __tablename__ = "reports"
     __table_args__ = (
@@ -263,8 +293,8 @@ class Report(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     reporter_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    target_type: Mapped[str] = mapped_column(String(10))  # post / comment
-    target_id: Mapped[int]  # 글이나 댓글 번호 (대상이 둘이라 외래 키는 걸지 않는다)
+    target_type: Mapped[str] = mapped_column(String(10))  # post / comment / review
+    target_id: Mapped[int]  # 글, 댓글, 후기 번호 (대상이 여럿이라 외래 키는 걸지 않는다)
     reason: Mapped[str] = mapped_column(String(20))  # spam / abuse / inappropriate / privacy / other
     detail: Mapped[str | None] = mapped_column(String(300))
     status: Mapped[str] = mapped_column(String(10), default="open")  # open / resolved(지움) / dismissed(문제없음)
@@ -317,4 +347,6 @@ class ChangeRequest(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     handled_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     handled_at: Mapped[datetime | None]
+    # 요청한 사람이 승인·거절된 결과를 알림에서 확인한 시각. 비어 있으면 아직 못 본 결과다
+    result_seen_at: Mapped[datetime | None]
 

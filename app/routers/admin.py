@@ -1,4 +1,4 @@
-"""관리자: 신고된 글·댓글을 보고 지우거나 문제없음으로 닫는다."""
+"""관리자: 신고된 글·댓글·레시피 후기를 보고 지우거나 문제없음으로 닫는다."""
 
 from typing import Literal
 
@@ -8,9 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import require_admin
-from app.models import Comment, Post, PostPhoto, Report, User
+from app.models import Comment, Post, PostPhoto, RecipeReview, Report, User
 from app.schemas import AdminReportOut, PublicUser, ReportResolve, ReportTargetOut
-from app.services.community import delete_comment, delete_post
+from app.services.community import delete_comment, delete_post, delete_review
 from app.timeutil import utcnow
 
 router = APIRouter(prefix="/admin", tags=["관리자"], dependencies=[Depends(require_admin)])
@@ -31,6 +31,19 @@ def _target(db: Session, report: Report) -> ReportTargetOut | None:
             text=f"{post.title}\n{post.body}"[:EXCERPT],
             photo_count=photos,
             deleted=post.deleted_at is not None,
+        )
+    if report.target_type == "review":
+        review = db.get(RecipeReview, report.target_id)
+        author = db.get(User, review.author_id) if review else None
+        if review is None or author is None:
+            return None
+        return ReportTargetOut(
+            recipe_id=review.recipe_id,
+            recipe_name=review.recipe_name,
+            author=PublicUser.of(author),
+            text=f"별점 {review.rating}\n{review.body or ''}"[:EXCERPT],
+            photo_count=0,
+            deleted=review.deleted_at is not None,
         )
     comment = db.get(Comment, report.target_id)
     author = db.get(User, comment.author_id) if comment else None
@@ -86,9 +99,10 @@ def resolve_report(report_id: int, payload: ReportResolve, admin: User = Depends
     if report.status != "open":
         raise HTTPException(status_code=409, detail="이미 처리한 신고예요.")
     if payload.action == "delete":
-        target = db.get(Post if report.target_type == "post" else Comment, report.target_id)
+        model, delete = {"post": (Post, delete_post), "comment": (Comment, delete_comment), "review": (RecipeReview, delete_review)}[report.target_type]
+        target = db.get(model, report.target_id)
         if target is not None and target.deleted_at is None:
-            (delete_post if report.target_type == "post" else delete_comment)(db, target, admin.id)
+            delete(db, target, admin.id)
     # 같은 대상에 들어온 다른 신고도 같은 결과로 닫는다 (한 번 보고 정하면 된다)
     status = "resolved" if payload.action == "delete" else "dismissed"
     for other in db.scalars(
