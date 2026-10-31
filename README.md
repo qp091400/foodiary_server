@@ -356,3 +356,19 @@ app/
     └── ocr/  base.py  paddle.py
 alembic/  tests/  Dockerfile  docker-compose.yml
 ```
+
+### 로컬 웹 + API를 80번 포트로 접속
+
+서버 저장소에서 `docker compose up --build -d`를 실행하면 개발용 Caddy도 시작한다.
+앱 저장소의 `.env.local`에서 `EXPO_PUBLIC_API_URL=http://localhost/api`로 설정하고
+`npm run web`으로 웹 개발 서버를 8081번 포트에서 실행한다(환경변수 변경 후 재시작).
+이후 브라우저에서는 `http://localhost`로 접속한다.
+
+- `/api/*`: 같은 Compose의 API 컨테이너(8000)로 전달한다.
+- 그 외 웹 경로와 WebSocket: 호스트의 Expo 개발 서버(8081)로 전달한다.
+- 기존 API 직접 주소 `http://localhost:8000`도 유지한다.
+
+웹이 다른 주소에서 실행 중이면 서버 Compose 실행 시 `LOCAL_WEB_UPSTREAM=호스트:포트`를
+지정한다. Docker 컨테이너에서 호스트로 접속할 때는 `localhost` 대신
+`host.docker.internal`을 사용한다. 개발 프록시는 HTTP 전용이며 운영 HTTPS 설정과 분리돼 있다.
+실제 휴대폰에서 같은 주소를 사용하려면 `localhost` 대신 개발 PC의 IP를 API 주소에 설정한다.
