@@ -1,4 +1,5 @@
 import csv
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +13,35 @@ from app.services.recipe_quality import classify
 
 def food(name):
     return SimpleNamespace(name=name)
+
+
+@pytest.mark.parametrize('indexed', [True, False])
+def test_recommendation_pages_keep_variants_unique_and_stop_at_last_page(tmp_path, monkeypatch, indexed):
+    monkeypatch.setattr(settings, 'recipe_data_dir', str(tmp_path))
+    rows = []
+    for i in range(65):
+        row = recipe(str(i), '달걀 1개, 양파 1개' + (', 당근 1개' if i >= 10 else ''))
+        row.update(name=f'요리 {i}', dish_name=f'요리{i}')
+        rows.append(row)
+    duplicate = dict(rows[0], id='duplicate')
+    rows.append(duplicate)
+    if indexed:
+        build_store(tmp_path / 'recipes.sqlite3', [rows], [], {row['id']: 'include' for row in rows})
+    else:
+        (tmp_path / 'catalogue.json').write_text(json.dumps(dict(recipes=rows, source_total=66, sample=False, imported_at='2026-10-31')), encoding='utf-8')
+    pages = []
+    offset = 0
+    while offset is not None:
+        page = recipe_store.recommendations([food('달걀')], offset=offset, seed=1234)
+        pages.append(page)
+        offset = page['next_offset']
+        assert len(pages) <= 3
+    assert [len(page['recipes']) for page in pages] == [30, 30, 5]
+    cards = [card for page in pages for card in page['recipes']]
+    assert len({card['id'] for card in cards}) == 65
+    assert len({card['name'] for card in cards}) == 65
+    assert [len(card['missing']) for card in cards] == sorted(len(card['missing']) for card in cards)
+    assert recipe_store.recommendations([food('달걀')], seed=1234)['recipes'] == pages[0]['recipes']
 
 
 def test_expanded_products_keep_processed_and_specific_ingredients_distinct():
