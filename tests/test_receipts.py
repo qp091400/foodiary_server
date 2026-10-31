@@ -178,8 +178,34 @@ def test_confirm_twice_409(client, fridge):
     assert again.status_code == 409
     assert "이미 확정" in again.json()["detail"]
     assert len(client.get(f"/fridges/{fridge['id']}/items", headers=fridge["headers"]).json()) == 2
-    # 확정된 영수증은 지울 수 없다
-    assert client.delete(f"/fridges/{fridge['id']}/receipts/{draft['id']}", headers=fridge["headers"]).status_code == 409
+
+
+def test_deleting_a_confirmed_receipt_undoes_it_and_allows_scanning_again(client, fridge, monkeypatch):
+    use_ocr(RECEIPT_ROWS)
+    monkeypatch.setattr(barcode_service, "decode_receipt_barcode", lambda image: "2026101000120034")
+    base = f"/fridges/{fridge['id']}"
+    draft = upload(client, fridge).json()
+    assert client.post(f"{base}/receipts/{draft['id']}/confirm", headers=fridge["headers"], json={"items": draft["draft_items"]}).status_code == 200
+    milk, tofu = client.get(f"{base}/items", headers=fridge["headers"]).json()
+    assert client.post(f"{base}/items/{milk['id']}/consume", headers=fridge["headers"], json={}).status_code == 200
+    # 수동으로 넣은 식품은 영수증과 무관하니 남아야 한다
+    manual = client.post(f"{base}/items", headers=fridge["headers"], json={"name": "사과", "quantity": 1}).json()
+
+    # 확정된 영수증이 남아 있는 동안은 같은 영수증을 다시 올릴 수 없다
+    assert upload(client, fridge).status_code == 409
+
+    assert client.delete(f"{base}/receipts/{draft['id']}", headers=fridge["headers"]).status_code == 204
+    # 그 영수증으로 넣은 식품, 구매 기록, 먹음 기록이 모두 사라진다
+    assert [item["id"] for item in client.get(f"{base}/items?status=all", headers=fridge["headers"]).json()] == [manual["id"]]
+    assert client.get(f"{base}/receipts/{draft['id']}", headers=fridge["headers"]).status_code == 404
+    assert [row["id"] for row in client.get(f"{base}/receipts", headers=fridge["headers"]).json()] == []
+    stats = client.get(f"{base}/stats/monthly?year=2026&month=10", headers=fridge["headers"]).json()
+    assert (stats["consumed_value"], stats["non_food_spent"]) == (0, 0)
+    assert uploaded_files() == []
+
+    # 기록을 지웠으니 같은 영수증을 다시 찍을 수 있다
+    assert upload(client, fridge).status_code == 201
+    assert client.delete(f"{base}/receipts/999999", headers=fridge["headers"]).status_code == 404
 
 
 def test_duplicate_receipt_barcode_409(client, fridge, monkeypatch):
