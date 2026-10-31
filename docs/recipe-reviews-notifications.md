@@ -36,17 +36,13 @@
 
 | 경로 | 설명 |
 |---|---|
-| `GET /notifications/summary` | `{"pending_change_requests": n, "expiring_items": n, "unread_change_results": n, "unread_comments": n, "total": n}`. 앱을 열 때와 앱으로 돌아올 때 이것만 부르면 된다 |
+| `GET /notifications/summary` | `{"expiring_items": n, "unread_comments": n, "total": n}`. 앱을 열 때와 앱으로 돌아올 때 이것만 부르면 된다 |
 | `GET /notifications/expiring?limit=` | **소비기한 임박 식품**(내가 멤버인 모든 냉장고에서 소비기한이 3일 이내로 남았거나 이미 지난 것, 소비기한이 빠른 순, 기본 50개, 최대 200개). 식품마다 `item_id`, `fridge_id`, `fridge_name`, `name`, `category_label`, `storage`, `remaining_quantity`, `expiry_date`, `days_left`(지났으면 음수)가 온다. `count`(limit에 잘리기 전의 전체 수)와 `alert_days`(3)도 온다 |
 | `GET /notifications/comments?limit=&before_id=` | **내 글에 달린 댓글 내용**(최신순, 기본 20, 최대 50). 댓글마다 `comment_id`, `post_id`, `post_title`, `commenter`(닉네임, 사진), `body`, `created_at`, `unread`. `unread_count`(새 댓글 전체 수)와 `next_before_id`도 온다 |
-| `GET /notifications/change-results?limit=&before_id=` | **내가 보낸 변경 요청의 결과**(승인·거절된 것만, 최신순, 기본 20, 최대 50). 요청 내용(`item_name`, `kind`, `fridge_name`, `note` 등 `/change-requests/sent`와 같은 칸)에 `status`(`approved`/`declined`), `handled_at`, `owner`(처리한 냉장고 주인), `unread`가 붙는다. `unread_count`와 `next_before_id`도 온다 |
-| `POST /notifications/change-results/read` | 확인함으로 표시하고 새 `summary`를 돌려준다. 본문 `{"ids": [요청 번호, ...]}`(200개까지)는 선택이며 화면에 보여 준 요청 번호를 넣는다. 본문을 비우면 지금까지 처리된 결과 모두 확인함이다 |
 | `POST /notifications/comments/read` | 읽음으로 표시하고 새 `summary`를 돌려준다. 본문 `{"up_to_id": 댓글 번호}`는 선택이며, 화면에 보여 준 가장 새 `comment_id`를 넣으면 그 뒤에 달린 댓글은 새 것으로 남는다. 본문을 비우면 지금까지 달린 것 모두 읽음이다 |
 
-- **소비기한 임박**: `expiring_items`는 내가 **멤버**(냉장고 주인이나 고치기 권한)인 냉장고들에서 `active`인 식품 중 소비기한이 오늘부터 3일 이내이거나 이미 지난 것의 수다. 냉장고별 `GET /fridges/{id}/items/expiring`(기본 3일, 지난 것 포함)과 같은 기준이고, 일수는 서버 상수 `EXPIRY_ALERT_DAYS`(TODO: balance)다. 소비기한이 없는 식품, 먹거나 버린 식품, 보기만 하는 친구의 냉장고는 세지 않는다. **읽음 표시가 없다.** 식품을 먹음·버림 처리하거나 소비기한을 늦추면 줄어들고, 처리하지 않으면 지난 뒤에도 계속 센다. 앱을 열 때나 앞으로 돌아올 때 `summary`를 부르면 "3일 남음"이 된 날부터 숫자에 잡힌다. **앱이 꺼져 있을 때 오는 푸시 알림은 아니다**(푸시는 기기 토큰 등록과 서버 스케줄러가 있어야 해서 아직 없다).
-- **변경 요청**: `pending_change_requests`는 내가 주인인 냉장고에 들어와 아직 승인·거절하지 않은 요청 수다. 아이콘을 누르면 기존 `GET /change-requests/received`(기본이 처리 전인 것)로 내용을 보여 주고, 승인·거절하면 숫자가 줄어든다. 읽음 표시는 따로 없다.
+- **소비기한 임박**: `expiring_items`는 내가 **멤버**(냉장고 주인이나 공유 링크로 들어온 사람)인 냉장고들에서 `active`인 식품 중 소비기한이 오늘부터 3일 이내이거나 이미 지난 것의 수다. 냉장고별 `GET /fridges/{id}/items/expiring`(기본 3일, 지난 것 포함)과 같은 기준이고, 일수는 서버 상수 `EXPIRY_ALERT_DAYS`(TODO: balance)다. 소비기한이 없는 식품, 먹거나 버린 식품, 공개 냉장고를 구경만 하는 것은 세지 않는다. **읽음 표시가 없다.** 식품을 먹음·버림 처리하거나 소비기한을 늦추면 줄어들고, 처리하지 않으면 지난 뒤에도 계속 센다. 앱을 열 때나 앞으로 돌아올 때 `summary`를 부르면 "3일 남음"이 된 날부터 숫자에 잡힌다. **앱이 꺼져 있을 때 오는 푸시 알림은 아니다**(푸시는 기기 토큰 등록과 서버 스케줄러가 있어야 해서 아직 없다).
 - **댓글**: 다른 사람이 내 글에 단 댓글만 센다. 내가 단 댓글, 지운 댓글, 지운 글의 댓글은 뺀다. 읽음은 사람마다 따로 기억하고(`users.comments_seen_id`), 번호는 올라가기만 해서 오래된 화면에서 보낸 요청이 읽은 자리를 되돌리지 않는다. 존재하지 않는 큰 번호를 보내도 앞으로 달릴 댓글까지 읽음이 되지는 않는다.
-- **내가 보낸 변경 요청의 결과**: `unread_change_results`는 내가 보낸 요청 중 주인이 승인하거나 거절했고 내가 아직 확인하지 않은 것의 수다. 내가 취소한 요청과 친구가 끊겨 자동으로 취소된 요청은 결과가 아니라서 세지 않는다. 확인 표시는 요청마다 따로 남고(`change_requests.result_seen_at`), 다른 사람의 요청 번호를 보내도 영향이 없다.
 
 ## 적용
 
@@ -54,7 +50,7 @@
 
 - `0006`: 새 표 `recipe_reviews`, `users`에 `comments_seen_id` 칸 추가. **이미 달린 댓글은 읽은 것으로 시작한다**(마이그레이션이 현재 가장 큰 댓글 번호를 넣어 준다). 그래서 배포 직후 옛 댓글이 한꺼번에 새 알림으로 뜨지 않는다.
 - `AUTO_CREATE_TABLES`는 이미 있는 `users` 표에 칸을 더하지 못한다. 로컬 개발 DB는 `alembic stamp 0001` 다음 `alembic upgrade head`(자세한 것은 [community.md](community.md)의 "배포할 때").
-- `0007`: `change_requests`에 `result_seen_at` 칸을 더한다. **이미 처리된 요청은 확인한 것으로 시작한다**(승인·거절된 요청의 `handled_at`을 넣어 준다).
+- `0007`: `change_requests`에 `result_seen_at` 칸을 더한다. **이미 처리된 요청은 확인한 것으로 시작한다**(승인·거절된 요청의 `handled_at`을 넣어 준다). `0008`에서 변경 요청 기능과 함께 표가 지워졌다.
 - 되돌리기: `alembic downgrade 0006`은 `result_seen_at`만, `0005`까지 내리면 후기 표와 댓글 읽음 칸도 지운다.
 
 검증: `tests/test_recipe_reviews.py`, `tests/test_notifications.py`.

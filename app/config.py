@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     ocr_orientation_model: str = "PP-LCNet_x1_0_doc_ori"
     ocr_models_dir: str = ""  # Cloud Run: 검증한 모델을 이미지에 포함한 디렉터리
     ocr_cpu_threads: int = Field(2, ge=1, le=16)
-    # 공유 링크의 앞부분. 비어 있으면 서버는 토큰만 돌려주고 링크는 앱이 만든다. 예: https://example.com/join/
+    # 공유 링크의 앞부분(끝에 토큰을 붙인다). 비어 있으면 서버는 토큰만 돌려주고 링크는 앱이 만들며, QR은 만들 수 없다. 예: https://foodiary.kr/share/
     share_link_base: str = ""
     ocr_engines: int = Field(1, ge=1, le=8)  # 사진을 동시에 읽는 OCR 엔진 수. 엔진마다 메모리를 약 2GB 쓴다
     # 인텔 CPU 가속(oneDNN). 실제 영수증 6장에서 결과는 줄 단위로 같고 한 장 18~29초 → 1.4~2.8초, 최대 메모리 6.9GB → 1.9GB

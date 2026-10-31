@@ -592,7 +592,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/PublicUser"
+                }
               }
             }
           },
@@ -737,7 +739,7 @@
         "tags": [
           "냉장고"
         ],
-        "summary": "내가 속한 냉장고 목록",
+        "summary": "내가 속한 냉장고 목록 (내 냉장고 + 공유 링크로 들어온 냉장고)",
         "operationId": "list_fridges_fridges_get",
         "responses": {
           "200": {
@@ -779,52 +781,6 @@
         },
         "responses": {
           "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FridgeOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/fridges/join": {
-      "post": {
-        "tags": [
-          "냉장고"
-        ],
-        "summary": "초대코드로 냉장고 참여",
-        "operationId": "join_fridge_fridges_join_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/JoinRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
@@ -957,7 +913,7 @@
         "tags": [
           "냉장고"
         ],
-        "summary": "냉장고 삭제 (주인만, 식품·영수증 함께 삭제)",
+        "summary": "냉장고 삭제 (주인만, 식품·영수증 함께 삭제. 공유 링크도 더 열리지 않는다)",
         "operationId": "delete_fridge_fridges__fridge_id__delete",
         "security": [
           {
@@ -978,53 +934,6 @@
         "responses": {
           "204": {
             "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/fridges/{fridge_id}/invites": {
-      "post": {
-        "tags": [
-          "냉장고"
-        ],
-        "summary": "초대코드 만들기 (7일 유효)",
-        "operationId": "create_invite_fridges__fridge_id__invites_post",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "fridge_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Fridge Id"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InviteOut"
-                }
-              }
-            }
           },
           "422": {
             "description": "Validation Error",
@@ -1887,7 +1796,7 @@
         "tags": [
           "영수증"
         ],
-        "summary": "초안(pending) 영수증 삭제",
+        "summary": "영수증 기록 삭제 (확정된 것은 그 영수증으로 넣은 식품·구매 기록·먹음/버림 기록까지). 같은 영수증을 다시 찍을 수 있게 된다",
         "operationId": "delete_receipt_fridges__fridge_id__receipts__receipt_id__delete",
         "security": [
           {
@@ -2798,127 +2707,13 @@
         }
       }
     },
-    "/friends": {
-      "get": {
-        "tags": [
-          "친구"
-        ],
-        "summary": "내 친구 목록",
-        "operationId": "list_friends_friends_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/FriendOut"
-                  },
-                  "type": "array",
-                  "title": "Response List Friends Friends Get"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "친구"
-        ],
-        "summary": "친구 코드로 친구 추가: 바로 서로 친구가 된다 (이미 친구면 200)",
-        "operationId": "add_friend_friends_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FriendAdd"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FriendOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/friends/{user_id}": {
-      "delete": {
-        "tags": [
-          "친구"
-        ],
-        "summary": "친구 끊기 (서로의 냉장고에서 받았던 권한도 함께 사라진다)",
-        "operationId": "remove_friend_friends__user_id__delete",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "User Id"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/fridges/{fridge_id}/share-links": {
+    "/fridges/{fridge_id}/share-link": {
       "post": {
         "tags": [
           "공유 링크"
         ],
-        "summary": "공유 링크 만들기 (주인만)",
-        "operationId": "create_link_fridges__fridge_id__share_links_post",
+        "summary": "공유 링크 받기 (멤버 누구나). 처음 누르면 만들어지고, 그다음부터는 같은 링크",
+        "operationId": "share_link_fridges__fridge_id__share_link_post",
         "security": [
           {
             "HTTPBearer": []
@@ -2935,18 +2730,8 @@
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ShareLinkCreate"
-              }
-            }
-          }
-        },
         "responses": {
-          "201": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
@@ -2967,13 +2752,75 @@
             }
           }
         }
-      },
+      }
+    },
+    "/fridges/{fridge_id}/share-link/qr": {
       "get": {
         "tags": [
           "공유 링크"
         ],
-        "summary": "살아 있는 공유 링크 (주인만)",
-        "operationId": "list_links_fridges__fridge_id__share_links_get",
+        "summary": "공유 링크 QR 이미지 (멤버 누구나). 휴대폰 카메라로 찍으면 링크가 열린다. 링크가 아직 없으면 만든다",
+        "operationId": "share_link_qr_fridges__fridge_id__share_link_qr_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "png",
+                "svg"
+              ],
+              "type": "string",
+              "description": "png(사진으로 저장하거나 보내기) / svg(화면에 크게 그리기)",
+              "default": "png",
+              "title": "Format"
+            },
+            "description": "png(사진으로 저장하거나 보내기) / svg(화면에 크게 그리기)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "공유 링크 주소를 담은 QR",
+            "content": {
+              "image/png": {},
+              "image/svg+xml": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fridges/{fridge_id}/share-link/reset": {
+      "post": {
+        "tags": [
+          "공유 링크"
+        ],
+        "summary": "공유 링크 바꾸기 (주인만). 이전 링크와 QR로는 더 들어올 수 없다. 이미 들어온 멤버는 그대로",
+        "operationId": "reset_share_link_fridges__fridge_id__share_link_reset_post",
         "security": [
           {
             "HTTPBearer": []
@@ -2996,63 +2843,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ShareLinkOut"
-                  },
-                  "title": "Response List Links Fridges  Fridge Id  Share Links Get"
+                  "$ref": "#/components/schemas/ShareLinkOut"
                 }
               }
             }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/fridges/{fridge_id}/share-links/{link_id}": {
-      "delete": {
-        "tags": [
-          "공유 링크"
-        ],
-        "summary": "공유 링크 없애기 (이미 들어온 사람의 권한은 그대로)",
-        "operationId": "revoke_link_fridges__fridge_id__share_links__link_id__delete",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "link_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Link Id"
-            }
-          },
-          {
-            "name": "fridge_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Fridge Id"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -3072,7 +2866,7 @@
         "tags": [
           "공유 링크"
         ],
-        "summary": "링크를 눌렀을 때 누구의 어떤 냉장고인지 미리 보기",
+        "summary": "링크를 열었을 때: 누구의 어떤 냉장고인지, 내가 이미 멤버인지",
         "operationId": "preview_link_share_links__token__get",
         "security": [
           {
@@ -3119,7 +2913,7 @@
         "tags": [
           "공유 링크"
         ],
-        "summary": "링크로 들어오기: 주인과 친구가 되고 냉장고 권한을 받는다",
+        "summary": "링크로 들어오기: 그 냉장고의 멤버가 되어 주인처럼 고칠 수 있고, 내 냉장고 목록에 들어온다 (이미 멤버면 그대로)",
         "operationId": "join_link_share_links__token__join_post",
         "security": [
           {
@@ -3144,508 +2938,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/JoinResult"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/fridges/{fridge_id}/access": {
-      "get": {
-        "tags": [
-          "공유 링크"
-        ],
-        "summary": "이 냉장고에 권한이 있는 사람들 (주인만)",
-        "operationId": "list_access_fridges__fridge_id__access_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "fridge_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Fridge Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/AccessOut"
-                  },
-                  "title": "Response List Access Fridges  Fridge Id  Access Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/fridges/{fridge_id}/access/{user_id}": {
-      "patch": {
-        "tags": [
-          "공유 링크"
-        ],
-        "summary": "권한 바꾸기: viewer(보기+변경 요청) / editor(주인처럼 고치기) (주인만)",
-        "operationId": "change_access_fridges__fridge_id__access__user_id__patch",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "User Id"
-            }
-          },
-          {
-            "name": "fridge_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Fridge Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AccessUpdate"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AccessOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "공유 링크"
-        ],
-        "summary": "이 냉장고의 권한 거두기 (친구는 그대로) (주인만)",
-        "operationId": "remove_access_fridges__fridge_id__access__user_id__delete",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "User Id"
-            }
-          },
-          {
-            "name": "fridge_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Fridge Id"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/change-requests": {
-      "post": {
-        "tags": [
-          "변경 요청"
-        ],
-        "summary": "냉장고 주인에게 변경 요청 보내기 (보기 권한이 있는 친구만)",
-        "operationId": "send_request_change_requests_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ChangeRequestCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ChangeRequestOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/change-requests/sent": {
-      "get": {
-        "tags": [
-          "변경 요청"
-        ],
-        "summary": "내가 보낸 변경 요청 (최신순)",
-        "operationId": "list_sent_change_requests_sent_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "enum": [
-                "pending",
-                "approved",
-                "declined",
-                "cancelled",
-                "all"
-              ],
-              "type": "string",
-              "default": "all",
-              "title": "Status"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 200,
-              "minimum": 1,
-              "default": 50,
-              "title": "Limit"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ChangeRequestOut"
-                  },
-                  "title": "Response List Sent Change Requests Sent Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/change-requests/{request_id}": {
-      "delete": {
-        "tags": [
-          "변경 요청"
-        ],
-        "summary": "내가 보낸 요청 취소 (아직 처리 전일 때)",
-        "operationId": "cancel_request_change_requests__request_id__delete",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "request_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Request Id"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/change-requests/received": {
-      "get": {
-        "tags": [
-          "변경 요청"
-        ],
-        "summary": "내 냉장고들에 들어온 변경 요청 (기본은 처리 전인 것, 오래된 것부터)",
-        "operationId": "list_received_change_requests_received_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "enum": [
-                "pending",
-                "approved",
-                "declined",
-                "cancelled",
-                "all"
-              ],
-              "type": "string",
-              "default": "pending",
-              "title": "Status"
-            }
-          },
-          {
-            "name": "fridge_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Fridge Id"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 200,
-              "minimum": 1,
-              "default": 50,
-              "title": "Limit"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ChangeRequestOut"
-                  },
-                  "title": "Response List Received Change Requests Received Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/change-requests/{request_id}/approve": {
-      "post": {
-        "tags": [
-          "변경 요청"
-        ],
-        "summary": "요청 승인: 그 내용이 냉장고에 반영된다 (주인만)",
-        "operationId": "approve_change_requests__request_id__approve_post",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "request_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Request Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ChangeRequestOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/change-requests/{request_id}/decline": {
-      "post": {
-        "tags": [
-          "변경 요청"
-        ],
-        "summary": "요청 거절 (주인만)",
-        "operationId": "decline_change_requests__request_id__decline_post",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "request_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Request Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ChangeRequestOut"
                 }
               }
             }
@@ -4416,7 +3708,7 @@
         "tags": [
           "알림"
         ],
-        "summary": "아이콘에 붙일 숫자: 답하지 않은 변경 요청 수, 소비기한 임박 식품 수, 내 요청의 새 결과 수, 새 댓글 수",
+        "summary": "아이콘에 붙일 숫자: 소비기한 임박 식품 수, 새 댓글 수",
         "operationId": "summary_notifications_summary_get",
         "responses": {
           "200": {
@@ -4520,128 +3812,6 @@
                 "anyOf": [
                   {
                     "$ref": "#/components/schemas/CommentsRead"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Payload"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NotificationSummary"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/notifications/change-results": {
-      "get": {
-        "tags": [
-          "알림"
-        ],
-        "summary": "내가 보낸 변경 요청의 결과(승인·거절) 목록 (최신순). 다음 쪽은 before_id에 next_before_id를 넣어 부른다",
-        "operationId": "list_change_results_notifications_change_results_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "before_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "이 번호보다 오래된 요청부터",
-              "title": "Before Id"
-            },
-            "description": "이 번호보다 오래된 요청부터"
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 50,
-              "minimum": 1,
-              "default": 20,
-              "title": "Limit"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ChangeResultList"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/notifications/change-results/read": {
-      "post": {
-        "tags": [
-          "알림"
-        ],
-        "summary": "변경 요청 결과를 확인함으로 표시하고 새 숫자를 돌려준다 (ids만, 비우면 지금까지 모두)",
-        "operationId": "mark_change_results_read_notifications_change_results_read_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/ChangeResultsRead"
                   },
                   {
                     "type": "null"
@@ -4899,49 +4069,6 @@
   },
   "components": {
     "schemas": {
-      "AccessOut": {
-        "properties": {
-          "user": {
-            "$ref": "#/components/schemas/PublicUser"
-          },
-          "permission": {
-            "type": "string",
-            "enum": [
-              "viewer",
-              "editor"
-            ],
-            "title": "Permission"
-          },
-          "since": {
-            "type": "string",
-            "title": "Since"
-          }
-        },
-        "type": "object",
-        "required": [
-          "user",
-          "permission",
-          "since"
-        ],
-        "title": "AccessOut"
-      },
-      "AccessUpdate": {
-        "properties": {
-          "permission": {
-            "type": "string",
-            "enum": [
-              "viewer",
-              "editor"
-            ],
-            "title": "Permission"
-          }
-        },
-        "type": "object",
-        "required": [
-          "permission"
-        ],
-        "title": "AccessUpdate"
-      },
       "AdminReportOut": {
         "properties": {
           "id": {
@@ -5349,491 +4476,6 @@
           "default_days"
         ],
         "title": "CategoryOut"
-      },
-      "ChangeRequestCreate": {
-        "properties": {
-          "fridge_id": {
-            "type": "integer",
-            "title": "Fridge Id"
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "add",
-              "consume",
-              "discard"
-            ],
-            "title": "Kind"
-          },
-          "item_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Item Id"
-          },
-          "quantity": {
-            "anyOf": [
-              {
-                "type": "number",
-                "exclusiveMinimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quantity",
-            "description": "추가할 수량(기본 1) / 먹거나 버린 수량(비우면 남은 양 전부)"
-          },
-          "name": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 200,
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          },
-          "category": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Category"
-          },
-          "storage": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "fridge",
-                  "freezer",
-                  "room"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Storage"
-          },
-          "expiry_date": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expiry Date"
-          },
-          "note": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 200,
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Note"
-          }
-        },
-        "type": "object",
-        "required": [
-          "fridge_id",
-          "kind"
-        ],
-        "title": "ChangeRequestCreate",
-        "description": "주인에게 보내는 변경 요청. add는 name(과 선택으로 quantity, category, storage, expiry_date), consume·discard는 item_id(와 선택으로 quantity)."
-      },
-      "ChangeRequestOut": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "fridge_id": {
-            "type": "integer",
-            "title": "Fridge Id"
-          },
-          "fridge_name": {
-            "type": "string",
-            "title": "Fridge Name"
-          },
-          "requester": {
-            "$ref": "#/components/schemas/PublicUser"
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "add",
-              "consume",
-              "discard"
-            ],
-            "title": "Kind"
-          },
-          "item_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Item Id"
-          },
-          "item_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Item Name"
-          },
-          "quantity": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quantity"
-          },
-          "category": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Category"
-          },
-          "storage": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Storage"
-          },
-          "expiry_date": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expiry Date"
-          },
-          "note": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Note"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "pending",
-              "approved",
-              "declined",
-              "cancelled"
-            ],
-            "title": "Status"
-          },
-          "created_at": {
-            "type": "string",
-            "title": "Created At"
-          },
-          "handled_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Handled At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "fridge_id",
-          "fridge_name",
-          "requester",
-          "kind",
-          "item_id",
-          "item_name",
-          "quantity",
-          "category",
-          "storage",
-          "expiry_date",
-          "note",
-          "status",
-          "created_at",
-          "handled_at"
-        ],
-        "title": "ChangeRequestOut"
-      },
-      "ChangeResultList": {
-        "properties": {
-          "requests": {
-            "items": {
-              "$ref": "#/components/schemas/ChangeResultOut"
-            },
-            "type": "array",
-            "title": "Requests"
-          },
-          "next_before_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Before Id"
-          },
-          "unread_count": {
-            "type": "integer",
-            "title": "Unread Count"
-          }
-        },
-        "type": "object",
-        "required": [
-          "requests",
-          "next_before_id",
-          "unread_count"
-        ],
-        "title": "ChangeResultList"
-      },
-      "ChangeResultOut": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "fridge_id": {
-            "type": "integer",
-            "title": "Fridge Id"
-          },
-          "fridge_name": {
-            "type": "string",
-            "title": "Fridge Name"
-          },
-          "requester": {
-            "$ref": "#/components/schemas/PublicUser"
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "add",
-              "consume",
-              "discard"
-            ],
-            "title": "Kind"
-          },
-          "item_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Item Id"
-          },
-          "item_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Item Name"
-          },
-          "quantity": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quantity"
-          },
-          "category": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Category"
-          },
-          "storage": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Storage"
-          },
-          "expiry_date": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expiry Date"
-          },
-          "note": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Note"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "pending",
-              "approved",
-              "declined",
-              "cancelled"
-            ],
-            "title": "Status"
-          },
-          "created_at": {
-            "type": "string",
-            "title": "Created At"
-          },
-          "handled_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Handled At"
-          },
-          "owner": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PublicUser"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "unread": {
-            "type": "boolean",
-            "title": "Unread"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "fridge_id",
-          "fridge_name",
-          "requester",
-          "kind",
-          "item_id",
-          "item_name",
-          "quantity",
-          "category",
-          "storage",
-          "expiry_date",
-          "note",
-          "status",
-          "created_at",
-          "handled_at",
-          "owner",
-          "unread"
-        ],
-        "title": "ChangeResultOut",
-        "description": "내가 보낸 변경 요청의 결과(승인·거절)."
-      },
-      "ChangeResultsRead": {
-        "properties": {
-          "ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "integer"
-                },
-                "type": "array",
-                "maxItems": 200
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ids",
-            "description": "확인한 요청 번호들. 비우면 지금까지 처리된 결과 모두"
-          }
-        },
-        "type": "object",
-        "title": "ChangeResultsRead"
       },
       "CommentCreate": {
         "properties": {
@@ -6509,7 +5151,6 @@
             "type": "string",
             "enum": [
               "private",
-              "friends",
               "public"
             ],
             "title": "Visibility"
@@ -6565,7 +5206,6 @@
             "type": "string",
             "enum": [
               "private",
-              "friends",
               "public"
             ],
             "title": "Visibility"
@@ -6604,7 +5244,6 @@
                 "type": "string",
                 "enum": [
                   "private",
-                  "friends",
                   "public"
                 ]
               },
@@ -6617,39 +5256,7 @@
         },
         "type": "object",
         "title": "FridgeUpdate",
-        "description": "바꿀 것만 보낸다. name은 이름, visibility는 멤버가 아닌 사람에게 보일 범위(private 나만 / friends 친구들도 / public 모두)."
-      },
-      "FriendAdd": {
-        "properties": {
-          "friend_code": {
-            "type": "string",
-            "maxLength": 16,
-            "minLength": 1,
-            "title": "Friend Code"
-          }
-        },
-        "type": "object",
-        "required": [
-          "friend_code"
-        ],
-        "title": "FriendAdd"
-      },
-      "FriendOut": {
-        "properties": {
-          "user": {
-            "$ref": "#/components/schemas/PublicUser"
-          },
-          "since": {
-            "type": "string",
-            "title": "Since"
-          }
-        },
-        "type": "object",
-        "required": [
-          "user",
-          "since"
-        ],
-        "title": "FriendOut"
+        "description": "바꿀 것만 보낸다. name은 이름, visibility는 멤버가 아닌 사람에게 보일 범위(private 나만 / public 로그인한 모두가 읽기만)."
       },
       "HTTPValidationError": {
         "properties": {
@@ -6663,24 +5270,6 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
-      },
-      "InviteOut": {
-        "properties": {
-          "code": {
-            "type": "string",
-            "title": "Code"
-          },
-          "expires_at": {
-            "type": "string",
-            "title": "Expires At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "code",
-          "expires_at"
-        ],
-        "title": "InviteOut"
       },
       "ItemCreate": {
         "properties": {
@@ -7155,54 +5744,20 @@
         "title": "ItemUpdate",
         "description": "보낸 필드만 수정한다. 가격·소비기한·메모는 null을 보내면 비운다."
       },
-      "JoinRequest": {
-        "properties": {
-          "code": {
-            "type": "string",
-            "maxLength": 16,
-            "minLength": 1,
-            "title": "Code"
-          }
-        },
-        "type": "object",
-        "required": [
-          "code"
-        ],
-        "title": "JoinRequest"
-      },
       "JoinResult": {
         "properties": {
-          "owner": {
-            "$ref": "#/components/schemas/PublicUser"
+          "fridge": {
+            "$ref": "#/components/schemas/FridgeOut"
           },
-          "fridge_id": {
-            "type": "integer",
-            "title": "Fridge Id"
-          },
-          "fridge_name": {
-            "type": "string",
-            "title": "Fridge Name"
-          },
-          "permission": {
-            "type": "string",
-            "enum": [
-              "viewer",
-              "editor"
-            ],
-            "title": "Permission"
-          },
-          "newly_friends": {
+          "joined": {
             "type": "boolean",
-            "title": "Newly Friends"
+            "title": "Joined"
           }
         },
         "type": "object",
         "required": [
-          "owner",
-          "fridge_id",
-          "fridge_name",
-          "permission",
-          "newly_friends"
+          "fridge",
+          "joined"
         ],
         "title": "JoinResult"
       },
@@ -7388,17 +5943,9 @@
       },
       "NotificationSummary": {
         "properties": {
-          "pending_change_requests": {
-            "type": "integer",
-            "title": "Pending Change Requests"
-          },
           "expiring_items": {
             "type": "integer",
             "title": "Expiring Items"
-          },
-          "unread_change_results": {
-            "type": "integer",
-            "title": "Unread Change Results"
           },
           "unread_comments": {
             "type": "integer",
@@ -7411,9 +5958,7 @@
         },
         "type": "object",
         "required": [
-          "pending_change_requests",
           "expiring_items",
-          "unread_change_results",
           "unread_comments",
           "total"
         ],
@@ -7609,10 +6154,6 @@
             "type": "string",
             "title": "Nickname"
           },
-          "friend_code": {
-            "type": "string",
-            "title": "Friend Code"
-          },
           "avatar_url": {
             "anyOf": [
               {
@@ -7628,11 +6169,10 @@
         "type": "object",
         "required": [
           "id",
-          "nickname",
-          "friend_code"
+          "nickname"
         ],
         "title": "PublicUser",
-        "description": "다른 사람에게 보여도 되는 정보. 닉네임은 겹칠 수 있어서 바뀌지 않는 친구 코드로 구별한다. 이메일·아이디는 넣지 않는다."
+        "description": "다른 사람에게 보여도 되는 정보. 이메일·아이디는 넣지 않는다. 닉네임은 겹칠 수 있다."
       },
       "PurchaseGroup": {
         "properties": {
@@ -8708,49 +7248,8 @@
         ],
         "title": "SendCodeRequest"
       },
-      "ShareLinkCreate": {
-        "properties": {
-          "permission": {
-            "type": "string",
-            "enum": [
-              "viewer",
-              "editor"
-            ],
-            "title": "Permission",
-            "default": "viewer"
-          },
-          "expires_in_days": {
-            "type": "integer",
-            "maximum": 90.0,
-            "minimum": 1.0,
-            "title": "Expires In Days",
-            "description": "링크가 살아 있는 날 수",
-            "default": 7
-          },
-          "max_uses": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "maximum": 100.0,
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Uses",
-            "description": "이 링크로 들어올 수 있는 사람 수. 비우면 제한 없음"
-          }
-        },
-        "type": "object",
-        "title": "ShareLinkCreate"
-      },
       "ShareLinkOut": {
         "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
           "token": {
             "type": "string",
             "title": "Token"
@@ -8765,88 +7264,48 @@
               }
             ],
             "title": "Url"
-          },
-          "permission": {
-            "type": "string",
-            "enum": [
-              "viewer",
-              "editor"
-            ],
-            "title": "Permission"
-          },
-          "created_at": {
-            "type": "string",
-            "title": "Created At"
-          },
-          "expires_at": {
-            "type": "string",
-            "title": "Expires At"
-          },
-          "max_uses": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Uses"
-          },
-          "use_count": {
-            "type": "integer",
-            "title": "Use Count"
           }
         },
         "type": "object",
         "required": [
-          "id",
           "token",
-          "url",
-          "permission",
-          "created_at",
-          "expires_at",
-          "max_uses",
-          "use_count"
+          "url"
         ],
-        "title": "ShareLinkOut"
+        "title": "ShareLinkOut",
+        "description": "냉장고의 공유 링크. 냉장고마다 하나이고, 주인이 바꾸기 전까지 같다."
       },
       "ShareLinkPreview": {
         "properties": {
-          "owner": {
-            "$ref": "#/components/schemas/PublicUser"
+          "fridge_id": {
+            "type": "integer",
+            "title": "Fridge Id"
           },
           "fridge_name": {
             "type": "string",
             "title": "Fridge Name"
           },
-          "permission": {
-            "type": "string",
-            "enum": [
-              "viewer",
-              "editor"
-            ],
-            "title": "Permission"
+          "owner": {
+            "$ref": "#/components/schemas/PublicUser"
           },
-          "my_permission": {
-            "type": "string",
-            "enum": [
-              "none",
-              "viewer",
-              "editor"
-            ],
-            "title": "My Permission"
+          "member_count": {
+            "type": "integer",
+            "title": "Member Count"
+          },
+          "already_member": {
+            "type": "boolean",
+            "title": "Already Member"
           }
         },
         "type": "object",
         "required": [
-          "owner",
+          "fridge_id",
           "fridge_name",
-          "permission",
-          "my_permission"
+          "owner",
+          "member_count",
+          "already_member"
         ],
         "title": "ShareLinkPreview",
-        "description": "링크를 눌렀을 때 \"○○님의 냉장고를 볼까요?\"를 보여 주는 용도."
+        "description": "링크를 열었을 때 \"○○님의 냉장고 [이름]에 들어갈까요?\"를 보여 주는 용도."
       },
       "SharedFridgeOut": {
         "properties": {
@@ -8862,7 +7321,6 @@
             "type": "string",
             "enum": [
               "private",
-              "friends",
               "public"
             ],
             "title": "Visibility"
@@ -8879,10 +7337,6 @@
               "viewer"
             ],
             "title": "My Permission"
-          },
-          "can_request_changes": {
-            "type": "boolean",
-            "title": "Can Request Changes"
           }
         },
         "type": "object",
@@ -8891,8 +7345,7 @@
           "name",
           "visibility",
           "item_count",
-          "my_permission",
-          "can_request_changes"
+          "my_permission"
         ],
         "title": "SharedFridgeOut",
         "description": "남의 냉장고 목록 한 줄."
@@ -9123,10 +7576,6 @@
             "type": "string",
             "title": "Created At"
           },
-          "friend_code": {
-            "type": "string",
-            "title": "Friend Code"
-          },
           "is_admin": {
             "type": "boolean",
             "title": "Is Admin"
@@ -9150,7 +7599,6 @@
           "email",
           "nickname",
           "created_at",
-          "friend_code",
           "is_admin"
         ],
         "title": "UserOut"

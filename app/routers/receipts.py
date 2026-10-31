@@ -17,7 +17,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
 from PIL import Image, ImageOps
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -25,7 +25,7 @@ from app.config import settings
 from app.database import get_db
 from app.deps import FridgeAccess, get_fridge_access
 from app.middleware import extra_ocr_request
-from app.models import ChangeRequest, ConsumptionLog, FoodItem, Receipt, ReceiptItem
+from app.models import ConsumptionLog, FoodItem, Receipt, ReceiptItem
 from app.schemas import (
     BatchUploadResult,
     ConfirmItem,
@@ -695,7 +695,6 @@ def delete_receipt(receipt_id: int, access: FridgeAccess = Depends(get_fridge_ac
         item_ids = list(db.scalars(select(FoodItem.id).where(FoodItem.receipt_id == receipt.id)))
         if item_ids:
             db.execute(delete(ConsumptionLog).where(ConsumptionLog.food_item_id.in_(item_ids)))
-            db.execute(update(ChangeRequest).where(ChangeRequest.item_id.in_(item_ids)).values(item_id=None))
         db.execute(delete(ReceiptItem).where(ReceiptItem.receipt_id == receipt.id))
         if item_ids:
             db.execute(delete(FoodItem).where(FoodItem.id.in_(item_ids)))
