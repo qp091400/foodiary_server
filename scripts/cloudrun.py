@@ -84,6 +84,10 @@ def validate_config(config: dict) -> None:
     for key in ("smtp_host", "smtp_user", "mail_from"):
         if not config.get(key) or any(c in config[key] for c in "\r\n\x00"):
             raise ValueError(f"Invalid or missing {key}")
+    if config.get("push_web_public_key") and not re.fullmatch(r"[A-Za-z0-9_-]{87}", config["push_web_public_key"]):
+        raise ValueError("push_web_public_key must be the base64url VAPID public key")
+    if "push_expo_enabled" in config and not isinstance(config["push_expo_enabled"], bool):
+        raise ValueError("push_expo_enabled must be a boolean")
 
 
 def save_private(path: Path, value: str, *, exclusive: bool = False) -> None:
@@ -117,6 +121,8 @@ def environment(config: dict) -> dict[str, str]:
         AUTH_REQUESTS_PER_MINUTE="30", OCR_REQUESTS_PER_MINUTE="30", EMAIL_BACKEND="smtp",
         SMTP_HOST=config["smtp_host"], SMTP_PORT="587", SMTP_USER=config["smtp_user"], MAIL_FROM=config["mail_from"],
         TIMEZONE="Asia/Seoul",
+        PUSH_WEB_PUBLIC_KEY=config.get("push_web_public_key", ""),
+        PUSH_EXPO_ENABLED="true" if config.get("push_expo_enabled", False) else "false",
     )
 
 
@@ -358,6 +364,8 @@ class Deployment:
                     f"--add-volume=name=receipts,type=cloud-storage,bucket={self.config['bucket']},mount-options=uid=10001;gid=10001;file-mode=0600;dir-mode=0700",
                     "--add-volume-mount=volume=receipts,mount-path=/app/uploads",
                     "--startup-probe=tcpSocket.port=8080,periodSeconds=5,timeoutSeconds=5,failureThreshold=48")
+        if self.config.get("push_web_public_key") or self.config.get("push_expo_enabled"):
+            self.gcloud("run", "jobs", "update", f"{self.service}-push", f"--region={self.region}", f"--image={self.image()}")
 
     def verify(self, *, private: bool = True) -> None:
         token = self.gcloud("auth", "print-identity-token", capture=True) if private else None

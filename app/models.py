@@ -32,6 +32,39 @@ class User(Base):
         return f"/users/{self.id}/avatar/{self.avatar_path.rsplit('/', 1)[-1]}" if self.avatar_path else None
 
 
+class PushDevice(Base):
+    __tablename__ = "push_devices"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_version: Mapped[int]
+    platform: Mapped[str] = mapped_column(String(10))
+    fingerprint: Mapped[str] = mapped_column(String(64), unique=True)
+    credential: Mapped[dict] = mapped_column(JSON)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    expiry: Mapped[bool] = mapped_column(default=True)
+    comments: Mapped[bool] = mapped_column(default=True)
+    comments_after_id: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class PushDelivery(Base):
+    __tablename__ = "push_deliveries"
+    __table_args__ = (UniqueConstraint("device_id", "event_key", name="uq_push_delivery_event"),
+                     Index("ix_push_delivery_pending", "status", "next_attempt_at"))
+    id: Mapped[int] = mapped_column(primary_key=True)
+    device_id: Mapped[str] = mapped_column(ForeignKey("push_devices.id", ondelete="CASCADE"))
+    event_key: Mapped[str] = mapped_column(String(100))
+    kind: Mapped[str] = mapped_column(String(10))
+    target_id: Mapped[int]
+    status: Mapped[str] = mapped_column(String(12), default="pending")
+    attempts: Mapped[int] = mapped_column(default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(default=utcnow)
+    ticket: Mapped[str | None] = mapped_column(String(100))
+    error_code: Mapped[str | None] = mapped_column(String(50))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
 class EmailVerification(Base):
     __tablename__ = "email_verifications"
     __table_args__ = (Index("ix_email_verifications_email_purpose", "email", "purpose"),)

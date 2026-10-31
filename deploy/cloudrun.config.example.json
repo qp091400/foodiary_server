@@ -8,5 +8,7 @@
   "origins": ["https://foodiary-123456789012.asia-northeast1.run.app"],
   "smtp_host": "smtp.gmail.com",
   "smtp_user": "owner@example.com",
-  "mail_from": "owner@example.com"
+  "mail_from": "owner@example.com",
+  "push_web_public_key": "",
+  "push_expo_enabled": false
 }

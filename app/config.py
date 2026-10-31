@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     dev_tools: bool = False  # true면 로그인 없는 테스트 페이지(/dev/receipt-test)를 연다. 운영에서는 끈다
     # 설정하면 운영에서도 /receipt-test 페이지가 열린다. 인식 요청마다 이 비밀번호가 있어야 한다. 비우면 404
     receipt_test_password: str = ""
+    push_web_public_key: str = ""
+    push_vapid_private_key: str = ""  # Secret Manager; never expose to clients
+    push_vapid_subject: str = ""
+    push_expo_access_token: str = ""
+    push_expo_enabled: bool = False
 
     @property
     def cors_origin_list(self) -> list[str]:
