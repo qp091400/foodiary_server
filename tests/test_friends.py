@@ -21,7 +21,6 @@ def people(client):
         result[name] = {
             "headers": auth(tokens),
             "id": tokens["user"]["id"],
-            "code": tokens["user"]["friend_code"],
             "fridge_id": default_fridge_id(client, tokens),
         }
     return result
@@ -48,29 +47,26 @@ def expires_at(link):
 # ── 친구 코드와 닉네임 ───────────────────────────────────────────────────
 
 
-def test_friend_code_is_fixed_and_tells_same_nicknames_apart(client, people):
-    twin = signup(client, "bobby", nickname="bob")  # 닉네임이 같아도 가입된다
-    twin_me = {"headers": auth(twin), "id": twin["user"]["id"]}
-    codes = {people["bob"]["code"], twin["user"]["friend_code"], people["alice"]["code"]}
-    assert len(codes) == 3 and all(len(code) == 8 for code in codes)
+def test_same_nicknames_are_distinguished_by_participant_id(client, people):
+    twin = signup(client, "bobby", nickname="bob")
     link = make_link(client, people["alice"])
     join(client, people["bob"], link)
-    join(client, twin_me, link)
-    friends = client.get("/friends", headers=people["alice"]["headers"]).json()
-    assert sorted((f["user"]["nickname"], f["user"]["friend_code"]) for f in friends) == sorted(
-        [("bob", people["bob"]["code"]), ("bob", twin["user"]["friend_code"])]
-    )
-    assert client.get("/users/me", headers=people["bob"]["headers"]).json()["friend_code"] == people["bob"]["code"]
-    assert set(friends[0]["user"]) == {"id", "nickname", "friend_code", "avatar_url"}  # 이메일과 로그인 아이디는 비공개
+    join(client, {"headers": auth(twin)}, link)
+    rows = client.get(f"/fridges/{people['alice']['fridge_id']}/access", headers=people["alice"]["headers"]).json()
+    assert len(rows) == 2
+    assert len({row["user"]["id"] for row in rows}) == 2
+    assert all(set(row["user"]) == {"id", "nickname", "avatar_url"} for row in rows)
+    assert "friend_code" not in twin["user"]
+
 
 
 def test_the_old_ways_to_find_people_are_gone(client, people):
     headers = people["alice"]["headers"]
     assert client.post("/users/me/friend-code", headers=headers).status_code in (404, 405)  # 코드는 바뀌지 않는다
-    assert client.post("/friends/requests", headers=headers, json={"code": people["bob"]["code"]}).status_code in (404, 405)
+    assert client.post("/friends/requests", headers=headers, json={"code": "ABCDEFGH"}).status_code in (404, 405)
     assert client.get("/users/search", params={"nickname": "bob"}, headers=headers).status_code == 404
-    assert client.get("/users/lookup", params={"code": people["bob"]["code"]}, headers=headers).status_code == 404
-    assert client.get("/friends", headers=headers).json() == []  # 링크 없이는 친구가 안 된다
+    assert client.get("/users/lookup", params={"code": "ABCDEFGH"}, headers=headers).status_code == 404
+    assert client.get("/friends", headers=headers).status_code == 404  # 링크 없이는 친구가 안 된다
 
 
 # ── 링크 만들기 ─────────────────────────────────────────────────────────
@@ -110,20 +106,18 @@ def test_links_are_limited_per_fridge(client, people, monkeypatch):
 # ── 링크로 들어오기 ──────────────────────────────────────────────────────
 
 
-def test_joining_makes_friends_and_gives_view_access(client, people):
+def test_joining_gives_only_fridge_view_access(client, people):
     alice, bob = people["alice"], people["bob"]
     link = make_link(client, alice)
     preview = client.get(f"/share-links/{link['token']}", headers=bob["headers"]).json()
     assert preview["owner"]["nickname"] == "alice" and preview["permission"] == "viewer" and preview["my_permission"] == "none"
-    assert client.get("/friends", headers=bob["headers"]).json() == []  # 미리 보기만으로는 아무것도 달라지지 않는다
+    assert client.get("/friends", headers=bob["headers"]).status_code == 404  # 미리 보기만으로는 아무것도 달라지지 않는다
     joined = join(client, bob, link)
     assert joined.status_code == 200
-    assert joined.json()["permission"] == "viewer" and joined.json()["newly_friends"] is True and joined.json()["fridge_id"] == alice["fridge_id"]
-    assert [f["user"]["id"] for f in client.get("/friends", headers=alice["headers"]).json()] == [bob["id"]]
-    assert [f["user"]["id"] for f in client.get("/friends", headers=bob["headers"]).json()] == [alice["id"]]
+    assert joined.json()["permission"] == "viewer" and joined.json()["fridge_id"] == alice["fridge_id"]
     shown = client.get(f"/users/{alice['id']}/fridges", headers=bob["headers"]).json()  # 냉장고가 비공개여도 링크로 받은 권한으로 보인다
     assert [(f["id"], f["visibility"], f["my_permission"], f["can_request_changes"]) for f in shown] == [
-        (alice["fridge_id"], "private", "viewer", True)
+        (alice["fridge_id"], "private", "viewer", False)
     ]
     assert client.get(f"/users/{alice['id']}/fridges/{alice['fridge_id']}/items", headers=bob["headers"]).status_code == 200
     assert client.get(f"/users/{alice['id']}/fridges", headers=people["carol"]["headers"]).json() == []  # 링크 없는 사람은 못 본다
@@ -132,9 +126,9 @@ def test_joining_makes_friends_and_gives_view_access(client, people):
 
 def test_joining_twice_changes_nothing_and_is_not_counted(client, people):
     link = make_link(client, people["alice"], max_uses=1)
-    assert join(client, people["bob"], link).json()["newly_friends"] is True
+    assert join(client, people["bob"], link).status_code == 200
     again = join(client, people["bob"], link)
-    assert again.status_code == 200 and again.json()["newly_friends"] is False
+    assert again.status_code == 200
     listed = client.get(f"/fridges/{people['alice']['fridge_id']}/share-links", headers=people["alice"]["headers"]).json()
     assert listed == []  # 한 명 제한이 찼으니 목록에서는 빠지지만, 같은 사람이 또 눌러도 횟수가 늘지 않았다
     with SessionLocal() as db:
@@ -172,7 +166,7 @@ def test_revoking_a_link_does_not_take_back_access_already_given(client, people)
     assert client.get(f"/users/{people['alice']['id']}/fridges", headers=people["bob"]["headers"]).json()[0]["my_permission"] == "viewer"
 
 
-def test_an_editor_link_lets_the_friend_edit_like_the_owner(client, people):
+def test_editor_invitation_allows_inventory_management(client, people):
     alice, carol = people["alice"], people["carol"]
     joined = join(client, carol, make_link(client, alice, permission="editor")).json()
     assert joined["permission"] == "editor"
@@ -197,7 +191,7 @@ def test_links_only_raise_a_permission_never_lower_it(client, people):
 # ── 주인이 친구별 권한을 관리 ────────────────────────────────────────────
 
 
-def test_the_owner_sees_and_changes_what_each_friend_may_do(client, people):
+def test_owner_manages_participant_permissions(client, people):
     alice, bob, carol = people["alice"], people["bob"], people["carol"]
     join(client, bob, make_link(client, alice))
     join(client, carol, make_link(client, alice, permission="editor"))
@@ -211,17 +205,16 @@ def test_the_owner_sees_and_changes_what_each_friend_may_do(client, people):
     down = client.patch(f"{url}/{carol['id']}", headers=alice["headers"], json={"permission": "viewer"})
     assert down.json()["permission"] == "viewer"
     assert client.post(f"/fridges/{alice['fridge_id']}/items", headers=carol["headers"], json={"name": "못 한다"}).status_code == 404
-    assert client.get(f"/users/{alice['id']}/fridges", headers=carol["headers"]).json()[0]["can_request_changes"] is True
+    assert client.get(f"/users/{alice['id']}/fridges", headers=carol["headers"]).json()[0]["can_request_changes"] is False
     assert client.patch(f"{url}/{bob['id']}", headers=alice["headers"], json={"permission": "editor"}).status_code == 200  # 같은 권한으로 바꿔도 괜찮다
 
 
-def test_removing_access_keeps_the_friendship(client, people):
+def test_removing_participant_access(client, people):
     alice, bob = people["alice"], people["bob"]
     join(client, bob, make_link(client, alice))
     url = f"/fridges/{alice['fridge_id']}/access/{bob['id']}"
     assert client.delete(url, headers=alice["headers"]).status_code == 204
     assert client.get(f"/users/{alice['id']}/fridges", headers=bob["headers"]).json() == []
-    assert [f["user"]["id"] for f in client.get("/friends", headers=bob["headers"]).json()] == [alice["id"]]  # 친구는 그대로
     assert client.delete(url, headers=alice["headers"]).status_code == 404
     assert client.patch(url, headers=alice["headers"], json={"permission": "editor"}).status_code == 404
     assert client.delete(f"/fridges/{alice['fridge_id']}/access/{alice['id']}", headers=alice["headers"]).status_code == 404  # 주인 자신은 대상이 아니다
@@ -242,23 +235,20 @@ def test_only_the_owner_manages_access(client, people):
 # ── 친구 끊기 ───────────────────────────────────────────────────────────
 
 
-def test_unfriending_takes_back_access_in_both_directions(client, people):
+def test_removing_one_fridge_access_does_not_affect_another(client, people):
     alice, bob = people["alice"], people["bob"]
-    join(client, bob, make_link(client, alice))  # bob이 alice 냉장고를 본다
-    join(client, alice, make_link(client, bob, permission="editor"))  # alice는 bob 냉장고를 고칠 수 있다
-    assert client.delete(f"/friends/{alice['id']}", headers=bob["headers"]).status_code == 204
-    assert client.get("/friends", headers=alice["headers"]).json() == [] and client.get("/friends", headers=bob["headers"]).json() == []
-    assert client.get(f"/users/{alice['id']}/fridges", headers=bob["headers"]).json() == []
-    assert client.get(f"/users/{bob['id']}/fridges", headers=alice["headers"]).json() == []
-    assert bob["fridge_id"] not in my_fridges(client, alice)
-    assert client.post(f"/fridges/{bob['fridge_id']}/items", headers=alice["headers"], json={"name": "못 한다"}).status_code == 404
-    assert client.delete(f"/friends/{alice['id']}", headers=bob["headers"]).status_code == 404  # 이미 친구가 아니다
-    assert join(client, bob, make_link(client, alice)).json()["newly_friends"] is True  # 링크로 다시 맺을 수 있다
+    join(client, bob, make_link(client, alice))
+    second = client.post("/fridges", headers=alice["headers"], json={"name": "두 번째"}).json()["id"]
+    link = client.post(f"/fridges/{second}/share-links", headers=alice["headers"], json={}).json()
+    join(client, bob, link)
+    client.delete(f"/fridges/{alice['fridge_id']}/access/{bob['id']}", headers=alice["headers"])
+    assert [row["id"] for row in client.get("/shared-fridges", headers=bob["headers"]).json()] == [second]
+
 
 
 @pytest.mark.parametrize(
     ("method", "path"),
-    [("get", "/friends"), ("delete", "/friends/1"), ("get", "/share-links/abc"), ("post", "/share-links/abc/join"),
+    [("get", "/shared-fridges"), ("get", "/share-links/abc"), ("post", "/share-links/abc/join"),
      ("post", "/fridges/1/share-links"), ("get", "/fridges/1/access")],
 )
 def test_login_is_required(client, method, path):

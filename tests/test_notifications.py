@@ -41,13 +41,12 @@ def comment(client, who, post_id, body="좋은 글이에요"):
 
 
 def ask(client, world, quantity=1):
-    response = client.post(
-        "/change-requests",
-        headers=world["bob"]["headers"],
-        json={"fridge_id": world["fridge_id"], "kind": "consume", "item_id": world["item_id"], "quantity": quantity},
-    )
-    assert response.status_code == 201, response.text
-    return response.json()["id"]
+    from app.database import SessionLocal
+    from app.models import ChangeRequest
+    with SessionLocal() as db:
+        request = ChangeRequest(fridge_id=world["fridge_id"], requester_id=world["bob"]["id"], kind="consume", item_id=world["item_id"], item_name="두부", payload={"quantity": quantity}, status="pending")
+        db.add(request); db.commit(); db.refresh(request)
+        return request.id
 
 
 def comments(client, who, **params):
@@ -231,7 +230,7 @@ def test_cancelled_requests_are_not_results(client, world):
     mine = ask(client, world)
     client.delete(f"/change-requests/{mine}", headers=world["bob"]["headers"])  # 내가 취소
     ask(client, world)
-    client.delete(f"/friends/{world['bob']['id']}", headers=world["alice"]["headers"])  # 친구가 끊겨 자동 취소
+    client.delete(f"/fridges/{world['fridge_id']}/access/{world['bob']['id']}", headers=world["alice"]["headers"])  # 친구가 끊겨 자동 취소
     assert summary(client, world["bob"])["unread_change_results"] == 0
     assert results(client, world["bob"])["requests"] == []
 

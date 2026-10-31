@@ -189,7 +189,6 @@ class UserOut(BaseModel):
     email: str
     nickname: str
     created_at: UtcDatetime
-    friend_code: str
     is_admin: bool
     avatar_url: str | None = None
 
@@ -226,11 +225,11 @@ class FridgeCreate(BaseModel):
     name: FridgeName
 
 
-Visibility = Literal["private", "friends", "public"]
+Visibility = Literal["private", "public"]
 
 
 class FridgeUpdate(BaseModel):
-    """바꿀 것만 보낸다. name은 이름, visibility는 멤버가 아닌 사람에게 보일 범위(private 나만 / friends 친구들도 / public 모두)."""
+    """바꿀 것만 보낸다. name은 이름, visibility는 멤버가 아닌 사람에게 보일 범위(private 참여자만 / public 모두)."""
 
     name: FridgeName | None = None
     visibility: Visibility | None = None
@@ -564,31 +563,21 @@ class MonthlyStats(BaseModel):
     top_discarded: list[DiscardedCategory]
 
 
-# ── 친구 · 공유 링크 · 변경 요청 · 남의 냉장고 · 커뮤니티 ────────────────
+# ── 참여자 초대 · 구버전 변경 요청 · 공개 프로필 · 커뮤니티 ────────────────
 
-Permission = Literal["viewer", "editor"]  # viewer: 보기 + 변경 요청만 / editor: 주인처럼 고치기
+Permission = Literal["viewer", "editor"]  # viewer: 보기만 / editor: 함께 관리
 
 
 class PublicUser(BaseModel):
-    """다른 사람에게 보여도 되는 정보. 닉네임은 겹칠 수 있어서 바뀌지 않는 친구 코드로 구별한다. 이메일·아이디는 넣지 않는다."""
+    """다른 사람에게 보여도 되는 프로필 정보. 이메일·로그인 아이디는 넣지 않는다."""
 
     id: int
     nickname: str
-    friend_code: str
     avatar_url: str | None = None
 
     @classmethod
     def of(cls, user) -> "PublicUser":
-        return cls(id=user.id, nickname=user.nickname, friend_code=user.friend_code, avatar_url=user.avatar_url)
-
-
-class FriendOut(BaseModel):
-    user: PublicUser
-    since: UtcDatetime
-
-
-class FriendAdd(BaseModel):
-    friend_code: Annotated[str, StringConstraints(strip_whitespace=True, to_upper=True, min_length=1, max_length=16)]  # 소문자로 넣어도 된다
+        return cls(id=user.id, nickname=user.nickname, avatar_url=user.avatar_url)
 
 
 class ShareLinkCreate(BaseModel):
@@ -622,7 +611,6 @@ class JoinResult(BaseModel):
     fridge_id: int
     fridge_name: str
     permission: Permission  # 지금 내가 가진 권한 (이미 더 높은 권한이 있으면 그대로)
-    newly_friends: bool
 
 
 class AccessOut(BaseModel):
@@ -643,7 +631,7 @@ class SharedFridgeOut(BaseModel):
     visibility: Visibility
     item_count: int
     my_permission: Literal["owner", "editor", "viewer"]
-    can_request_changes: bool  # 친구인 viewer만 주인에게 변경 요청을 보낼 수 있다
+    can_request_changes: bool  # 구버전 클라이언트 호환용. 새 요청은 항상 비활성이다.
 
 
 ChangeKind = Literal["add", "consume", "discard"]  # 추가 / 먹음 / 버림

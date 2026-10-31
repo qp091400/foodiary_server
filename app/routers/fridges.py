@@ -42,7 +42,7 @@ def _fridge_out(db: Session, fridge: Fridge, role: str) -> FridgeOut:
         my_role=role,
         member_count=_member_count(db, fridge.id),
         created_at=fridge.created_at,
-        visibility=fridge.visibility,
+        visibility="private" if fridge.visibility == "friends" else fridge.visibility,
     )
 
 
@@ -68,7 +68,7 @@ def list_fridges(user: User = Depends(get_current_user), db: Session = Depends(g
             my_role=role,
             member_count=member_count,
             created_at=fridge.created_at,
-            visibility=fridge.visibility,
+            visibility="private" if fridge.visibility == "friends" else fridge.visibility,
         )
         for fridge, role, member_count in rows
     ]
@@ -130,7 +130,7 @@ def get_fridge(access: FridgeAccess = Depends(get_fridge_access), db: Session = 
         my_role=access.member.role,
         member_count=len(members),
         created_at=access.fridge.created_at,
-        visibility=access.fridge.visibility,
+        visibility="private" if access.fridge.visibility == "friends" else access.fridge.visibility,
         members=members,
     )
 
@@ -159,7 +159,7 @@ def delete_fridge(access: FridgeAccess = Depends(require_owner), db: Session = D
 
 
 @router.post("/{fridge_id}/invites", response_model=InviteOut, status_code=201, summary="초대코드 만들기 (7일 유효)")
-def create_invite(access: FridgeAccess = Depends(get_fridge_access), db: Session = Depends(get_db)):
+def create_invite(access: FridgeAccess = Depends(require_owner), db: Session = Depends(get_db)):
     for _ in range(5):  # 코드가 겹치면 다시 뽑는다
         invite = FridgeInvite(
             fridge_id=access.fridge.id,

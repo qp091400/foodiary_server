@@ -22,7 +22,6 @@ from app.routers import (
     change_requests,
     community,
     dev,
-    friends,
     fridges,
     items,
     notifications,
@@ -83,7 +82,7 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_host_li
 # Outermost: normalize the proxy prefix before routing and security checks.
 app.add_middleware(APIPrefixMiddleware)
 
-for module in (auth, users, fridges, items, receipts, recipes, recipe_reviews, products, stats, friends, sharing, change_requests, community, notifications, admin, dev):
+for module in (auth, users, fridges, items, receipts, recipes, recipe_reviews, products, stats, sharing, change_requests, community, notifications, admin, dev):
     app.include_router(module.router)
 app.include_router(dev.test_router)
 

@@ -11,7 +11,7 @@ def world(client):
     people = {}
     for name in ("owner", "friend", "stranger"):
         tokens = signup(client, name)
-        people[name] = {"headers": auth(tokens), "id": tokens["user"]["id"], "code": tokens["user"]["friend_code"], "tokens": tokens}
+        people[name] = {"headers": auth(tokens), "id": tokens["user"]["id"], "tokens": tokens}
     owner, friend = people["owner"], people["friend"]
     fridge_id = default_fridge_id(client, owner["tokens"])
     # owner와 friend는 링크로 친구가 된다. 링크로 받은 보기 권한은 거둬서, 공개 범위만으로 보이는지 따로 시험한다.
@@ -51,12 +51,9 @@ def test_a_new_fridge_is_private(client, world):
         assert items_of(client, world, viewer).status_code == 404  # 있는지도 알려 주지 않는다
 
 
-def test_friends_visibility_opens_it_to_friends_only(client, world):
-    assert set_visibility(client, world, "friends")["visibility"] == "friends"
-    assert [f["name"] for f in fridges_of(client, world, "friend").json()] == [client.get("/fridges", headers=world["owner"]["headers"]).json()[0]["name"]]
-    assert items_of(client, world, "friend").status_code == 200
-    assert fridges_of(client, world, "stranger").json() == []
-    assert items_of(client, world, "stranger").status_code == 404
+def test_friend_visibility_is_retired(client, world):
+    assert client.patch(f"/fridges/{world['fridge_id']}", headers=world["owner"]["headers"], json={"visibility": "friends"}).status_code == 422
+
 
 
 def test_public_visibility_opens_it_to_everyone(client, world):
@@ -88,10 +85,10 @@ def test_only_the_owner_changes_the_visibility_and_the_name_survives(client, wor
     assert client.post("/fridges/join", headers=world["stranger"]["headers"], json={"code": invite}).status_code == 200
     assert client.patch(fridge_url, headers=world["stranger"]["headers"], json={"visibility": "public"}).status_code == 403  # 멤버는 못 바꾼다
     assert client.get(fridge_url, headers=world["owner"]["headers"]).json()["visibility"] == "private"
-    renamed = client.patch(fridge_url, headers=world["owner"]["headers"], json={"name": "새 이름", "visibility": "friends"}).json()
-    assert (renamed["name"], renamed["visibility"]) == ("새 이름", "friends")
-    assert client.patch(fridge_url, headers=world["owner"]["headers"], json={"name": "또 바꿈"}).json()["visibility"] == "friends"  # 이름만 바꿔도 공개 범위는 그대로
-    assert client.get(fridge_url, headers=world["owner"]["headers"]).json()["visibility"] == "friends"
+    renamed = client.patch(fridge_url, headers=world["owner"]["headers"], json={"name": "새 이름", "visibility": "public"}).json()
+    assert (renamed["name"], renamed["visibility"]) == ("새 이름", "public")
+    assert client.patch(fridge_url, headers=world["owner"]["headers"], json={"name": "또 바꿈"}).json()["visibility"] == "public"  # 이름만 바꿔도 공개 범위는 그대로
+    assert client.get(fridge_url, headers=world["owner"]["headers"]).json()["visibility"] == "public"
 
 
 def test_invalid_visibility_and_empty_changes_are_rejected(client, world):
@@ -100,15 +97,15 @@ def test_invalid_visibility_and_empty_changes_are_rejected(client, world):
     assert client.patch(fridge_url, headers=world["owner"]["headers"], json={}).status_code == 422
 
 
-def test_members_always_see_the_fridge_and_losing_the_friend_closes_it_again(client, world):
-    fridge_url = f"/fridges/{world['fridge_id']}"
-    invite = client.post(f"{fridge_url}/invites", headers=world["owner"]["headers"]).json()["code"]
-    client.post("/fridges/join", headers=world["stranger"]["headers"], json={"code": invite})
-    assert items_of(client, world, "stranger").status_code == 200  # 비공개여도 멤버는 본다
-    set_visibility(client, world, "friends")
+def test_only_invited_participants_can_see_private_fridges(client, world):
+    url = f"/fridges/{world['fridge_id']}"
+    token = client.post(f"{url}/share-links", headers=world["owner"]["headers"], json={}).json()["token"]
+    client.post(f"/share-links/{token}/join", headers=world["friend"]["headers"])
     assert items_of(client, world, "friend").status_code == 200
-    assert client.delete(f"/friends/{world['owner']['id']}", headers=world["friend"]["headers"]).status_code == 204
-    assert items_of(client, world, "friend").status_code == 404  # 친구를 끊으면 바로 닫힌다
+    assert items_of(client, world, "stranger").status_code == 404
+    client.delete(f"{url}/access/{world['friend']['id']}", headers=world["owner"]["headers"])
+    assert items_of(client, world, "friend").status_code == 404
+
 
 
 def test_wrong_ids_are_not_found(client, world):

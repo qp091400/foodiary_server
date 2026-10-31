@@ -274,12 +274,17 @@ curl "$API/fridges/$FRIDGE/stats/monthly?year=2026&month=10" -H "Authorization: 
 curl "$API/fridges/$FRIDGE/purchases/summary?group_by=item" -H "Authorization: Bearer $TOKEN"   # 우유: 3번, 4개, 8,940원
 ```
 
-### 냉장고 공유
+### 냉장고 참여자 초대
 
 ```bash
-curl -X POST $API/fridges/$FRIDGE/invites -H "Authorization: Bearer $TOKEN"     # {"code":"K7M2QX9P", ...}
-curl -X POST $API/fridges/join -H "Authorization: Bearer $다른사람토큰" \
-  -H 'Content-Type: application/json' -d '{"code":"K7M2QX9P"}'
+# 주인이 초대 생성: viewer(보기만) / editor(함께 관리)
+curl -X POST $API/fridges/$FRIDGE/share-links -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"permission":"editor","expires_in_days":7}'
+# 응답 token을 앱의 /share/{token} 링크로 전달. 상대가 로그인 후 참여한다.
+curl -X POST $API/share-links/$SHARE_TOKEN/join -H "Authorization: Bearer $GUEST_TOKEN"
+# 초대받은 냉장고와 주인이 관리하는 참여자 목록
+curl $API/shared-fridges -H "Authorization: Bearer $GUEST_TOKEN"
+curl $API/fridges/$FRIDGE/access -H "Authorization: Bearer $TOKEN"
 ```
 
 전체 엔드포인트는 `/docs`(Swagger)에서 볼 수 있습니다.
@@ -326,9 +331,9 @@ http://openapi.foodsafetykorea.go.kr/api/{KEY}/C005/json/1/5/BAR_CD=880123456789
 필드명이 다르면 [app/services/foodsafety.py](app/services/foodsafety.py)의 `parse_c005`만 고치면 됩니다.
 파싱은 키가 없으면 `None`이 되도록 방어적으로 짜여 있어, 필드명이 틀려도 서버가 죽지 않고 카테고리 추정으로 넘어갑니다.
 
-## 친구 · 남의 냉장고 보기 · 커뮤니티
+## 냉장고 참여자 초대 · 공개 프로필 · 커뮤니티
 
-친구 추가(친구 코드·링크, 닉네임), 냉장고마다 공개 범위(나만 / 친구들도 / 모두), 커뮤니티 글쓰기와 지우기(쓴 사람, 관리자)가 있습니다. 경로, 규칙, 관리자 만드는 법, 배포할 때 주의할 점은 [docs/community.md](docs/community.md)에 있습니다.
+냉장고 주인이 초대 링크로 보기 전용 또는 함께 관리 참여자를 추가합니다. 친구 기능은 제거했으며, 공개 범위는 참여자만/전체 공개입니다. API와 이전 데이터 처리 방식은 [docs/community.md](docs/community.md)를 참고하세요.
 
 레시피에 별점·후기를 남기는 기능과, 처리할 변경 요청·내 글에 달린 댓글을 알려 주는 알림 아이콘용 API는 [docs/recipe-reviews-notifications.md](docs/recipe-reviews-notifications.md)에 있습니다.
 

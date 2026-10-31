@@ -57,9 +57,7 @@ def _expiring_count(db: Session, me: User) -> int:
 
 def _summary(db: Session, me: User) -> NotificationSummary:
     pending = db.scalar(
-        select(func.count())
-        .select_from(ChangeRequest)
-        .join(Fridge, Fridge.id == ChangeRequest.fridge_id)
+        select(func.count()).select_from(ChangeRequest).join(Fridge, Fridge.id == ChangeRequest.fridge_id)
         .where(Fridge.owner_id == me.id, ChangeRequest.status == "pending")
     )
     unread = db.scalar(

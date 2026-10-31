@@ -11,7 +11,7 @@ from app.deps import FridgeAccess, get_current_user
 from app.models import ChangeRequest, Fridge, FoodItem, FridgeMember, User
 from app.routers.items import consume_item, create_item, discard_item
 from app.schemas import ChangeRequestCreate, ChangeRequestOut, ConsumeRequest, ItemCreate, PublicUser
-from app.services.friends import can_request_changes, fridge_permission
+from app.services.fridge_access import can_request_changes, fridge_permission
 from app.timeutil import utcnow
 
 router = APIRouter(prefix="/change-requests", tags=["변경 요청"])
@@ -47,7 +47,7 @@ def _out(db: Session, request: ChangeRequest) -> ChangeRequestOut:
 # ── 보내는 사람 ──────────────────────────────────────────────────────────
 
 
-@router.post("", response_model=ChangeRequestOut, status_code=201, summary="냉장고 주인에게 변경 요청 보내기 (보기 권한이 있는 친구만)")
+@router.post("", response_model=ChangeRequestOut, status_code=201, summary="구버전 변경 요청 (신규 발행 종료)")
 def send_request(payload: ChangeRequestCreate, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
     fridge = db.get(Fridge, payload.fridge_id)
     permission = fridge_permission(db, me.id, fridge) if fridge else None
@@ -56,7 +56,7 @@ def send_request(payload: ChangeRequestCreate, me: User = Depends(get_current_us
     if permission in ("owner", "editor"):
         raise HTTPException(status_code=400, detail="고칠 수 있는 냉장고라서 요청하지 않고 직접 바꾸면 돼요.")
     if not can_request_changes(db, me.id, fridge, permission):
-        raise HTTPException(status_code=403, detail="변경 요청은 친구에게만 보낼 수 있어요.")
+        raise HTTPException(status_code=403, detail="보기 전용 참여자는 수정할 수 없어요. 냉장고 주인에게 함께 관리 권한을 요청해주세요.")
     pending = db.scalar(
         select(func.count()).select_from(ChangeRequest).where(
             ChangeRequest.fridge_id == fridge.id, ChangeRequest.requester_id == me.id, ChangeRequest.status == "pending"
