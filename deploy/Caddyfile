@@ -14,9 +14,18 @@
 		Referrer-Policy no-referrer
 		-Server
 	}
-	reverse_proxy api:8000 {
-		transport http {
-			response_header_timeout 120s
+	@api path /api /api/*
+	handle @api {
+		# Preserve /api for the API server's prefix handling.
+		reverse_proxy api:8000 {
+			transport http {
+				response_header_timeout 180s
+			}
+		}
+	}
+	handle {
+		reverse_proxy {$WEB_UPSTREAM:https://foodiary-app-ef2b5.web.app} {
+			header_up Host {upstream_hostport}
 		}
 	}
 }

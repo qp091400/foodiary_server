@@ -9,11 +9,11 @@ import httpx
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("base_url", help="https://api.example.com")
+    parser.add_argument("base_url", help="https://foodiary.kr/api")
     args = parser.parse_args()
     url = urlsplit(args.base_url)
-    if url.scheme != "https" or not url.hostname or url.username or url.password or url.query or url.fragment or url.path not in {"", "/"}:
-        parser.error("Supply an HTTPS origin without credentials, query strings or fragments")
+    if url.scheme != "https" or not url.hostname or url.username or url.password or url.query or url.fragment or url.path not in {"", "/", "/api", "/api/"}:
+        parser.error("Supply an HTTPS origin, optionally ending in /api, without credentials, query strings or fragments")
     base = args.base_url.rstrip("/")
     failed = []
     with httpx.Client(timeout=15, follow_redirects=False) as client:

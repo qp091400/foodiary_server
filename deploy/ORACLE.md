@@ -94,10 +94,10 @@ sudo docker compose --env-file .env.production -f compose.production.yml run --r
 sudo docker compose --env-file .env.production -f compose.production.yml config --quiet
 sudo docker compose --env-file .env.production -f compose.production.yml up -d
 sudo docker compose --env-file .env.production -f compose.production.yml ps
-curl --fail https://api.example.com/ready
+curl --fail https://api.example.com/api/ready
 ```
 
-개발 PC의 프로젝트 가상환경에서 `python scripts/check_deployment.py https://api.example.com`을 실행하면
+개발 PC의 프로젝트 가상환경에서 `python scripts/check_deployment.py https://api.example.com/api`을 실행하면
 외부 HTTPS 연결, OCR 준비 상태, 인증 요구, 문서/개발 페이지 차단을 함께 확인한다.
 
 API는 마이그레이션 후 실제 OCR 시험 추론을 완료해야 정상 시작한다.
@@ -134,3 +134,11 @@ sudo docker compose --env-file .env.production -f compose.production.yml up -d -
 
 `down -v`는 DB·이미지·모델·인증서 볼륨을 삭제하므로 사용하지 않는다.
 서버 보안 업데이트도 정기적으로 적용한다. 이 구성은 한 서버를 사용하며 무중단 배포와 고가용성을 제공하지 않는다.
+
+### 웹과 API 경로 분기
+
+운영 Caddy는 `/api` 및 `/api/*`를 API 컨테이너로 전달하고, 그 외 경로는
+`WEB_UPSTREAM`(기본값 `https://foodiary-app-ef2b5.web.app`)으로 전달한다.
+웹 원본은 사용자 도메인 대신 Firebase의 원래 `.web.app` 주소를 사용해 프록시 루프를 피한다.
+앱/웹 API 주소는 `https://사용자도메인/api`로 빌드한다.
+이 설정 변경에는 Docker 재빌드나 재시작을 자동 실행하는 작업이 포함되지 않는다.

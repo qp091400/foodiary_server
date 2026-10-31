@@ -72,6 +72,7 @@ services:
     environment:
       API_DOMAIN: ${API_DOMAIN:?Set API_DOMAIN}
       ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL}
+      WEB_UPSTREAM: ${WEB_UPSTREAM:-https://foodiary-app-ef2b5.web.app}
     ports:
       - "80:80"
       - "443:443"
