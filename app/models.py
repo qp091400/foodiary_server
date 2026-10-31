@@ -3,8 +3,8 @@
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import JSON, ForeignKey, Index, LargeBinary, String, Text, UniqueConstraint, text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import JSON, ForeignKey, Index, LargeBinary, String, Text, UniqueConstraint, select, text
+from sqlalchemy.orm import Mapped, mapped_column, object_session
 
 from app.database import Base
 from app.timeutil import utcnow
@@ -30,6 +30,38 @@ class User(Base):
     @property
     def avatar_url(self) -> str | None:
         return f"/users/{self.id}/avatar/{self.avatar_path.rsplit('/', 1)[-1]}" if self.avatar_path else None
+
+    @property
+    def community_suspension(self) -> "CommunitySuspension | None":
+        """지금 걸려 있는 커뮤니티 임시 정지. 없으면 None. (내 정보 응답에 실려서, 정지된 사람이 앱에서 자기 상태를 본다)"""
+        session = object_session(self)
+        if session is None:
+            return None
+        return session.scalar(
+            select(CommunitySuspension)
+            .where(CommunitySuspension.user_id == self.id, CommunitySuspension.lifted_at.is_(None), CommunitySuspension.ends_at > utcnow())
+            .order_by(CommunitySuspension.ends_at.desc())
+            .limit(1)
+        )
+
+
+class CommunitySuspension(Base):
+    """관리자가 건 커뮤니티 임시 정지. 기간 동안 글·댓글·후기를 쓸 수 없다. 풀거나 끝나도 기록은 남긴다.
+
+    지금 정지 중인 것 = lifted_at이 비어 있고 ends_at이 아직 안 지난 것.
+    """
+
+    __tablename__ = "community_suspensions"
+    __table_args__ = (Index("ix_community_suspensions_user_ends", "user_id", "ends_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    reason: Mapped[str] = mapped_column(String(300))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    ends_at: Mapped[datetime]
+    lifted_at: Mapped[datetime | None]
+    lifted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
 
 
 class PushDevice(Base):
@@ -223,6 +255,8 @@ class Post(Base):
     body: Mapped[str] = mapped_column(Text)
     board: Mapped[str] = mapped_column(String(10), default="general", server_default="general")
     review_id: Mapped[int | None] = mapped_column(ForeignKey("recipe_reviews.id", ondelete="SET NULL"), unique=True)
+    # 글에 붙인 첫 링크의 미리보기(app/services/link_preview.py). 글을 쓰거나 고칠 때 한 번 만들어 저장한다. 없으면 None
+    link_preview: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     updated_at: Mapped[datetime | None]
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     deleted_at: Mapped[datetime | None]

@@ -77,6 +77,9 @@ class Settings(BaseSettings):
     # 게시판 검색의 의미 점수(임베딩). local: 서버 안에서 계산(키·네트워크 불필요, docs/post-search.md)
     # none: 끈다 → 키워드 점수만으로 검색한다. 문제가 생기면 이 값만 바꿔 다시 시작하면 된다
     embedding_provider: Literal["local", "none"] = "local"
+    # 커뮤니티 글의 링크 미리보기(제목·대표 이미지). 글을 쓸 때 서버가 그 주소에 한 번 접속한다(app/services/link_preview.py).
+    # false면 미리보기를 만들지 않는다 (이미 만든 것은 그대로 보인다)
+    link_preview_enabled: bool = True
 
     @property
     def cors_origin_list(self) -> list[str]:

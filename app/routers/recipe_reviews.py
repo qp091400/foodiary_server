@@ -14,6 +14,7 @@ from app.schemas import MessageResponse, MyReviewList, PublicUser, ReportCreate,
 from app.services import recipe_store
 from app.services.community import delete_review, file_report
 from app.services.recipe_reviews import rating_summaries, sync_review_post
+from app.services.suspension import ensure_can_write
 from app.timeutil import utcnow
 
 router = APIRouter(prefix="/recipes", tags=["레시피 후기"])
@@ -109,6 +110,7 @@ def list_reviews(
     summary="별점과 후기 남기기. 이미 썼으면 고친다 (처음이면 201, 고치면 200)",
 )
 def write_review(recipe_id: str, payload: ReviewWrite, response: Response, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    ensure_can_write(db, me)  # 후기는 커뮤니티 레시피게시판에도 올라가므로 정지 중에는 쓸 수 없다
     name = _recipe_name(recipe_id)
     review = _my_live_review(db, recipe_id, me)
     if review is None:

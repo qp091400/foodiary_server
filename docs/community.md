@@ -97,6 +97,34 @@
 - 내가 쓴 글과 댓글은 신고할 수 없고(400), 같은 사람이 같은 대상을 또 신고할 수 없다(409). 문제없음으로 닫힌 뒤에도 같다.
 - **신고가 쌓여도 글이 저절로 숨겨지지는 않는다.** 관리자가 `GET /admin/reports`로 보고 처리해야 한다. 운영할 때는 관리자가 신고를 정기적으로 확인하는 사람이어야 하고, 필요하면 "신고 3건이면 자동으로 숨김" 같은 규칙을 더할 수 있다.
 
+## 링크 미리보기
+
+글의 본문(없으면 제목)에 **처음 나오는 http(s) 주소**의 미리보기를 글에 붙여 준다. 유튜브 같은 영상 링크는 썸네일과 제목이, 그 밖의 사이트는 페이지의 `og:` 정보(제목, 설명, 대표 이미지, 사이트 이름)가 온다. 앱은 이 카드를 누르면 `url`을 연다.
+
+- 응답(`PostOut`)의 `link_preview`: `url`(올린 주소 그대로), `kind`(`link` / `youtube`), `title`, `description`(유튜브면 채널 이름), `image`(https 주소만), `site`. 링크가 없거나 만들지 못했으면 `null`이다.
+- **글을 쓰거나 고칠 때 한 번만 만들어 글에 저장한다.** 글을 읽을 때(목록, 상세, 검색)는 바깥 사이트에 접속하지 않는다. 글을 고쳤을 때 처음 나오는 주소가 그대로면 있던 미리보기를 쓰고, 바뀌었으면 새로 만들고, 주소를 지웠으면 없앤다.
+- 미리보기를 못 만들어도 글은 올라간다(`link_preview`만 `null`). 이 기능이 생기기 전에 쓴 글에는 없다.
+- 유튜브(`youtube.com`, `youtu.be`의 watch, shorts, embed, live)는 영상 번호로 썸네일 주소를 만들고 제목만 공식 조회(oEmbed)로 가져온다.
+- 서버가 사용자가 적은 주소에 접속하므로 **서버 안쪽을 건드리지 못하게 막는다**(SSRF): http/https와 기본 포트(80/443)만, 아이디·비밀번호가 든 주소는 거절한다. 주소가 가리키는 IP가 **모두 공인 IP**여야 하고(사설망, `localhost`, 클라우드 메타데이터 서버 `169.254.169.254`, IPv6 사설·루프백, IPv4를 감싼 IPv6, 숫자로 쓴 `127.0.0.1` 등은 거절), 확인한 IP로 바로 접속한다(이름을 다시 풀지 않는다). 리다이렉트는 3번까지 따라가며 매번 같은 검사를 한다. HTTPS 인증서는 원래 사이트 이름으로 검사한다(만료·이름 불일치·자체 서명은 거절). 응답은 앞부분 약 300KB까지만 읽고, 한 주소에 전체 5초까지 쓴다.
+- 끄려면 `LINK_PREVIEW_ENABLED=false`로 다시 시작한다. 이미 저장된 미리보기는 계속 보인다.
+
+## 임시 정지
+
+관리자가 계정을 **지금부터 며칠 동안 커뮤니티에 못 쓰게** 할 수 있다. 신고된 글·댓글·후기의 작성자뿐 아니라 어느 계정이든 된다.
+
+| 경로 | 설명 |
+|---|---|
+| `POST /admin/users/{user_id}/suspension` | **관리자만.** `{"days": 1~365, "reason": "사유(1~300자)"}`. 지금부터 `days`일 동안 정지한다. 이미 정지 중이면 이전 것을 풀고 새 기간으로 다시 건다(줄이거나 늘릴 수 있다) |
+| `DELETE /admin/users/{user_id}/suspension` | **관리자만.** 정지를 푼다. 정지 중이 아니어도 204 |
+| `GET /admin/suspensions?status=active\|all` | **관리자만.** 정지 목록. 기본은 지금 정지 중인 계정, `all`이면 끝났거나(`ended`) 푼(`lifted`) 것까지. 닉네임과 사유, 정지한 관리자, 끝나는 때가 온다 |
+| `GET /admin/reports` | 응답의 `target.author_suspended_until`(작성자가 지금 정지 중이면 끝나는 때)과 `target.author_is_admin`으로 신고 목록에서 바로 정지할 수 있는지 안다 |
+| `GET /users/me`, 로그인 응답 | `community_suspension: {ends_at, reason}`. 정지 중이 아니면 `null`. 앱이 정지된 사람에게 안내를 보여 주는 데 쓴다 |
+
+- **막히는 것**: 새 글, 댓글, 글 고치기, 글에 사진 붙이기, 레시피 후기 쓰기·고치기(후기는 레시피게시판에도 올라가므로). 정지 중에 쓰려고 하면 `403`이고 메시지에 끝나는 때(서비스 시간대)와 사유가 들어 있다.
+- **되는 것**: 읽기, 좋아요, 신고, 내가 쓴 글과 댓글 지우기, 로그인. 이미 쓴 글은 그대로 보인다.
+- 관리자와 자기 자신은 정지할 수 없다(400). 정지 기간이 지나면 저절로 풀리고, 기록은 남는다(`community_suspensions`).
+- 다른 사람에게 보이는 곳(글, 프로필)에는 정지 여부가 나오지 않는다.
+
 ## 관리자 만들기
 
 ```sh
@@ -112,6 +140,8 @@ python -m scripts.set_admin 이메일 --remove   # 빼기
 - 친구·변경 요청·초대코드 경로(`/friends`, `/change-requests`, `/fridges/{id}/invites`, `/fridges/join`, `/fridges/{id}/share-links`, `/fridges/{id}/access`, `/notifications/change-results`)와 응답의 `friend_code`, `is_friend`, `can_request_changes`, 알림 숫자 `pending_change_requests`, `unread_change_results`가 없어졌다. **앱이 이것들을 쓰고 있으면 앱을 먼저 바꾼 뒤 서버를 배포한다.**
 - DB가 바뀐다: `users`에 `friend_code`(이미 가입한 사람에게는 마이그레이션이 하나씩 만들어 준다), `is_admin`, `fridges`에 `visibility`(기본 `private`), 새 표 `friendships`, `posts`(마이그레이션 `0002`), `post_likes`, `comments`, `post_photos`, `reports`(`0003`), `fridge_viewers`, `fridge_share_links`, `change_requests`(`0004`). 새 칸과 표만 더해진다. 단 `0004`는 답을 못 받은 예전 친구 요청(`friendships.status = 'pending'`)을 지운다(요청 방식을 없앴으므로). 마이그레이션은 배포 순서의 `migrate` 단계에서 `deploy`보다 먼저 돈다.
 - `0009` 뒤에 **옛 버전의 서버로 되돌리면** 지워진 표와 `friend_code`를 찾다가 가입과 공유가 실패한다. 되돌릴 일이 생기면 `alembic downgrade 0008`을 먼저 한다(빈 표와 새 친구 코드가 만들어진다). (`downgrade 0002`는 2차 표만 지운다. 올린 사진 파일은 `uploads/posts/`에 남으니 필요하면 따로 지운다.)
+- `0014`는 **칸 하나와 표 하나만 더한다**: `posts.link_preview`(비어 있어도 되는 JSON)와 표 `community_suspensions`. 기존 글과 계정은 그대로이고 지금 정지 중인 사람도 없다. `downgrade`로 되돌릴 수 있다(두 가지 모두 새 것이라 되돌려도 다른 데이터는 그대로다).
+- 링크 미리보기를 만들려면 서버가 **바깥 인터넷에 접속**할 수 있어야 한다(Cloud Run은 기본으로 된다). 접속이 막힌 환경에서는 미리보기가 없을 뿐 글쓰기는 정상이다.
 - 로컬 개발 DB는 `AUTO_CREATE_TABLES`로 만들어져서 새 칸이 자동으로 안 생긴다. 한 번만: `alembic stamp 0001` 다음 `alembic upgrade head`.
 
 ## 아직 없는 것

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from fastapi.responses import FileResponse
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -20,6 +21,7 @@ from app.schemas import (
     CommentList,
     CommentOut,
     LikeOut,
+    LinkPreviewOut,
     MessageResponse,
     PostCreate,
     PostBoard,
@@ -32,7 +34,9 @@ from app.schemas import (
     ReportCreate,
 )
 from app.services.community import delete_comment, delete_post, file_report, remove_photo_file
+from app.services.link_preview import build_preview, refreshed_preview
 from app.services.post_search import find_posts
+from app.services.suspension import ensure_can_write
 from app.timeutil import utcnow
 
 router = APIRouter(prefix="/posts", tags=["커뮤니티"])
@@ -46,6 +50,16 @@ COMMENT_NOT_FOUND = "댓글을 찾을 수 없어요."
 
 def _photo_url(post_id: int, photo_id: int) -> str:
     return f"/posts/{post_id}/photos/{photo_id}"
+
+
+def _preview_out(data: dict | None) -> LinkPreviewOut | None:
+    """글에 저장된 미리보기를 응답 모양으로. 저장된 모양이 이상하면(옛 형식 등) 없는 것으로 친다."""
+    if not data:
+        return None
+    try:
+        return LinkPreviewOut.model_validate(data)
+    except ValidationError:
+        return None
 
 
 def _decorate(db: Session, rows: list[tuple[Post, User]], me: User) -> list[PostOut]:
@@ -74,6 +88,7 @@ def _decorate(db: Session, rows: list[tuple[Post, User]], me: User) -> list[Post
             title=post.title,
             body=post.body,
             board=post.board,
+            link_preview=_preview_out(post.link_preview),
             review=PostReviewOut(id=review.id, recipe_id=review.recipe_id, recipe_name=review.recipe_name, rating=review.rating)
             if (review := reviews.get(post.review_id)) else None,
             updated_at=post.updated_at,
@@ -120,12 +135,14 @@ def _too_many(what: str, limit: int) -> HTTPException:
 
 @router.post("", response_model=PostOut, status_code=201, summary="글쓰기 (사진은 글을 쓴 뒤 POST /posts/{id}/photos로 붙인다)")
 def create_post(payload: PostCreate, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    ensure_can_write(db, me)
     recent = db.scalar(
         select(func.count()).select_from(Post).where(Post.author_id == me.id, Post.review_id.is_(None), Post.created_at >= utcnow() - timedelta(hours=1))
     )
     if recent >= POSTS_PER_HOUR:
         raise _too_many("글", POSTS_PER_HOUR)
-    post = Post(author_id=me.id, title=payload.title, body=payload.body, board=payload.board)
+    # 본문(없으면 제목)의 첫 링크 미리보기. 못 만들어도 글은 올라간다
+    post = Post(author_id=me.id, title=payload.title, body=payload.body, board=payload.board, link_preview=build_preview(payload.body, payload.title))
     db.add(post)
     db.commit()
     return _decorate(db, [(post, me)], me)[0]
@@ -162,10 +179,13 @@ def update_post(post_id: int, payload: PostUpdate, me: User = Depends(get_curren
         raise HTTPException(status_code=403, detail="내가 쓴 글만 수정할 수 있어요.")
     if post.review_id is not None:
         raise HTTPException(status_code=409, detail="자동 등록된 후기는 레시피의 내 후기에서 수정해 주세요.")
+    ensure_can_write(db, me)
     changes = payload.model_dump(exclude_unset=True)
     if any(getattr(post, key) != value for key, value in changes.items()):
         for key, value in changes.items():
             setattr(post, key, value)
+        # 처음 나오는 링크가 그대로면 있던 미리보기를 쓰고, 바뀌었거나 없어졌으면 새로 만든다
+        post.link_preview = refreshed_preview(post.link_preview, post.body, post.title)
         post.updated_at = utcnow()
         db.commit()
     return _decorate(db, [(post, author)], me)[0]
@@ -193,6 +213,7 @@ def add_photos(
     post, author = _live_post(db, post_id)
     if post.author_id != me.id:
         raise HTTPException(status_code=403, detail="내가 쓴 글에만 사진을 붙일 수 있어요.")
+    ensure_can_write(db, me)
     attached = db.scalar(select(func.count()).select_from(PostPhoto).where(PostPhoto.post_id == post.id))
     if attached + len(files) > MAX_PHOTOS_PER_POST:
         raise HTTPException(status_code=400, detail=f"사진은 글 하나에 {MAX_PHOTOS_PER_POST}장까지 붙일 수 있어요.")
@@ -294,6 +315,7 @@ def _comment_out(comment: Comment, author: User, me: User) -> CommentOut:
 @router.post("/{post_id}/comments", response_model=CommentOut, status_code=201, summary="댓글 쓰기")
 def create_comment(post_id: int, payload: CommentCreate, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
     _live_post(db, post_id)
+    ensure_can_write(db, me)
     recent = db.scalar(
         select(func.count()).select_from(Comment).where(Comment.author_id == me.id, Comment.created_at >= utcnow() - timedelta(hours=1))
     )

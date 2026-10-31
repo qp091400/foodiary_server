@@ -1,21 +1,29 @@
-"""관리자: 신고된 글·댓글·레시피 후기를 보고 지우거나 문제없음으로 닫는다."""
+"""관리자: 신고된 글·댓글·레시피 후기를 보고 지우거나 문제없음으로 닫는다. 계정을 커뮤니티에서 임시 정지한다."""
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import require_admin
-from app.models import Comment, Post, PostPhoto, RecipeReview, Report, User
-from app.schemas import AdminReportOut, PublicUser, ReportResolve, ReportTargetOut
+from app.models import CommunitySuspension, Comment, Post, PostPhoto, RecipeReview, Report, User
+from app.schemas import AdminReportOut, PublicUser, ReportResolve, ReportTargetOut, SuspendCreate, SuspensionOut
 from app.services.community import delete_comment, delete_post, delete_review
+from app.services.suspension import active_suspension, lift, status_of, suspend
 from app.timeutil import utcnow
 
 router = APIRouter(prefix="/admin", tags=["관리자"], dependencies=[Depends(require_admin)])
 
 EXCERPT = 200
+USER_NOT_FOUND = "사용자를 찾을 수 없어요."
+
+
+def _author_status(db: Session, author: User) -> dict:
+    """신고 목록에서 작성자를 바로 정지할 수 있도록, 관리자인지와 지금 정지 중인지를 같이 보여 준다."""
+    current = active_suspension(db, author.id)
+    return {"author_is_admin": author.is_admin, "author_suspended_until": current.ends_at if current else None}
 
 
 def _target(db: Session, report: Report) -> ReportTargetOut | None:
@@ -28,6 +36,7 @@ def _target(db: Session, report: Report) -> ReportTargetOut | None:
         return ReportTargetOut(
             post_id=post.id,
             author=PublicUser.of(author),
+            **_author_status(db, author),
             text=f"{post.title}\n{post.body}"[:EXCERPT],
             photo_count=photos,
             deleted=post.deleted_at is not None,
@@ -41,6 +50,7 @@ def _target(db: Session, report: Report) -> ReportTargetOut | None:
             recipe_id=review.recipe_id,
             recipe_name=review.recipe_name,
             author=PublicUser.of(author),
+            **_author_status(db, author),
             text=f"별점 {review.rating}\n{review.body or ''}"[:EXCERPT],
             photo_count=0,
             deleted=review.deleted_at is not None,
@@ -52,6 +62,7 @@ def _target(db: Session, report: Report) -> ReportTargetOut | None:
     return ReportTargetOut(
         post_id=comment.post_id,
         author=PublicUser.of(author),
+        **_author_status(db, author),
         text=comment.body[:EXCERPT],
         photo_count=0,
         deleted=comment.deleted_at is not None,
@@ -111,3 +122,55 @@ def resolve_report(report_id: int, payload: ReportResolve, admin: User = Depends
         other.status, other.handled_by, other.handled_at = status, admin.id, utcnow()
     db.commit()
     return _out(db, report)
+
+
+# ── 커뮤니티 임시 정지 ───────────────────────────────────────────────────
+
+
+def _suspension_out(db: Session, suspension: CommunitySuspension) -> SuspensionOut:
+    target = db.get(User, suspension.user_id)
+    creator = db.get(User, suspension.created_by) if suspension.created_by else None
+    return SuspensionOut(
+        id=suspension.id,
+        user=PublicUser.of(target),
+        reason=suspension.reason,
+        created_at=suspension.created_at,
+        ends_at=suspension.ends_at,
+        created_by=PublicUser.of(creator) if creator else None,
+        status=status_of(suspension),
+        lifted_at=suspension.lifted_at,
+    )
+
+
+@router.post(
+    "/users/{user_id}/suspension",
+    response_model=SuspensionOut,
+    status_code=201,
+    summary="커뮤니티 임시 정지: 지금부터 며칠 동안 그 계정이 글·댓글·후기를 못 쓰게 한다. 이미 정지 중이면 새 기간으로 다시 건다",
+)
+def suspend_user(user_id: int, payload: SuspendCreate, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    target = db.get(User, user_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail=USER_NOT_FOUND)
+    return _suspension_out(db, suspend(db, admin, target, payload.days, payload.reason))
+
+
+@router.delete("/users/{user_id}/suspension", status_code=204, summary="임시 정지 풀기 (정지 중이 아니어도 204)")
+def lift_suspension(user_id: int, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    target = db.get(User, user_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail=USER_NOT_FOUND)
+    lift(db, admin, target)
+    return Response(status_code=204)
+
+
+@router.get("/suspensions", response_model=list[SuspensionOut], summary="정지 목록 (기본은 지금 정지 중인 계정, all이면 끝났거나 푼 것까지)")
+def list_suspensions(
+    status: Literal["active", "all"] = Query("active"),
+    limit: int = Query(100, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    query = select(CommunitySuspension).order_by(CommunitySuspension.id.desc()).limit(limit)
+    if status == "active":
+        query = query.where(CommunitySuspension.lifted_at.is_(None), CommunitySuspension.ends_at > utcnow())
+    return [_suspension_out(db, suspension) for suspension in db.scalars(query).all()]

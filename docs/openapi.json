@@ -3019,7 +3019,7 @@
             "schema": {
               "type": "string",
               "maxLength": 100,
-              "description": "제목·본문에 포함된 검색어. 빈 값·공백이면 전체 목록",
+              "description": "검색어. 제목·본문과 키워드·의미가 맞는 글을 관련도순으로 돌려준다. 빈 값·공백이면 전체 목록(최신순)",
               "default": "",
               "title": "Q"
             },
@@ -3061,7 +3061,7 @@
                   "type": "null"
                 }
               ],
-              "description": "이 번호보다 오래된 글부터",
+              "description": "다음 쪽 표시. 응답의 next_before_id를 그대로 보낸다 (검색어가 없으면 이 번호보다 오래된 글부터, 있으면 이미 받은 결과 수 다음부터)",
               "title": "Before Id"
             },
             "description": "다음 쪽 표시. 응답의 next_before_id를 그대로 보낸다 (검색어가 없으면 이 번호보다 오래된 글부터, 있으면 이미 받은 결과 수 다음부터)"
@@ -3991,6 +3991,125 @@
         }
       }
     },
+    "/notifications/push/config": {
+      "get": {
+        "tags": [
+          "휴대폰 알림"
+        ],
+        "summary": "Config",
+        "operationId": "config_notifications_push_config_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/notifications/push/devices/{installation_id}": {
+      "put": {
+        "tags": [
+          "휴대폰 알림"
+        ],
+        "summary": "Register",
+        "operationId": "register_notifications_push_devices__installation_id__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "installation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Installation Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceRegistration"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "휴대폰 알림"
+        ],
+        "summary": "Unregister",
+        "operationId": "unregister_notifications_push_devices__installation_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "installation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Installation Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/admin/reports": {
       "get": {
         "tags": [
@@ -4101,6 +4220,169 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AdminReportOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/users/{user_id}/suspension": {
+      "post": {
+        "tags": [
+          "관리자"
+        ],
+        "summary": "커뮤니티 임시 정지: 지금부터 며칠 동안 그 계정이 글·댓글·후기를 못 쓰게 한다. 이미 정지 중이면 새 기간으로 다시 건다",
+        "operationId": "suspend_user_admin_users__user_id__suspension_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuspendCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuspensionOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "관리자"
+        ],
+        "summary": "임시 정지 풀기 (정지 중이 아니어도 204)",
+        "operationId": "lift_suspension_admin_users__user_id__suspension_delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/suspensions": {
+      "get": {
+        "tags": [
+          "관리자"
+        ],
+        "summary": "정지 목록 (기본은 지금 정지 중인 계정, all이면 끝났거나 푼 것까지)",
+        "operationId": "list_suspensions_admin_suspensions_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "active",
+                "all"
+              ],
+              "type": "string",
+              "default": "active",
+              "title": "Status"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SuspensionOut"
+                  },
+                  "title": "Response List Suspensions Admin Suspensions Get"
                 }
               }
             }
@@ -4888,6 +5170,55 @@
         },
         "type": "object",
         "title": "ConsumeRequest"
+      },
+      "DeviceRegistration": {
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "web",
+              "expo"
+            ],
+            "title": "Platform"
+          },
+          "subscription": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WebSubscription"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "token": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token"
+          },
+          "expiry": {
+            "type": "boolean",
+            "title": "Expiry",
+            "default": true
+          },
+          "comments": {
+            "type": "boolean",
+            "title": "Comments",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "platform"
+        ],
+        "title": "DeviceRegistration"
       },
       "DiscardedCategory": {
         "properties": {
@@ -5916,6 +6247,73 @@
         ],
         "title": "LikeOut"
       },
+      "LinkPreviewOut": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "link",
+              "youtube"
+            ],
+            "title": "Kind"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image"
+          },
+          "site": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Site"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "kind"
+        ],
+        "title": "LinkPreviewOut",
+        "description": "글에 붙인 첫 링크의 미리보기. 글을 쓰거나 고칠 때 서버가 만들어 저장한다. 누르면 url을 연다."
+      },
       "LoginRequest": {
         "properties": {
           "username": {
@@ -6231,6 +6629,16 @@
               "recipe"
             ],
             "title": "Board"
+          },
+          "link_preview": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LinkPreviewOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "review": {
             "anyOf": [
@@ -7255,6 +7663,22 @@
           "author": {
             "$ref": "#/components/schemas/PublicUser"
           },
+          "author_is_admin": {
+            "type": "boolean",
+            "title": "Author Is Admin",
+            "default": false
+          },
+          "author_suspended_until": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author Suspended Until"
+          },
           "text": {
             "type": "string",
             "title": "Text"
@@ -7772,6 +8196,115 @@
         ],
         "title": "SignupRequest"
       },
+      "SuspendCreate": {
+        "properties": {
+          "days": {
+            "type": "integer",
+            "maximum": 365.0,
+            "minimum": 1.0,
+            "title": "Days",
+            "description": "정지할 일수 (지금부터)"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Reason",
+            "description": "사유. 정지된 사람에게도 그대로 보인다"
+          }
+        },
+        "type": "object",
+        "required": [
+          "days",
+          "reason"
+        ],
+        "title": "SuspendCreate",
+        "description": "커뮤니티 임시 정지. 지금부터 days일 동안 글·댓글·후기를 쓸 수 없다."
+      },
+      "SuspensionInfo": {
+        "properties": {
+          "ends_at": {
+            "type": "string",
+            "title": "Ends At"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ends_at",
+          "reason"
+        ],
+        "title": "SuspensionInfo",
+        "description": "내가 지금 받고 있는 커뮤니티 임시 정지. 이 기간에는 글·댓글·후기를 쓸 수 없다(읽기, 좋아요, 신고는 된다)."
+      },
+      "SuspensionOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "user": {
+            "$ref": "#/components/schemas/PublicUser"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "ends_at": {
+            "type": "string",
+            "title": "Ends At"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicUser"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "ended",
+              "lifted"
+            ],
+            "title": "Status"
+          },
+          "lifted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lifted At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "user",
+          "reason",
+          "created_at",
+          "ends_at",
+          "created_by",
+          "status",
+          "lifted_at"
+        ],
+        "title": "SuspensionOut"
+      },
       "TokenPair": {
         "properties": {
           "access_token": {
@@ -7858,6 +8391,16 @@
               }
             ],
             "title": "Avatar Url"
+          },
+          "community_suspension": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SuspensionInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -7990,6 +8533,44 @@
           "expires_in"
         ],
         "title": "VerifyCodeResponse"
+      },
+      "WebKeys": {
+        "properties": {
+          "p256dh": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "P256Dh"
+          },
+          "auth": {
+            "type": "string",
+            "maxLength": 30,
+            "title": "Auth"
+          }
+        },
+        "type": "object",
+        "required": [
+          "p256dh",
+          "auth"
+        ],
+        "title": "WebKeys"
+      },
+      "WebSubscription": {
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "maxLength": 2048,
+            "title": "Endpoint"
+          },
+          "keys": {
+            "$ref": "#/components/schemas/WebKeys"
+          }
+        },
+        "type": "object",
+        "required": [
+          "endpoint",
+          "keys"
+        ],
+        "title": "WebSubscription"
       }
     },
     "securitySchemes": {

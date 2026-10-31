@@ -182,6 +182,15 @@ class ResetPasswordRequest(BaseModel):
     new_password: Password
 
 
+class SuspensionInfo(BaseModel):
+    """내가 지금 받고 있는 커뮤니티 임시 정지. 이 기간에는 글·댓글·후기를 쓸 수 없다(읽기, 좋아요, 신고는 된다)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    ends_at: UtcDatetime
+    reason: str
+
+
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -192,6 +201,7 @@ class UserOut(BaseModel):
     created_at: UtcDatetime
     is_admin: bool
     avatar_url: str | None = None
+    community_suspension: SuspensionInfo | None = None  # 정지 중이 아니면 없다
 
 
 class TokenPair(BaseModel):
@@ -668,12 +678,24 @@ class PostPhotoOut(BaseModel):
     url: str  # 로그인 토큰을 붙여 GET으로 받으면 사진이 온다
 
 
+class LinkPreviewOut(BaseModel):
+    """글에 붙인 첫 링크의 미리보기. 글을 쓰거나 고칠 때 서버가 만들어 저장한다. 누르면 url을 연다."""
+
+    url: str
+    kind: Literal["link", "youtube"]  # youtube면 영상 썸네일이다 (앱이 재생 표시를 얹는다)
+    title: str | None = None
+    description: str | None = None  # youtube면 채널 이름
+    image: str | None = None  # https 주소만 온다
+    site: str | None = None  # 사이트 이름 (없으면 도메인)
+
+
 class PostOut(BaseModel):
     id: int
     author: PublicUser
     title: str
     body: str
     board: PostBoard
+    link_preview: LinkPreviewOut | None = None  # 본문(없으면 제목)에서 처음 나온 링크. 링크가 없거나 못 만들면 없다
     review: PostReviewOut | None
     updated_at: UtcDatetime | None
     can_edit: bool
@@ -733,6 +755,8 @@ class ReportTargetOut(BaseModel):
     recipe_id: str | None = None  # 후기면 그 레시피 번호
     recipe_name: str | None = None
     author: PublicUser
+    author_is_admin: bool = False  # 관리자는 정지할 수 없다
+    author_suspended_until: UtcDatetime | None = None  # 작성자가 지금 임시 정지 중이면 그 끝나는 때
     text: str  # 글이면 제목과 본문, 댓글이면 본문, 후기면 별점과 본문 (앞부분)
     photo_count: int
     deleted: bool
@@ -753,6 +777,26 @@ class AdminReportOut(BaseModel):
 
 class ReportResolve(BaseModel):
     action: Literal["delete", "dismiss"]  # 대상을 지운다 / 문제없음으로 닫는다
+
+
+class SuspendCreate(BaseModel):
+    """커뮤니티 임시 정지. 지금부터 days일 동안 글·댓글·후기를 쓸 수 없다."""
+
+    days: int = Field(ge=1, le=365, description="정지할 일수 (지금부터)")
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)] = Field(
+        description="사유. 정지된 사람에게도 그대로 보인다"
+    )
+
+
+class SuspensionOut(BaseModel):
+    id: int
+    user: PublicUser
+    reason: str
+    created_at: UtcDatetime
+    ends_at: UtcDatetime
+    created_by: PublicUser | None  # 정지한 관리자 (계정이 없어졌으면 없다)
+    status: Literal["active", "ended", "lifted"]  # 정지 중 / 기간이 끝남 / 관리자가 풂
+    lifted_at: UtcDatetime | None
 
 
 
