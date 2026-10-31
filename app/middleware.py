@@ -9,38 +9,11 @@ from collections import OrderedDict, deque
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
-from starlette.types import ASGIApp, Scope, Receive, Send
 
 from app.config import settings
 
 # 영수증 업로드와 인식 테스트. 테스트 비밀번호를 틀린 요청도 센다(비밀번호 맞히기 방지).
 _OCR_PATH = re.compile(r"^/(?:fridges/\d+/receipts|(?:dev/)?receipt-test)(?:/batch)?/?$")
-
-
-class APIPrefixMiddleware:
-    """Expose API routes under /api on the same server as the web proxy.
-
-    Preserve the original path and set root_path so Starlette routing and
-    redirects include /api. Direct Cloud Run/local requests remain supported.
-    """
-    def __init__(self, app: ASGIApp):
-        self.app = app
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send):
-        if scope['type'] in ('http', 'websocket'):
-            prefix = scope.get('root_path', '') + '/api'
-            path = scope['path']
-            if path == prefix or path.startswith(prefix + '/'):
-                scope = dict(scope, root_path=prefix)
-        await self.app(scope, receive, send)
-
-
-def application_path(request: Request) -> str:
-    path = request.scope['path']
-    root = request.scope.get('root_path', '')
-    if root and (path == root or path.startswith(root + '/')):
-        return path[len(root):] or '/'
-    return path
 
 
 class RequestLimiter:
@@ -92,7 +65,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         retry_after = 0
         if settings.rate_limit_enabled and request.method == "POST":
-            path = application_path(request)
+            path = request.scope["path"]
             group = "auth" if path.startswith("/auth/") else "ocr" if _OCR_PATH.fullmatch(path) else None
             if group:
                 limit = settings.auth_requests_per_minute if group == "auth" else settings.ocr_requests_per_minute
@@ -111,6 +84,6 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         response.headers["Referrer-Policy"] = "no-referrer"
         if settings.app_env == "production":
             response.headers["Strict-Transport-Security"] = "max-age=31536000"
-        if application_path(request).startswith(("/auth/", "/users/", "/fridges", "/receipt-test", "/dev/")):
+        if request.scope["path"].startswith(("/auth/", "/users/", "/fridges", "/receipt-test", "/dev/")):
             response.headers["Cache-Control"] = "no-store"
         return response

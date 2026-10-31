@@ -30,6 +30,7 @@ RELEASE_STEPS = ("build", "migrate", "deploy", "publish")
 # The database goes first: manifest.json marks the upload as complete.
 RECIPE_SEED_FILES = ("recipes.sqlite3", "manifest.json")
 IMAGE_TAG = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]{0,127}")
+HOSTNAME = re.compile(r"(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}")
 APIS = ("run.googleapis.com", "cloudbuild.googleapis.com", "artifactregistry.googleapis.com",
         "secretmanager.googleapis.com", "iam.googleapis.com", "storage.googleapis.com")
 
@@ -72,14 +73,9 @@ def validate_config(config: dict) -> None:
         url = urlsplit(origin)
         if url.scheme != "https" or not url.hostname or url.username or url.password or url.query or url.fragment or url.path:
             raise ValueError("Frontend origins must be HTTPS origins without paths or credentials")
-    for key in ('web_upstream', 'public_origin'):
-        value = config.get(key, '')
-        if value:
-            url = urlsplit(value)
-            if url.scheme != 'https' or not url.hostname or url.username or url.password or url.query or url.fragment or url.path:
-                raise ValueError(f'{key} must be an HTTPS origin without a path')
-    if config.get('web_upstream') and config.get('web_upstream') in {config.get('public_origin'), service_url(config)}:
-        raise ValueError('Web upstream must not point back to the API gateway')
+    for host in config.get("hosts", []):
+        if not isinstance(host, str) or not HOSTNAME.fullmatch(host):
+            raise ValueError("hosts must be plain lowercase host names such as api.example.com (no https://, path or *)")
     for key in ("smtp_host", "smtp_user", "mail_from"):
         if not config.get(key) or any(c in config[key] for c in "\r\n\x00"):
             raise ValueError(f"Invalid or missing {key}")
@@ -103,14 +99,11 @@ def service_url(config: dict) -> str:
 
 
 def environment(config: dict) -> dict[str, str]:
-    public_host = urlsplit(config.get('public_origin', '')).hostname
     hosts = [urlsplit(service_url(config)).hostname, 'localhost', '127.0.0.1']
-    if public_host:
-        hosts.append(public_host)
+    hosts += config.get("hosts", [])  # a domain mapped to this service, e.g. api.foodiary.kr. Without it the server answers that name with 400
     return dict(
-        WEB_UPSTREAM=config.get('web_upstream', ''),
         APP_ENV="production", DEV_TOOLS="false", AUTO_CREATE_TABLES="false",
-        TRUSTED_HOSTS=",".join(hosts),
+        TRUSTED_HOSTS=",".join(dict.fromkeys(hosts)),
         CORS_ORIGINS=",".join(config["origins"]), UPLOAD_DIR="/app/uploads", MAX_UPLOAD_MB="10",
         OCR_ENGINE="paddle", OCR_LANG="korean", OCR_DET_MAX_SIDE="1280", OCR_CPU_THREADS="4", OCR_ENGINES="2",
         OCR_ORIENTATION_MODEL="PP-LCNet_x1_0_doc_ori",
@@ -476,6 +469,16 @@ def add_origins(config_path: Path, origins: list[str]) -> list[str]:
     return merged
 
 
+def add_hosts(config_path: Path, hosts: list[str]) -> list[str]:
+    """Let the service answer for more host names (a domain mapped to it) without touching the rest of the private config."""
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    merged = list(dict.fromkeys([*config.get("hosts", []), *(host.strip().lower().rstrip(".") for host in hosts)]))
+    validate_config({**config, "hosts": merged})
+    config["hosts"] = merged
+    save_private(config_path, json.dumps(config, indent=2) + "\n")
+    return merged
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=ROOT / ".cloudrun" / "config.json")
@@ -490,6 +493,8 @@ def main() -> None:
         commands.add_parser(action)
     add_origin = commands.add_parser("add-origin", help="Allow another HTTPS frontend origin (CORS), e.g. https://foodiary.kr. Run deploy or release afterwards")
     add_origin.add_argument("origins", nargs="+", help="HTTPS origins without a path")
+    add_host = commands.add_parser("add-host", help="Let the service answer for another host name, e.g. api.foodiary.kr (a domain mapped to it). Run deploy and publish afterwards")
+    add_host.add_argument("hosts", nargs="+", help="host names only: no https:// and no path")
     release = commands.add_parser("release", help="build, migrate, deploy and publish in one go (private from deploy until publish ends)")
     release.add_argument("--image", metavar="TAG", help="deploy the image the GitHub trigger already built for this tag "
                                                         "(the 7-character commit id, or latest) instead of building here")
@@ -503,6 +508,10 @@ def main() -> None:
         if args.action == "add-origin":
             origins = add_origins(args.config, args.origins)
             print("Allowed frontend origins: " + ", ".join(origins) + "\nRun deploy or release to apply. No cloud resources were changed.")
+            return
+        if args.action == "add-host":
+            hosts = add_hosts(args.config, args.hosts)
+            print("The service answers for these extra host names: " + ", ".join(hosts) + "\nRun deploy and publish to apply. No cloud resources were changed.")
             return
         deployment = Deployment(json.loads(args.config.read_text(encoding="utf-8")), args.config.parent)
         if args.action == "plan":

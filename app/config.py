@@ -3,7 +3,7 @@
 import re
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_JWT_SECRET = "change-me"
@@ -15,21 +15,6 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://fridge:fridge@localhost:5432/fridge"
     app_env: Literal["development", "test", "production"] = "development"
     trusted_hosts: str = "*"
-    web_upstream: str = ""  # Enable / -> external web; /api/* stays in this service.
-
-    @field_validator('web_upstream')
-    @classmethod
-    def validate_web_upstream(cls, value: str) -> str:
-        from urllib.parse import urlsplit
-        if not value:
-            return value
-        parsed = urlsplit(value)
-        if (parsed.scheme not in ('http', 'https') or not parsed.hostname
-                or parsed.username or parsed.password or parsed.query or parsed.fragment
-                or parsed.path not in ('', '/')):
-            raise ValueError('WEB_UPSTREAM must be an http(s) origin without credentials or a path')
-        return value.rstrip('/')
-
 
     jwt_secret: str = DEFAULT_JWT_SECRET
     access_token_minutes: int = 30

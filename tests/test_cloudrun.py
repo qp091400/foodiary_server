@@ -566,18 +566,6 @@ def test_add_origin_is_an_offline_cli_command(tmp_path, monkeypatch, capsys):
     assert "foodiary.kr" in capsys.readouterr().out
 
 
-def test_existing_cloudrun_service_can_proxy_external_web():
-    value = config()
-    value.update(web_upstream='https://web.foodiary.test', public_origin='https://foodiary.kr')
-    cloudrun.validate_config(value)
-    env = cloudrun.environment(value)
-    assert env['WEB_UPSTREAM'] == value['web_upstream']
-    assert 'foodiary.kr' in env['TRUSTED_HOSTS'].split(',')
-    value['web_upstream'] = value['public_origin']
-    with pytest.raises(ValueError, match='point back'):
-        cloudrun.validate_config(value)
-
-
 # ── GitHub 트리거가 만든 이미지로 배포 ───────────────────────────────────
 
 DIGEST = "sha256:" + "d" * 64
@@ -702,3 +690,44 @@ def test_the_recipe_hash_is_read_from_recipe_package_json_the_way_the_build_step
     assert r"""grep -o '"sha256": *"[a-f0-9]\{64\}"' recipe-package.json""" in text
     found = re.search(r'"sha256": *"([a-f0-9]{64})"', (root / "recipe-package.json").read_text(encoding="utf-8"))
     assert found and found.group(1) == cloudrun.recipe_pin()  # 파일 형식이 바뀌어 빌드 단계가 못 읽게 되는 일을 막는다
+
+
+# ── 서버가 받아 줄 주소(api.foodiary.kr 같은 전용 도메인) ─────────────────
+
+
+def test_add_host_keeps_the_rest_of_the_private_config(tmp_path):
+    path = write_config(tmp_path)
+    before = json.loads(path.read_text())
+    merged = cloudrun.add_hosts(path, [" API.Foodiary.kr. ", "api.foodiary.kr", "www.foodiary.kr"])
+    assert merged == ["api.foodiary.kr", "www.foodiary.kr"]  # 소문자로, 끝의 점과 중복은 정리
+    after = json.loads(path.read_text())
+    assert after["hosts"] == merged and {k: v for k, v in after.items() if k != "hosts"} == before
+    assert cloudrun.add_hosts(path, ["api.foodiary.kr"]) == merged  # 다시 해도 같다
+
+
+def test_the_service_answers_only_for_its_own_names_plus_the_ones_added(tmp_path):
+    base = cloudrun.environment(config())["TRUSTED_HOSTS"].split(",")
+    assert base == ["foodiary-123456789012.asia-northeast1.run.app", "localhost", "127.0.0.1"]
+    added = cloudrun.environment({**config(), "hosts": ["api.foodiary.kr", "localhost"]})["TRUSTED_HOSTS"].split(",")
+    assert added == [*base, "api.foodiary.kr"]  # 겹치는 이름은 한 번만
+    assert not any("*" in host for host in added)  # 운영은 와일드카드를 허용하지 않는다
+    assert "WEB_UPSTREAM" not in cloudrun.environment(config())  # 웹 프록시 기능은 없앴다. 서버가 읽지 않는 값을 보내지 않는다
+
+
+@pytest.mark.parametrize("bad", ["https://api.foodiary.kr", "api.foodiary.kr/path", "*.foodiary.kr", "foodiary", "a b.kr", "api_x.foodiary.kr",
+                                 "-bad.foodiary.kr", "api.foodiary.kr:8080", "", "한글.kr", "." * 3, "a" * 64 + ".kr"])
+def test_add_host_rejects_anything_but_a_plain_host_name_without_changing_the_file(tmp_path, bad):
+    path = write_config(tmp_path)
+    before = path.read_text()
+    with pytest.raises(ValueError):
+        cloudrun.add_hosts(path, ["api.foodiary.kr", bad])
+    assert path.read_text() == before  # 하나라도 틀리면 아무것도 바꾸지 않는다
+
+
+def test_add_host_is_an_offline_cli_command(tmp_path, monkeypatch, capsys):
+    path = write_config(tmp_path)
+    monkeypatch.setattr(cloudrun.shutil, "which", lambda name: pytest.fail("add-host must not look for or run gcloud"))
+    monkeypatch.setattr(cloudrun.sys, "argv", ["cloudrun", "--config", str(path), "add-host", "api.foodiary.kr"])
+    cloudrun.main()
+    assert json.loads(path.read_text())["hosts"] == ["api.foodiary.kr"]
+    assert "api.foodiary.kr" in capsys.readouterr().out

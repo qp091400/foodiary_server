@@ -45,7 +45,6 @@ ENV HOME=/home/foodiary \
     OMP_NUM_THREADS=1 \
     OPENBLAS_NUM_THREADS=1
 USER 10001:10001
-CMD ["sh", "/app/deploy/entrypoint.sh"]
 
 # Cloud Run 이미지는 모델을 빌드 때 검증하고 런타임 다운로드 없이 시작한다.
 FROM production AS cloudrun-models

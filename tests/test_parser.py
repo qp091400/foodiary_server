@@ -11,6 +11,7 @@ from app.services.receipt_parser import (
     ParsedItem,
     estimate_skew,
     merge_same_name,
+    find_item_section,
     find_purchase_date,
     find_store_name,
     find_total,
@@ -511,3 +512,50 @@ def test_merge_same_name_drops_unit_price_when_lines_differ():
         ParsedItem(line_no=2, name="두부", quantity=1, unit_price=1200, amount=1200),
     ])
     assert [(i.quantity, i.amount, i.unit_price) for i in merged] == [(2, 2700, None)]
+
+
+# ── 과세물품가액·부가세액 줄을 OCR이 잘못 읽어도 품목이 되지 않는다 ─────────
+
+
+def _tax_receipt(tax_line, vat_line):
+    return make_boxes(
+        [
+            ["이마트24 가천대3기숙사점"],
+            ["2026-10-31 12:48 POS-0003"],
+            ["상품", "단가", "수량", "금액"],
+            ["덴마크초코초코우유300ml"],
+            ["8801155731625", "2,200", "2", "4,400"],
+            ["-행사:1+1", "-2,200"],
+            tax_line,
+            vat_line,
+            ["합 계", "2,200"],
+            ["신용카드", "2,200"],
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    "tax_line, vat_line",
+    [
+        (["과세물품가액", "2,000"], ["부 가 세 액", "200"]),  # 바르게 읽음
+        (["관세물품가액", "2,000"], ["부색가세액", "200"]),  # 같은 영수증을 갤럭시로 찍었을 때: "과세"→"관세", "부가세액"→"부색가세액"
+        (["과세 물품 가액", "2,000"], ["부가세", "200"]),
+        (["면세물품가액", "2,000"], ["투가세액", "200"]),  # "부"를 "투"로 읽음
+        (["과셰물품가액", "2,000"], ["부 가 세 앤", "200"]),
+        (["과세물품", "2,000"], ["부가세액", "200"]),
+    ],
+)
+def test_tax_lines_end_the_item_section_even_when_ocr_misreads_them(tax_line, vat_line):
+    receipt = parse_receipt(_tax_receipt(tax_line, vat_line))
+    assert [_summary(item) for item in receipt.items] == [("덴마크초코초코우유300ml", 2.0, 2200, 4400, 2200)]
+    assert receipt.total_amount == 2200
+    assert sum(item.amount - item.discount for item in receipt.items) == receipt.total_amount
+
+
+def test_misread_tax_lines_are_not_taken_as_the_total():
+    assert find_total(["관세물품 합계 4,000", "부색가세액 400", "합 계 4,400"]) == 4400
+
+
+def test_similar_looking_product_names_do_not_end_the_item_section():
+    lines = ["부추 1,500 1 1,500", "치킨 추가세트 5,000 1 5,000", "세제 3,000 1 3,000"]
+    assert find_item_section(lines) == (0, len(lines))

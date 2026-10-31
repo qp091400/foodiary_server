@@ -7,9 +7,7 @@ Google AI Pro의 월 $10 크레딧을 활용하는 Cloud Run 배포는 [deploy/C
 CPU OCR 모델을 이미지에 포함하고, Neon PostgreSQL과 비공개 사진 버킷을 연결하는 배포 도구가 준비되어 있습니다.
 비밀값·운영 이미지·마이그레이션을 분리하고, 비공개 HTTPS 검증 후 API를 공개합니다.
 
-Oracle Always Free ARM 서버 배포가 필요하면 [deploy/ORACLE.md](deploy/ORACLE.md)를 따릅니다.
-`compose.production.yml`은 HTTPS, 비root 실행, 영구 볼륨, 실제 OCR 시작 검사와 운영 설정 검증을 포함합니다.
-기존 `docker-compose.yml`은 로컬 개발용입니다.
+`docker-compose.yml`은 로컬 개발용입니다.
 
 ## 1. 기능
 
@@ -337,6 +335,8 @@ http://openapi.foodsafetykorea.go.kr/api/{KEY}/C005/json/1/5/BAR_CD=880123456789
 
 레시피에 별점·후기를 남기는 기능과, 처리할 변경 요청·내 글에 달린 댓글을 알려 주는 알림 아이콘용 API는 [docs/recipe-reviews-notifications.md](docs/recipe-reviews-notifications.md)에 있습니다.
 
+**API 전체 목록**은 [docs/api.html](docs/api.html)에 있습니다(경로, 요청·응답 칸, 로그인 필요 여부). 코드에서 자동으로 만든 문서라서 저장소를 받은 뒤 파일을 브라우저로 열어 보세요(GitHub 화면에서는 HTML이 그려지지 않습니다). 운영 서버의 `/docs`는 꺼 두었습니다. API를 고친 뒤에는 `python -m scripts.export_api_docs`로 다시 만듭니다. 원본 명세는 [docs/openapi.json](docs/openapi.json)입니다.
+
 ## 9. 향후 확장 (이번 범위 아님)
 
 - **푸시 알림(FCM)**: 지금은 임박 목록 조회 API만 있습니다. 매일 아침 임박 품목을 푸시하는 스케줄러를 붙일 수 있습니다.
@@ -362,18 +362,8 @@ app/
 alembic/  tests/  Dockerfile  docker-compose.yml
 ```
 
-### 로컬 웹 + API를 80번 포트로 접속
+### 로컬에서 웹과 함께 쓰기
 
-서버 저장소에서 `docker compose up --build -d`를 실행하면 개발용 Caddy도 시작한다.
-앱 저장소의 `.env.local`에서 `EXPO_PUBLIC_API_URL=http://localhost/api`로 설정하고
-`npm run web`으로 웹 개발 서버를 8081번 포트에서 실행한다(환경변수 변경 후 재시작).
-이후 브라우저에서는 `http://localhost`로 접속한다.
-
-- `/api/*`: 같은 Compose의 API 컨테이너(8000)로 전달한다.
-- 그 외 웹 경로와 WebSocket: 호스트의 Expo 개발 서버(8081)로 전달한다.
-- 기존 API 직접 주소 `http://localhost:8000`도 유지한다.
-
-웹이 다른 주소에서 실행 중이면 서버 Compose 실행 시 `LOCAL_WEB_UPSTREAM=호스트:포트`를
-지정한다. Docker 컨테이너에서 호스트로 접속할 때는 `localhost` 대신
-`host.docker.internal`을 사용한다. 개발 프록시는 HTTP 전용이며 운영 HTTPS 설정과 분리돼 있다.
-실제 휴대폰에서 같은 주소를 사용하려면 `localhost` 대신 개발 PC의 IP를 API 주소에 설정한다.
+서버 저장소에서 `docker compose up --build -d`를 실행하면 API가 `http://localhost:8000`에서 열린다.
+앱 저장소의 `EXPO_PUBLIC_API_URL`을 `http://localhost:8000`으로 두고 `npm run web`을 실행한다.
+실제 휴대폰에서는 `localhost` 대신 개발 PC의 IP를 API 주소에 설정한다.

@@ -8,7 +8,6 @@
 !/constraints-production.txt
 !/alembic.ini
 !/README.md
-!/compose.production.yml
 !/app/
 !/app/**
 !/alembic/

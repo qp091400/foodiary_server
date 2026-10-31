@@ -15,7 +15,6 @@ os.environ.update(
         "RECEIPT_TEST_PASSWORD": "",
         "OCR_DET_MAX_SIDE": "0",
         "APP_ENV": "test",
-        "WEB_UPSTREAM": "",
         "OCR_WARMUP": "false",
         "OCR_FAIL_CLOSED": "false",
         "OCR_MODELS_DIR": "",
