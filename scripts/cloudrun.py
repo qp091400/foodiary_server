@@ -25,6 +25,9 @@ SECRET_KEYS = ("DATABASE_URL", "JWT_SECRET", "SMTP_PASSWORD")
 TEST_PASSWORD_KEY = "RECEIPT_TEST_PASSWORD"
 # publish verifies the private service before it opens it, so a separate verify step would only repeat that.
 RELEASE_STEPS = ("build", "migrate", "deploy", "publish")
+# The recipe database lives in the build bucket, uploaded once per recipe version instead of with every build's source.
+# The database goes first: manifest.json marks the upload as complete.
+RECIPE_SEED_FILES = ("recipes.sqlite3", "manifest.json")
 APIS = ("run.googleapis.com", "cloudbuild.googleapis.com", "artifactregistry.googleapis.com",
         "secretmanager.googleapis.com", "iam.googleapis.com", "storage.googleapis.com")
 
@@ -103,8 +106,19 @@ def environment(config: dict) -> dict[str, str]:
     )
 
 
+def recipe_pin() -> str:
+    """The SHA-256 of the pinned recipe package. It names the folder the database is kept in."""
+    try:
+        pinned = json.loads((ROOT / "recipe-package.json").read_text(encoding="utf-8"))["sha256"]
+    except (OSError, KeyError, ValueError):
+        pinned = None
+    if not isinstance(pinned, str) or not re.fullmatch(r"[a-f0-9]{64}", pinned):
+        raise RuntimeError("recipe-package.json is missing or has no valid sha256")
+    return pinned
+
+
 def check_recipe_seed() -> None:
-    """The Cloud Run image carries the recipe database. Stop before the upload instead of deep inside the Docker build."""
+    """The Cloud Run image carries the recipe database. Stop before uploading it instead of deep inside the Docker build."""
     seed = ROOT / "recipe_data" / "image-seed"
     try:
         pinned = json.loads((ROOT / "recipe-package.json").read_text(encoding="utf-8"))["sha256"]
@@ -131,7 +145,7 @@ class Deployment:
                                 cwd=ROOT, text=True, capture_output=capture or missing_ok)
         if result.returncode:
             error = result.stderr or ""
-            if missing_ok and ("NOT_FOUND" in error or "does not exist" in error or "not found" in error):
+            if missing_ok and any(text in error for text in ("NOT_FOUND", "does not exist", "not found", "matched no objects", "No URLs matched")):
                 return None
             # None of the arguments contains a secret value.
             if error:
@@ -259,12 +273,34 @@ class Deployment:
         save_private(self.folder / "versions.json", json.dumps(versions))
         print("Stored the test password as a new secret version without printing it. Run deploy, verify and publish.")
 
-    def build(self) -> None:
+    def recipe_seed_location(self) -> str:
+        return f"gs://{self.build_bucket}/recipe-seed/{recipe_pin()}"
+
+    def recipe_seed_uploaded(self, location: str) -> bool:
+        try:
+            listing = self.gcloud("storage", "ls", f"{location}/*", capture=True, missing_ok=True)
+        except RuntimeError:
+            return False  # Cannot tell. Uploading again reports the real problem if there is one.
+        return listing is not None and all(f"{location}/{name}" in listing.split() for name in RECIPE_SEED_FILES)
+
+    def ensure_recipe_seed(self) -> str:
+        """Keep the recipe database in the build bucket so each build uploads only the small source. Returns its gs:// folder."""
+        location = self.recipe_seed_location()
+        if self.recipe_seed_uploaded(location):
+            print(f"Recipe data is already in {location}. Not uploading it again.", flush=True)
+            return location
         check_recipe_seed()
+        print(f"Uploading the recipe data to {location} (once per recipe version)", flush=True)
+        for name in RECIPE_SEED_FILES:
+            self.gcloud("storage", "cp", str(ROOT / "recipe_data" / "image-seed" / name), f"{location}/{name}")
+        return location
+
+    def build(self) -> None:
+        seed = self.ensure_recipe_seed()
         tag = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         image = f"{self.region}-docker.pkg.dev/{self.project}/{self.config['repository']}/{self.service}:{tag}"
         self.gcloud("builds", "submit", str(ROOT), f"--config={ROOT / 'deploy/cloudbuild.cloudrun.yaml'}",
-                    f"--ignore-file={ROOT / '.gcloudignore'}", f"--substitutions=_IMAGE={image}",
+                    f"--ignore-file={ROOT / '.gcloudignore'}", f"--substitutions=_IMAGE={image},_RECIPE_SEED={seed}",
                     f"--region={self.region}", "--machine-type=e2-standard-2",
                     f"--gcs-source-staging-dir=gs://{self.build_bucket}/source",
                     f"--service-account=projects/{self.project}/serviceAccounts/{self.account('build')}")

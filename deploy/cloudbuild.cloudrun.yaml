@@ -3,6 +3,11 @@ steps:
   - name: gcr.io/cloud-builders/docker
     entrypoint: bash
     args: [-c, "printf '\\n!recipe_data\\n!recipe_data/image-seed\\n!recipe_data/image-seed/**\\n' >> .dockerignore"]
+  # The database is not part of the uploaded source. cloudrun.py build keeps one copy per recipe version in the build bucket.
+  # The Docker build still checks its SHA-256 against recipe-package.json, so a wrong or damaged copy fails the build.
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args: [-c, "mkdir -p recipe_data/image-seed && gcloud storage cp '${_RECIPE_SEED}/*' recipe_data/image-seed/"]
   - name: gcr.io/cloud-builders/docker
     env: ['DOCKER_BUILDKIT=1']  # builds only the stages the target needs (the development-only recipe stage is skipped)
     args: [build, --target, cloudrun, --tag, '${_IMAGE}', .]

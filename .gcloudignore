@@ -17,12 +17,8 @@
 !/scripts/**
 !/deploy/
 !/deploy/**
-# 레시피 DB(준비된 것만): Cloud Run 이미지에 들어간다. 다른 sqlite와 ZIP은 올리지 않는다.
+# 레시피 DB(recipe_data/)는 올리지 않는다. cloudrun.py build가 빌드 버킷에 버전별로 한 번만 올리고, Cloud Build가 거기서 받는다.
 !/recipe-package.json
-!/recipe_data/
-!/recipe_data/image-seed/
-!/recipe_data/image-seed/recipes.sqlite3
-!/recipe_data/image-seed/manifest.json
 
 .git/
 .venv/

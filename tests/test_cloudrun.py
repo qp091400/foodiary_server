@@ -257,10 +257,22 @@ def prepare_seed(root, *, pinned="a" * 64, actual="a" * 64, size=5):
     (seed / "manifest.json").write_text(json.dumps({"sha256": actual, "database_bytes": size}))
 
 
+def not_in_the_bucket_yet(calls):
+    """gcloud stand-in: the bucket has no recipe data, and nothing else may be run."""
+    def gcloud(*args, **kwargs):
+        calls.append(args[:2])
+        if args[:2] == ("storage", "ls"):
+            return None
+        pytest.fail("Nothing may be uploaded or built without valid recipe data")
+    return gcloud
+
+
 def test_build_needs_the_prepared_recipe_data_and_stops_before_uploading_anything(tmp_path, monkeypatch):
     monkeypatch.setattr(cloudrun, "ROOT", tmp_path)
+    (tmp_path / "recipe-package.json").write_text(json.dumps({"sha256": "a" * 64}))
     deployment = cloudrun.Deployment(config(), tmp_path)
-    monkeypatch.setattr(deployment, "gcloud", lambda *a, **kw: pytest.fail("Nothing may be uploaded without recipe data"))
+    calls = []
+    monkeypatch.setattr(deployment, "gcloud", not_in_the_bucket_yet(calls))
     with pytest.raises(RuntimeError, match="prepare_recipes"):  # nothing prepared
         deployment.build()
     for name, kwargs in (("old-version", dict(actual="b" * 64)), ("truncated", dict(size=99))):
@@ -270,6 +282,7 @@ def test_build_needs_the_prepared_recipe_data_and_stops_before_uploading_anythin
         monkeypatch.setattr(cloudrun, "ROOT", folder)
         with pytest.raises(RuntimeError, match="prepare_recipes"):
             deployment.build()
+    assert set(calls) == {("storage", "ls")}  # 버킷에 있는지만 물어봤다
 
 
 def test_build_continues_when_the_recipe_data_matches_the_pin(tmp_path, monkeypatch):
@@ -284,7 +297,7 @@ def test_build_continues_when_the_recipe_data_matches_the_pin(tmp_path, monkeypa
 
     monkeypatch.setattr(deployment, "gcloud", gcloud)
     deployment.build()
-    assert calls == [("builds", "submit"), ("artifacts", "docker")]
+    assert calls == [("storage", "ls"), ("storage", "cp"), ("storage", "cp"), ("builds", "submit"), ("artifacts", "docker")]
 
 
 def test_cloud_run_image_ships_the_recipe_database_without_opening_local_builds_to_it():
@@ -293,10 +306,12 @@ def test_cloud_run_image_ships_the_recipe_database_without_opening_local_builds_
     cloudrun_stage = dockerfile[dockerfile.index("FROM production AS cloudrun\n"):].split("\nFROM ")[0]
     assert "COPY --from=cloudrun-recipes" in cloudrun_stage and "RECIPE_DATA_DIR=/opt/recipe-data" in cloudrun_stage
     ignore = (root / ".gcloudignore").read_text(encoding="utf-8").splitlines()
-    assert {"!/recipe_data/image-seed/recipes.sqlite3", "!/recipe_data/image-seed/manifest.json", "!/recipe-package.json"} <= set(ignore)
-    assert not [line for line in ignore if line.startswith("!") and ("zip" in line or "foodiary_data" in line)]
+    assert "!/recipe-package.json" in ignore  # 해시 검사에 필요한 핀은 소스와 함께 간다
+    assert not [line for line in ignore if line.startswith("!") and ("recipe_data" in line or "zip" in line or "foodiary_data" in line)]  # DB는 소스와 함께 올리지 않는다
     build = (root / "deploy/cloudbuild.cloudrun.yaml").read_text(encoding="utf-8")
     assert "!recipe_data/image-seed" in build and "DOCKER_BUILDKIT=1" in build
+    # 버킷에서 DB를 받는 단계는 Docker 빌드보다 앞에 있다
+    assert 0 < build.index("${_RECIPE_SEED}/*") < build.index("--target, cloudrun")
     assert "recipe_data" in (root / ".dockerignore").read_text(encoding="utf-8")  # 개발 빌드 컨텍스트에는 계속 들어가지 않는다
 
 
@@ -384,3 +399,133 @@ def test_release_is_a_cli_command(tmp_path, monkeypatch):
     monkeypatch.setattr(cloudrun.sys, "argv", ["cloudrun", "--config", str(config_path), "release"])
     cloudrun.main()
     assert ran == ["foodiary"]
+
+
+def bucket_listing(location, names=cloudrun.RECIPE_SEED_FILES):
+    return "\n".join(f"{location}/{name}" for name in names)
+
+
+def test_recipe_data_already_in_the_bucket_is_not_uploaded_again_and_needs_no_local_copy(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cloudrun, "ROOT", tmp_path)  # 이 폴더에는 recipe_data가 없다
+    (tmp_path / "recipe-package.json").write_text(json.dumps({"sha256": "a" * 64}))
+    deployment = cloudrun.Deployment(config(), tmp_path)
+    location = "gs://example-project-foodiary-builds/recipe-seed/" + "a" * 64
+    assert deployment.recipe_seed_location() == location
+    calls = []
+
+    def gcloud(*args, **kwargs):
+        calls.append(args)
+        return bucket_listing(location) if args[:2] == ("storage", "ls") else pytest.fail("Nothing may be uploaded")
+
+    monkeypatch.setattr(deployment, "gcloud", gcloud)
+    assert deployment.ensure_recipe_seed() == location
+    assert calls == [("storage", "ls", f"{location}/*")]
+    assert "not uploading it again" in capsys.readouterr().out.lower()
+
+
+def test_missing_recipe_data_is_uploaded_database_first_and_manifest_last(tmp_path, monkeypatch):
+    prepare_seed(tmp_path)
+    monkeypatch.setattr(cloudrun, "ROOT", tmp_path)
+    deployment = cloudrun.Deployment(config(), tmp_path)
+    location = deployment.recipe_seed_location()
+    calls = []
+
+    def gcloud(*args, **kwargs):
+        calls.append(args)
+        return None if args[:2] == ("storage", "ls") else ""
+
+    monkeypatch.setattr(deployment, "gcloud", gcloud)
+    assert deployment.ensure_recipe_seed() == location
+    seed = tmp_path / "recipe_data" / "image-seed"
+    assert calls[1:] == [("storage", "cp", str(seed / "recipes.sqlite3"), f"{location}/recipes.sqlite3"),
+                         ("storage", "cp", str(seed / "manifest.json"), f"{location}/manifest.json")]
+
+
+def test_an_interrupted_upload_is_redone(tmp_path, monkeypatch):
+    prepare_seed(tmp_path)
+    monkeypatch.setattr(cloudrun, "ROOT", tmp_path)
+    deployment = cloudrun.Deployment(config(), tmp_path)
+    location = deployment.recipe_seed_location()
+    calls = []
+
+    def gcloud(*args, **kwargs):
+        calls.append(args[:2])
+        return bucket_listing(location, ("recipes.sqlite3",)) if args[:2] == ("storage", "ls") else ""  # manifest.json이 없다
+
+    monkeypatch.setattr(deployment, "gcloud", gcloud)
+    deployment.ensure_recipe_seed()
+    assert calls.count(("storage", "cp")) == 2
+
+
+def test_a_failed_bucket_check_falls_back_to_uploading(tmp_path, monkeypatch):
+    prepare_seed(tmp_path)
+    monkeypatch.setattr(cloudrun, "ROOT", tmp_path)
+    deployment = cloudrun.Deployment(config(), tmp_path)
+    calls = []
+
+    def gcloud(*args, **kwargs):
+        calls.append(args[:2])
+        if args[:2] == ("storage", "ls"):
+            raise RuntimeError("gcloud storage ls failed")
+        return ""
+
+    monkeypatch.setattr(deployment, "gcloud", gcloud)
+    deployment.ensure_recipe_seed()
+    assert calls == [("storage", "ls"), ("storage", "cp"), ("storage", "cp")]
+
+
+def test_a_new_recipe_version_gets_its_own_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr(cloudrun, "ROOT", tmp_path)
+    deployment = cloudrun.Deployment(config(), tmp_path)
+    folders = []
+    for pin in ("a" * 64, "b" * 64):
+        (tmp_path / "recipe-package.json").write_text(json.dumps({"sha256": pin}))
+        folders.append(deployment.recipe_seed_location())
+    assert folders[0] != folders[1] and folders[1].endswith("/recipe-seed/" + "b" * 64)
+
+
+@pytest.mark.parametrize("pin", [None, "", "short", "../../x", "A" * 64])
+def test_the_recipe_pin_must_be_a_plain_hash(tmp_path, monkeypatch, pin):
+    monkeypatch.setattr(cloudrun, "ROOT", tmp_path)
+    (tmp_path / "recipe-package.json").write_text(json.dumps({} if pin is None else {"sha256": pin}))
+    with pytest.raises(RuntimeError, match="recipe-package.json"):
+        cloudrun.Deployment(config(), tmp_path).recipe_seed_location()
+    monkeypatch.setattr(cloudrun, "ROOT", tmp_path / "nowhere")
+    with pytest.raises(RuntimeError, match="recipe-package.json"):
+        cloudrun.Deployment(config(), tmp_path).recipe_seed_location()
+
+
+def test_build_hands_the_bucket_folder_to_cloud_build_and_uploads_no_recipe_data_with_the_source(tmp_path, monkeypatch):
+    prepare_seed(tmp_path)
+    monkeypatch.setattr(cloudrun, "ROOT", tmp_path)
+    deployment = cloudrun.Deployment(config(), tmp_path)
+    location = deployment.recipe_seed_location()
+    submitted = []
+
+    def gcloud(*args, **kwargs):
+        if args[:2] == ("builds", "submit"):
+            submitted.append(args)
+        if args[:2] == ("storage", "ls"):
+            return bucket_listing(location)  # 이미 올라가 있다
+        return "sha256:" + "c" * 64 if args[0] == "artifacts" else ""
+
+    monkeypatch.setattr(deployment, "gcloud", gcloud)
+    deployment.build()
+    (arguments,) = submitted
+    substitutions = next(a for a in arguments if a.startswith("--substitutions="))
+    assert f"_RECIPE_SEED={location}" in substitutions and "_IMAGE=" in substitutions
+    assert "," not in location  # 치환 값은 쉼표로 이어 붙이므로 쉼표가 들어가면 안 된다
+
+
+def test_gcloud_treats_no_matching_objects_as_missing_without_noise(tmp_path, monkeypatch, capsys):
+    deployment = cloudrun.Deployment(config(), tmp_path)
+    monkeypatch.setattr(cloudrun.shutil, "which", lambda name: "/usr/bin/gcloud")
+
+    def run(command, **kwargs):
+        return cloudrun.subprocess.CompletedProcess(command, 1, "", "ERROR: (gcloud.storage.ls) One or more URLs matched no objects.\n")
+
+    monkeypatch.setattr(cloudrun.subprocess, "run", run)
+    assert deployment.gcloud("storage", "ls", "gs://bucket/x/*", capture=True, missing_ok=True) is None
+    assert capsys.readouterr().err == ""
+    with pytest.raises(RuntimeError):  # missing_ok가 아니면 여전히 실패다
+        deployment.gcloud("storage", "ls", "gs://bucket/x/*", capture=True)
