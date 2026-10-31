@@ -328,12 +328,25 @@ class Deployment:
             self.gcloud("storage", "cp", str(ROOT / "recipe_data" / "image-seed" / name), f"{location}/{name}")
         return location
 
+    def ensure_recommendation_seed(self) -> str:
+        """Stage the data-repository Release once per pinned model package."""
+        if not (ROOT / 'recommendation-package.json').exists():return ''
+        from scripts.prepare_recommendation_model import config,prepare,FILES
+        pin=config(ROOT)
+        location=f"gs://{self.build_bucket}/recommendation-seed/{pin['sha256']}"
+        listing=self.gcloud('storage','ls',f'{location}/*',capture=True,missing_ok=True)
+        if listing is not None and all(f'{location}/{name}' in listing.split() for name in FILES):return location
+        seed=prepare(ROOT)
+        for name in FILES:self.gcloud('storage','cp',str(seed/name),f'{location}/{name}')
+        return location
+
     def build(self) -> None:
         seed = self.ensure_recipe_seed()
+        recommendation_seed = self.ensure_recommendation_seed()
         tag = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         image = f"{self.region}-docker.pkg.dev/{self.project}/{self.config['repository']}/{self.service}:{tag}"
         self.gcloud("builds", "submit", str(ROOT), f"--config={ROOT / 'deploy/cloudbuild.cloudrun.yaml'}",
-                    f"--ignore-file={ROOT / '.gcloudignore'}", f"--substitutions=_IMAGE={image},_RECIPE_SEED={seed}",
+                    f"--ignore-file={ROOT / '.gcloudignore'}", f"--substitutions=_IMAGE={image},_RECIPE_SEED={seed},_RECOMMENDATION_SEED={recommendation_seed}",
                     f"--region={self.region}", "--machine-type=e2-standard-2",
                     f"--gcs-source-staging-dir=gs://{self.build_bucket}/source",
                     f"--service-account=projects/{self.project}/serviceAccounts/{self.account('build')}")

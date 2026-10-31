@@ -59,12 +59,21 @@ COPY scripts/install_recipe_package.py scripts/verify_recipe_seed.py ./scripts/
 COPY recipe_data/image-seed/ /opt/recipe-seed/
 RUN python -m scripts.verify_recipe_seed /opt/recipe-seed
 
+FROM python:3.11-slim-bookworm AS cloudrun-recommendations
+WORKDIR /check
+COPY recommendation-model.json recommendation-package.json recipe-package.json ./
+COPY scripts/prepare_recommendation_model.py scripts/install_recipe_package.py ./scripts/
+COPY recipe_data/recommendation-seed/ /opt/recommendation-model/
+RUN python -m scripts.prepare_recommendation_model --verify /opt/recommendation-model
+
 FROM production AS cloudrun
 COPY --from=cloudrun-models --chown=0:0 /tmp/verified-models /opt/foodiary-models
 COPY --from=cloudrun-recipes --chown=0:0 /opt/recipe-seed/ /opt/recipe-data/
+COPY --from=cloudrun-recommendations --chown=0:0 /opt/recommendation-model/ /opt/recommendation-model/
 ENV OCR_MODELS_DIR=/opt/foodiary-models \
     PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True \
-    RECIPE_DATA_DIR=/opt/recipe-data
+    RECIPE_DATA_DIR=/opt/recipe-data \
+    RECOMMENDATION_MODEL_DIR=/opt/recommendation-model
 CMD ["python", "/app/scripts/cloudrun_entrypoint.py"]
 
 FROM runtime AS development

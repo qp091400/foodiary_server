@@ -9,7 +9,7 @@ steps:
   # .dockerignore keeps the 800+ MB recipe database out of local builds. The Cloud Run image needs exactly that one folder.
   - name: gcr.io/cloud-builders/docker
     entrypoint: bash
-    args: [-c, "printf '\\n!recipe_data\\n!recipe_data/image-seed\\n!recipe_data/image-seed/**\\n' >> .dockerignore"]
+    args: [-c, "printf '\\n!recipe_data\\n!recipe_data/image-seed\\n!recipe_data/image-seed/**\\n!recipe_data/recommendation-seed\\n!recipe_data/recommendation-seed/**\\n' >> .dockerignore"]
   # The database is not in the repository. cloudrun.py build keeps one copy per recipe version in the build bucket.
   # The Docker build still checks its SHA-256 against recipe-package.json, so a wrong or damaged copy fails the build.
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
@@ -22,6 +22,15 @@ steps:
         test -n "$$SHA" || { echo "recipe-package.json에서 sha256을 찾지 못했습니다"; exit 1; }
         mkdir -p recipe_data/image-seed
         gcloud storage cp "gs://${PROJECT_ID}-${_SERVICE}-builds/recipe-seed/$$SHA/*" recipe_data/image-seed/
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        SHA=$$(grep -o '"sha256": *"[a-f0-9]\{64\}"' recommendation-package.json | grep -o '[a-f0-9]\{64\}')
+        mkdir -p recipe_data/recommendation-seed
+        gcloud storage cp "gs://${PROJECT_ID}-${_SERVICE}-builds/recommendation-seed/$$SHA/*" recipe_data/recommendation-seed/
   - name: gcr.io/cloud-builders/docker
     env: ['DOCKER_BUILDKIT=1']  # builds only the stages the target needs (the development-only recipe stage is skipped)
     args:

@@ -674,8 +674,12 @@ def test_trigger_build_tags_the_image_with_the_commit_and_latest_and_deploys_not
 def test_trigger_build_downloads_the_recipe_database_before_docker_builds_it():
     build, text = trigger_build()
     names = [step["name"].rsplit("/", 1)[-1] for step in build["steps"]]
-    assert names == ["docker", "cloud-sdk:slim", "docker"]
+    assert names == ["docker", "cloud-sdk:slim", "cloud-sdk:slim", "docker"]
     script = build["steps"][1]["args"][-1]
+    recommendation_script = build["steps"][2]["args"][-1]
+    assert 'recommendation-package.json' in recommendation_script
+    assert 'recommendation-seed/$$SHA/*' in recommendation_script
+    assert '$SHA' not in recommendation_script.replace('$$SHA', '')
     assert "gs://${PROJECT_ID}-${_SERVICE}-builds/recipe-seed/$$SHA/*" in script  # 빌드 버킷의 레시피 DB. $$는 셸 변수라는 표시다
     assert "recipe_data/image-seed" in script
     assert "$SHA" not in script.replace("$$SHA", "")  # 이스케이프하지 않은 셸 변수가 없다 (Cloud Build가 빈 값으로 바꿔 버린다)

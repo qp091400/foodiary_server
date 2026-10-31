@@ -18,6 +18,8 @@
 !/deploy/**
 # 레시피 DB(recipe_data/)는 올리지 않는다. cloudrun.py build가 빌드 버킷에 버전별로 한 번만 올리고, Cloud Build가 거기서 받는다.
 !/recipe-package.json
+!/recommendation-package.json
+!/recommendation-model.json
 
 .git/
 .venv/
