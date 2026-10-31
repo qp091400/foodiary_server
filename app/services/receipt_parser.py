@@ -6,7 +6,7 @@
 import math
 import re
 import statistics
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 
 from app.services.name_fix import fix_name
@@ -24,6 +24,29 @@ class ParsedItem:
     barcode: str | None = None
     confidence: float = 0.0
     name_cut: bool = False  # 화면에서 이름이 잘려 있다(주문내역 화면)
+
+
+def merge_same_name(items: list[ParsedItem]) -> list[ParsedItem]:
+    """한 장 안에서 이름이 완전히 같은 줄을 하나로 합친다 (홍합살 1개 + 홍합살 1개 → 홍합살 2개).
+
+    수량·금액·할인은 더하고, 합친 줄은 처음 나온 줄의 번호와 자리를 쓴다. 금액 합계가 그대로라 총액 검사에는 영향이 없다.
+    다른 영수증이나 이미 냉장고에 있는 품목과는 합치지 않는다 (영수증마다 따로 부른다).
+    """
+    merged: dict[str, ParsedItem] = {}
+    for item in items:
+        first = merged.get(item.name)
+        if first is None:
+            merged[item.name] = replace(item)
+            continue
+        if first.unit_price != item.unit_price:
+            first.unit_price = None  # 단가가 다르면 한 단가로 말할 수 없다
+        first.quantity += item.quantity
+        first.amount += item.amount
+        first.discount += item.discount
+        first.barcode = first.barcode or item.barcode
+        first.confidence = min(first.confidence, item.confidence)
+        first.name_cut = first.name_cut or item.name_cut
+    return list(merged.values())
 
 
 @dataclass

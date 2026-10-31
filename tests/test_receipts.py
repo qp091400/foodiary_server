@@ -533,3 +533,33 @@ def test_real_barcode_decoding():
     receipt.paste(barcode, (60, 340))
     assert barcode_service.decode_receipt_barcode(receipt) == "2026101000120034"
     assert barcode_service.decode_receipt_barcode(Image.new("RGB", (300, 300), "white")) is None
+
+
+def test_same_name_lines_on_one_receipt_become_one_draft_item(client, fridge):
+    rows = [
+        ["이마트 성수점"],
+        ["2026-10-10 14:22"],
+        ["상품명", "단가", "수량", "금액"],
+        ["홍합살", "3,000", "1", "3,000"],
+        ["풀무원 두부", "1,500", "1", "1,500"],
+        ["홍합살", "3,000", "1", "3,000"],
+        ["합계", "7,500"],
+    ]
+    use_ocr(rows)
+    first = upload(client, fridge).json()
+    assert [(item["name"], item["quantity"], item["amount"]) for item in first["draft_items"]] == [
+        ("홍합살", 2.0, 6000), ("풀무원 두부", 1.0, 1500),
+    ]
+    assert first["items_sum"] == 7500 and first["warnings"] == []
+    confirmed = client.post(
+        f"/fridges/{fridge['id']}/receipts/{first['id']}/confirm", headers=fridge["headers"],
+        json={"items": [{**item, "include": True} for item in first["draft_items"]]},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+
+    # 다음 영수증의 홍합살은 이미 냉장고에 있는 홍합살과 합치지 않는다
+    use_ocr([["이마트 성수점"], ["2026-10-11 10:00"], ["상품명", "단가", "수량", "금액"], ["홍합살", "3,000", "1", "3,000"], ["합계", "3,000"]])
+    second = upload(client, fridge, data=image_bytes(size=(610, 900))).json()
+    assert [(item["name"], item["quantity"]) for item in second["draft_items"]] == [("홍합살", 1.0)]
+    items = client.get(f"/fridges/{fridge['id']}/items", headers=fridge["headers"]).json()
+    assert sorted((item["name"], item["quantity"]) for item in items) == [("풀무원 두부", 1.0), ("홍합살", 2.0)]

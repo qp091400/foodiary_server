@@ -8,7 +8,9 @@ import pytest
 from app.services.expiry import classify
 from app.services.ocr.base import OcrBox
 from app.services.receipt_parser import (
+    ParsedItem,
     estimate_skew,
+    merge_same_name,
     find_purchase_date,
     find_store_name,
     find_total,
@@ -481,3 +483,31 @@ def test_store_name_fallback():
     assert parse_receipt([]).items == []
     # 주문번호 줄은 매장명이 아니고, "가게/사업자번호/대표자" 줄에서는 가게 이름만 쓴다
     assert parse_receipt(make_boxes([["[주문번호]0011"], ["행복식당/1234567890/홍길동"]])).store_name == "행복식당"
+
+
+def test_merge_same_name_adds_up_identical_lines_only():
+    lines = [
+        ParsedItem(line_no=1, name="홍합살", quantity=1, unit_price=3000, amount=3000, confidence=0.9),
+        ParsedItem(line_no=2, name="서울우유 1L", quantity=1, unit_price=2980, amount=2980),
+        ParsedItem(line_no=3, name="홍합살", quantity=1, unit_price=3000, amount=3000, discount=500, confidence=0.8),
+        ParsedItem(line_no=4, name="홍합살 200g", quantity=1, unit_price=4000, amount=4000),
+    ]
+    merged = merge_same_name(lines)
+    # 이름이 완전히 같은 줄만 합치고, 처음 나온 줄의 번호와 자리를 쓴다
+    assert [(item.line_no, item.name, item.quantity) for item in merged] == [
+        (1, "홍합살", 2), (2, "서울우유 1L", 1), (4, "홍합살 200g", 1),
+    ]
+    mussel = merged[0]
+    assert (mussel.amount, mussel.discount, mussel.unit_price, mussel.confidence) == (6000, 500, 3000, 0.8)
+    # 금액 합계는 그대로라 총액 검사에 영향이 없다
+    assert sum(i.amount - i.discount for i in merged) == sum(i.amount - i.discount for i in lines)
+    # 원래 줄은 바뀌지 않는다
+    assert (lines[0].quantity, lines[0].amount) == (1, 3000)
+
+
+def test_merge_same_name_drops_unit_price_when_lines_differ():
+    merged = merge_same_name([
+        ParsedItem(line_no=1, name="두부", quantity=1, unit_price=1500, amount=1500),
+        ParsedItem(line_no=2, name="두부", quantity=1, unit_price=1200, amount=1200),
+    ])
+    assert [(i.quantity, i.amount, i.unit_price) for i in merged] == [(2, 2700, None)]

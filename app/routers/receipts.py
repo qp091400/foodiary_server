@@ -44,7 +44,7 @@ from app.services.foodsafety import ProductInfo, lookup_barcode
 from app.services.ocr import OcrEngine, get_ocr_engine
 from app.services.ocr.base import OcrBox, OcrBusyError, next_ticket
 from app.services.ocr.paddle import Verdict
-from app.services.receipt_parser import ParsedReceipt, parse_receipt
+from app.services.receipt_parser import ParsedReceipt, merge_same_name, parse_receipt
 from app.timeutil import today, utcnow
 
 logger = logging.getLogger(__name__)
@@ -118,7 +118,7 @@ def _remove_file(relative_path: str | None) -> None:
 def build_draft(db: Session, parsed: ParsedReceipt, purchased_on: date) -> list[dict]:
     lookup = _ProductLookup(db)
     draft = []
-    for item in parsed.items:
+    for item in merge_same_name(parsed.items):
         product = lookup.get(item.barcode)
         guess = estimate(item.name, purchased_on, product)
         # 쇼핑몰 주문에는 옷·생활용품이 많이 섞여 있다. 식품으로 알아본 것만 넣고 모르는 것은 제외로 둔다(사용자가 켠다).
