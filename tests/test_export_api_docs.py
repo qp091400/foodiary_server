@@ -23,6 +23,7 @@ def test_every_route_of_the_app_is_in_the_page_and_the_json(tmp_path):
     for needed in ("/notifications/summary", "/notifications/expiring", "/share-links/{token}/join", "/fridges/{fridge_id}/share-link/qr", "/recipes/{recipe_id}/reviews/mine"):
         assert any(path.startswith(needed) for _, path in operations), needed
     assert "공유 링크 QR 이미지" in page and "로그인 필요" in page
+    assert not any(path.startswith(("/friends", "/change-requests", "/shared-fridges")) for _, path in operations)  # 친구 기능은 없어졌다
 
 
 def test_the_page_opens_by_itself_without_any_outside_file(tmp_path):

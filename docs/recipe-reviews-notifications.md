@@ -50,7 +50,7 @@
 
 - `0006`: 새 표 `recipe_reviews`, `users`에 `comments_seen_id` 칸 추가. **이미 달린 댓글은 읽은 것으로 시작한다**(마이그레이션이 현재 가장 큰 댓글 번호를 넣어 준다). 그래서 배포 직후 옛 댓글이 한꺼번에 새 알림으로 뜨지 않는다.
 - `AUTO_CREATE_TABLES`는 이미 있는 `users` 표에 칸을 더하지 못한다. 로컬 개발 DB는 `alembic stamp 0001` 다음 `alembic upgrade head`(자세한 것은 [community.md](community.md)의 "배포할 때").
-- `0007`: `change_requests`에 `result_seen_at` 칸을 더한다. **이미 처리된 요청은 확인한 것으로 시작한다**(승인·거절된 요청의 `handled_at`을 넣어 준다). `0008`에서 변경 요청 기능과 함께 표가 지워졌다.
+- `0007`: `change_requests`에 `result_seen_at` 칸을 더한다. **이미 처리된 요청은 확인한 것으로 시작한다**(승인·거절된 요청의 `handled_at`을 넣어 준다). `0009`에서 변경 요청 기능과 함께 표가 지워졌다.
 - 되돌리기: `alembic downgrade 0006`은 `result_seen_at`만, `0005`까지 내리면 후기 표와 댓글 읽음 칸도 지운다.
 
 검증: `tests/test_recipe_reviews.py`, `tests/test_notifications.py`.

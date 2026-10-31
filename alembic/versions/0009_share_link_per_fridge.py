@@ -1,7 +1,7 @@
 """one fixed share link per fridge; friends, view-only access, change requests and invite codes are gone
 
-Revision ID: 0008
-Revises: 0007
+Revision ID: 0009
+Revises: 0008
 Create Date: 2026-10-31 18:00:00
 """
 import secrets
@@ -11,8 +11,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = '0008'
-down_revision: Union[str, None] = '0007'
+revision: str = '0009'
+down_revision: Union[str, None] = '0008'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -37,7 +37,7 @@ def upgrade() -> None:
     with op.batch_alter_table('users') as batch:
         batch.drop_constraint(op.f('uq_users_friend_code'), type_='unique')
         batch.drop_column('friend_code')
-    # '친구에게' 공개는 없어졌다. 더 넓게 열리지 않도록 '나만'으로 바꾼다.
+    # '친구에게' 공개는 없어졌다. 더 넓게 열리지 않도록 '나만'으로 바꾼다. (0008이 이미 했다면 바뀌는 행이 없다)
     op.execute("UPDATE fridges SET visibility = 'private' WHERE visibility = 'friends'")
     with op.batch_alter_table('fridges') as batch:
         batch.add_column(sa.Column('share_token', sa.String(length=32), nullable=True))

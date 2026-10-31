@@ -104,10 +104,10 @@ python -m scripts.set_admin 이메일 --remove   # 빼기
 
 ## 배포할 때
 
-- **`0008`이 친구 기능을 지운다.** 표 `friendships`, `fridge_viewers`(보기 권한), `change_requests`(변경 요청), `fridge_share_links`(예전 링크), `fridge_invites`(초대코드)와 `users.friend_code`를 지우고, `fridges`에 `share_token`을 더한다. `friends`로 공개했던 냉장고는 `private`이 된다. **링크나 초대코드로 들어와 고칠 수 있던 멤버(`fridge_members`)는 그대로 남는다.** 보기만 하던 사람은 권한을 잃고, 예전 링크와 초대코드로는 더 들어올 수 없다(새 링크를 보내야 한다). 지운 데이터는 `downgrade`로 돌아오지 않는다(빈 표만 다시 생긴다).
+- **`0009`가 친구 기능을 지운다**(그 앞의 `0008`은 `friends` 공개 범위를 `private`으로만 바꾼다). 표 `friendships`, `fridge_viewers`(보기 권한), `change_requests`(변경 요청), `fridge_share_links`(예전 링크), `fridge_invites`(초대코드)와 `users.friend_code`를 지우고, `fridges`에 `share_token`을 더한다. `friends`로 공개했던 냉장고는 `private`이 된다. **링크나 초대코드로 들어와 고칠 수 있던 멤버(`fridge_members`)는 그대로 남는다.** 보기만 하던 사람은 권한을 잃고, 예전 링크와 초대코드로는 더 들어올 수 없다(새 링크를 보내야 한다). 지운 데이터는 `downgrade`로 돌아오지 않는다(빈 표만 다시 생긴다).
 - 친구·변경 요청·초대코드 경로(`/friends`, `/change-requests`, `/fridges/{id}/invites`, `/fridges/join`, `/fridges/{id}/share-links`, `/fridges/{id}/access`, `/notifications/change-results`)와 응답의 `friend_code`, `is_friend`, `can_request_changes`, 알림 숫자 `pending_change_requests`, `unread_change_results`가 없어졌다. **앱이 이것들을 쓰고 있으면 앱을 먼저 바꾼 뒤 서버를 배포한다.**
 - DB가 바뀐다: `users`에 `friend_code`(이미 가입한 사람에게는 마이그레이션이 하나씩 만들어 준다), `is_admin`, `fridges`에 `visibility`(기본 `private`), 새 표 `friendships`, `posts`(마이그레이션 `0002`), `post_likes`, `comments`, `post_photos`, `reports`(`0003`), `fridge_viewers`, `fridge_share_links`, `change_requests`(`0004`). 새 칸과 표만 더해진다. 단 `0004`는 답을 못 받은 예전 친구 요청(`friendships.status = 'pending'`)을 지운다(요청 방식을 없앴으므로). 마이그레이션은 배포 순서의 `migrate` 단계에서 `deploy`보다 먼저 돈다.
-- `0008` 뒤에 **옛 버전의 서버로 되돌리면** 지워진 표와 `friend_code`를 찾다가 가입과 공유가 실패한다. 되돌릴 일이 생기면 `alembic downgrade 0007`을 먼저 한다(빈 표와 새 친구 코드가 만들어진다). (`downgrade 0002`는 2차 표만 지운다. 올린 사진 파일은 `uploads/posts/`에 남으니 필요하면 따로 지운다.)
+- `0009` 뒤에 **옛 버전의 서버로 되돌리면** 지워진 표와 `friend_code`를 찾다가 가입과 공유가 실패한다. 되돌릴 일이 생기면 `alembic downgrade 0008`을 먼저 한다(빈 표와 새 친구 코드가 만들어진다). (`downgrade 0002`는 2차 표만 지운다. 올린 사진 파일은 `uploads/posts/`에 남으니 필요하면 따로 지운다.)
 - 로컬 개발 DB는 `AUTO_CREATE_TABLES`로 만들어져서 새 칸이 자동으로 안 생긴다. 한 번만: `alembic stamp 0001` 다음 `alembic upgrade head`.
 
 ## 아직 없는 것
