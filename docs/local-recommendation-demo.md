@@ -1,6 +1,6 @@
 # Local recommendation verification
 
-No deployment service, remote database, existing SSH tunnel on port 8000, existing Expo process on 8081, or app `.env.local` was modified. The checks use a separate HTTP API on 127.0.0.1:8001, a separate Expo web process on localhost:8082, and SQLite under `artifacts/local-recommendation-demo/demo.sqlite3`. Database migrations through 0016 were applied to that local file only. The full catalogue/model are read-only local files.
+No deployment service, remote database, existing SSH tunnel on port 8000, existing Expo process on 8081, or app `.env.local` was modified. The checks use a separate HTTP API on 127.0.0.1:8001, a separate Expo web process on localhost:8082, and SQLite under `artifacts/local-recommendation-demo/demo.sqlite3`. Database migrations through 0019 were applied to that local file only. The full catalogue/model are read-only local files.
 
 ## Start again
 From foodiary_server, using the environment with requirements.txt installed:

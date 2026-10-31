@@ -21,6 +21,17 @@ def main():
         'RECOMMENDATION_MODEL_DIR':str(ROOT/'artifacts/recommendation-full-demo'),
         'UPLOAD_DIR':str(DEMO/'uploads'),'CORS_ORIGINS':'*','TRUSTED_HOSTS':'localhost,127.0.0.1',
         'PUSH_EXPO_ENABLED':'false','LINK_PREVIEW_ENABLED':'false','RATE_LIMIT_ENABLED':'false'})
+    # Recover only this isolated demo's old 0016 event revision after main introduced 0016..0018.
+    import sqlite3
+    database=DEMO/'demo.sqlite3'
+    if database.exists():
+        with sqlite3.connect(database) as db:
+            tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            revision=db.execute('SELECT version_num FROM alembic_version').fetchone() if 'alembic_version' in tables else None
+            columns={r[1] for r in db.execute('PRAGMA table_info(users)')}
+            if revision==('0016',) and 'recipe_events' in tables and 'household_size' not in columns and 'name_corrections' not in tables:
+                with sqlite3.connect(DEMO/'before-merge-migrations.sqlite3') as backup:db.backup(backup)
+                db.execute("UPDATE alembic_version SET version_num='0015'")
     subprocess.run([sys.executable,'-m','alembic','upgrade','head'],check=True)
     from sqlalchemy import select
     from app.database import SessionLocal

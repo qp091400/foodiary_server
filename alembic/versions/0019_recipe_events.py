@@ -1,12 +1,18 @@
 """Private, idempotent recipe behavioral events."""
 from alembic import op
 import sqlalchemy as sa
-revision = '0016'
-down_revision = '0015'
+revision = '0019'
+down_revision = '0018'
 branch_labels = depends_on = None
 
 
 def upgrade():
+    inspector=sa.inspect(op.get_bind())
+    if inspector.has_table('recipe_events'):
+        required={'id','user_id','recipe_id','event_key','event_type','source','rating','selected_at'}
+        if not required.issubset({c['name'] for c in inspector.get_columns('recipe_events')}):
+            raise ValueError('Existing recipe_events schema is incompatible')
+        return  # Preserve records created by the earlier local demo or create_all.
     op.create_table('recipe_events', sa.Column('id',sa.Integer(),primary_key=True),
         sa.Column('user_id',sa.Integer(),sa.ForeignKey('users.id',ondelete='CASCADE'),nullable=False),
         sa.Column('recipe_id',sa.String(100),nullable=False),sa.Column('event_key',sa.String(100),nullable=False),

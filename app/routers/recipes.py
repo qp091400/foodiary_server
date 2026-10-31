@@ -73,7 +73,10 @@ def personalized(payload: Selection, access: FridgeAccess = Depends(get_fridge_a
     if len(foods) != len(ids):
         raise HTTPException(409,'선택한 식품이 변경됐어요. 냉장고 목록을 새로 불러와 주세요.')
     expired = [f for f in foods if f.expiry_date and f.expiry_date < today()]
-    result = recipe_store.recommendations([f for f in foods if f not in expired],seed=payload.seed,limit=300)
+    result = recipe_store.recommendations([f for f in foods if f not in expired],seed=payload.seed,limit=300,query=payload.q.strip())
+    profile=load_profile(db,access.user)
+    if payload.profile_version and payload.profile_version!=profile.version:
+        raise HTTPException(409,'후기 정보가 바뀌었어요. 추천을 새로 불러와 주세요.')
     signals = personal_signals(db,access.user.id)
     try:
         vectors = recommendation_bundle.vectors([r['id'] for r in result['recipes']] + [s['recipeId'] for s in signals],model['version'])
@@ -89,13 +92,15 @@ def personalized(payload: Selection, access: FridgeAccess = Depends(get_fridge_a
         detail = recipe_store.detail(recipe['id'])
         if detail is None:
             raise HTTPException(409,'레시피 목록이 변경됐어요. 다시 불러와 주세요.')
+        recipe.update(profile.explain(detail))
         recipe.update(fridge_features(detail,all_foods,today()))
         total,count = ratings.get(recipe['id'],(0,0))
         recipe['rating_score'] = rating_score(total,count)
         recipe['rating_average'],recipe['rating_count'] = summaries[recipe['id']].average,summaries[recipe['id']].count
     return {**result,'next_offset':None,'pool_truncated':result['next_offset'] is not None,
             'excluded_expired':[f.name for f in expired],'version':model['version'],
-            'embeddings':{'version':model['version'],'vectors':vectors},'signals':signals,'weights':weights}
+            'embeddings':{'version':model['version'],'vectors':vectors},'signals':signals,'weights':weights,
+            'profile_version':profile.version,'preference_review_count':profile.count,'query':payload.q.strip()}
 
 
 @router.get("/{recipe_id}")
