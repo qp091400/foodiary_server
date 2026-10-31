@@ -214,6 +214,8 @@ gcloud scheduler jobs delete foodiary-keepalive --location asia-northeast1
 소스 변경 후 `build → migrate → deploy → verify → publish`를 실행한다. `deploy`는 다시 IAM 비공개로 바꾸므로
 현재 공개 서비스는 점검 시간에 업데이트한다.
 
+압축본을 만들어 올리는 대신 **GitHub에 푸시하면 이미지가 자동으로 만들어지게** 할 수도 있다. 설정과 사용법은 [AUTO_BUILD.md](AUTO_BUILD.md)다(그 방식에서는 배포를 `release --image 커밋번호`로 한다).
+
 이 과정은 한 명령으로 실행할 수 있다. 새 압축본(`package_release.py`가 만든 것)을 Cloud Shell에 올린 뒤:
 
 ```sh

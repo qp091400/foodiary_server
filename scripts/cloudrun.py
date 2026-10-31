@@ -5,6 +5,7 @@ Secret values are read from private files, never passed as command arguments.
 """
 
 import argparse
+import functools
 import getpass
 import json
 import os
@@ -28,6 +29,7 @@ RELEASE_STEPS = ("build", "migrate", "deploy", "publish")
 # The recipe database lives in the build bucket, uploaded once per recipe version instead of with every build's source.
 # The database goes first: manifest.json marks the upload as complete.
 RECIPE_SEED_FILES = ("recipes.sqlite3", "manifest.json")
+IMAGE_TAG = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]{0,127}")
 APIS = ("run.googleapis.com", "cloudbuild.googleapis.com", "artifactregistry.googleapis.com",
         "secretmanager.googleapis.com", "iam.googleapis.com", "storage.googleapis.com")
 
@@ -400,21 +402,38 @@ class Deployment:
         except RuntimeError:
             return None
 
-    def release(self) -> None:
-        """Ship the current source in one go: build, migrate, deploy, verify and publish. Stops at the first failure."""
+    def use_image(self, tag: str) -> None:
+        """Deploy an image Cloud Build already made (the GitHub trigger tags it with the 7-character commit id and latest)."""
+        if not IMAGE_TAG.fullmatch(tag):
+            raise ValueError("An image tag may only contain letters, digits, dots, dashes and underscores")
+        repository = f"{self.region}-docker.pkg.dev/{self.project}/{self.config['repository']}/{self.service}"
+        digest = self.gcloud("artifacts", "docker", "images", "describe", f"{repository}:{tag}",
+                             "--format=value(image_summary.digest)", capture=True, missing_ok=True)
+        if not re.fullmatch(r"sha256:[a-f0-9]{64}", digest or ""):
+            raise RuntimeError(f"No image tagged {tag} in {repository}. Wait until the GitHub build has finished "
+                               "(Cloud Build > History) and check the commit id.")
+        save_private(self.folder / "image.txt", f"{repository}@{digest}")
+        print(f"Using {repository}:{tag} ({digest})", flush=True)
+
+    def release(self, image: str | None = None) -> None:
+        """Ship in one go: build, migrate, deploy, verify and publish. Stops at the first failure.
+
+        With image, use the image the GitHub trigger already built for that tag instead of building here."""
+        steps = RELEASE_STEPS if image is None else ("use_image", *RELEASE_STEPS[1:])
         previous = self.previous_revision()
         print("The service is private from deploy until publish finishes."
               + (f" Revision serving now: {previous}" if previous else ""), flush=True)
-        for number, step in enumerate(RELEASE_STEPS, 1):
-            print(f"\n[{number}/{len(RELEASE_STEPS)}] {step}", flush=True)
+        for number, step in enumerate(steps, 1):
+            print(f"\n[{number}/{len(steps)}] {step}", flush=True)
+            action = functools.partial(self.use_image, image) if step == "use_image" else getattr(self, step)
             try:
-                getattr(self, step)()
+                action()
             except Exception:
                 print(self.failure_hint(step, previous), file=sys.stderr)
                 raise
 
     def failure_hint(self, step: str, previous: str | None) -> str:
-        if step in ("build", "migrate"):
+        if step in ("build", "use_image", "migrate"):
             return f"Stopped at {step}. The running service was not changed. Fix the error and run release again."
         hint = (f"Stopped at {step}. The service may be private now. Fix the error, then run deploy (if it did not finish) "
                 "and publish, one at a time, so the image is not built again.")
@@ -471,7 +490,9 @@ def main() -> None:
         commands.add_parser(action)
     add_origin = commands.add_parser("add-origin", help="Allow another HTTPS frontend origin (CORS), e.g. https://foodiary.kr. Run deploy or release afterwards")
     add_origin.add_argument("origins", nargs="+", help="HTTPS origins without a path")
-    commands.add_parser("release", help="build, migrate, deploy and publish in one go (private from deploy until publish ends)")
+    release = commands.add_parser("release", help="build, migrate, deploy and publish in one go (private from deploy until publish ends)")
+    release.add_argument("--image", metavar="TAG", help="deploy the image the GitHub trigger already built for this tag "
+                                                        "(the 7-character commit id, or latest) instead of building here")
     test_password = commands.add_parser("test-password", help="Set (or --disable) the /receipt-test page password")
     test_password.add_argument("--disable", action="store_true", help="Turn the test page off at the next deploy")
     args = parser.parse_args()
@@ -486,6 +507,8 @@ def main() -> None:
         deployment = Deployment(json.loads(args.config.read_text(encoding="utf-8")), args.config.parent)
         if args.action == "plan":
             print(json.dumps(deployment.plan(), indent=2, ensure_ascii=False))
+        elif args.action == "release":
+            deployment.release(args.image)
         elif args.action == "test-password":
             deployment.set_test_password(disable=args.disable)
         else:

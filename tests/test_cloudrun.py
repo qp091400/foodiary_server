@@ -395,10 +395,10 @@ def test_release_is_a_cli_command(tmp_path, monkeypatch):
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps(config()))
     ran = []
-    monkeypatch.setattr(cloudrun.Deployment, "release", lambda self: ran.append(self.service))
+    monkeypatch.setattr(cloudrun.Deployment, "release", lambda self, image=None: ran.append((self.service, image)))
     monkeypatch.setattr(cloudrun.sys, "argv", ["cloudrun", "--config", str(config_path), "release"])
     cloudrun.main()
-    assert ran == ["foodiary"]
+    assert ran == [("foodiary", None)]
 
 
 def bucket_listing(location, names=cloudrun.RECIPE_SEED_FILES):
@@ -576,3 +576,129 @@ def test_existing_cloudrun_service_can_proxy_external_web():
     value['web_upstream'] = value['public_origin']
     with pytest.raises(ValueError, match='point back'):
         cloudrun.validate_config(value)
+
+
+# ── GitHub 트리거가 만든 이미지로 배포 ───────────────────────────────────
+
+DIGEST = "sha256:" + "d" * 64
+REPOSITORY = "asia-northeast1-docker.pkg.dev/example-project/foodiary/foodiary"
+
+
+def test_use_image_pins_the_digest_of_the_tag_the_trigger_built(tmp_path, monkeypatch):
+    deployment, _ = prepare_deployment(tmp_path)
+    calls = []
+
+    def gcloud(*args, **kwargs):
+        calls.append(args)
+        return DIGEST
+
+    monkeypatch.setattr(deployment, "gcloud", gcloud)
+    deployment.use_image("1a2b3c4")
+    assert calls == [("artifacts", "docker", "images", "describe", f"{REPOSITORY}:1a2b3c4", "--format=value(image_summary.digest)")]
+    assert (tmp_path / "image.txt").read_text() == f"{REPOSITORY}@{DIGEST}"
+    assert deployment.image() == f"{REPOSITORY}@{DIGEST}"  # deploy와 migrate가 그대로 쓸 수 있는 형식이다
+
+
+@pytest.mark.parametrize("tag", ["", " ", "a b", "../x", "a:b", "-x", "x" * 129, "a/b"])
+def test_use_image_rejects_odd_tags_before_asking_google(tmp_path, monkeypatch, tag):
+    deployment, image = prepare_deployment(tmp_path)
+    monkeypatch.setattr(deployment, "gcloud", lambda *a, **kw: pytest.fail("A bad tag must not reach gcloud"))
+    with pytest.raises(ValueError):
+        deployment.use_image(tag)
+    assert (tmp_path / "image.txt").read_text() == image
+
+
+@pytest.mark.parametrize("answer", [None, "", "not-a-digest", "sha256:abc"])
+def test_a_missing_image_keeps_the_previous_one_and_says_to_wait_for_the_build(tmp_path, monkeypatch, answer):
+    deployment, image = prepare_deployment(tmp_path)
+    monkeypatch.setattr(deployment, "gcloud", lambda *a, **kw: answer)
+    with pytest.raises(RuntimeError, match="No image tagged abc1234"):
+        deployment.use_image("abc1234")
+    assert (tmp_path / "image.txt").read_text() == image  # 못 찾았으면 이전 기록을 건드리지 않는다
+
+
+def test_release_with_an_image_skips_the_build(tmp_path, monkeypatch, capsys):
+    deployment, _ = prepare_deployment(tmp_path)
+    calls = []
+    stub_release_steps(deployment, monkeypatch, calls)
+    monkeypatch.setattr(deployment, "use_image", lambda tag: calls.append(("use_image", tag)))
+    deployment.release("1a2b3c4")
+    assert calls == [("use_image", "1a2b3c4"), "migrate", "deploy", "publish"]
+    assert "[1/4] use_image" in capsys.readouterr().out
+
+
+def test_release_without_an_image_still_builds(tmp_path, monkeypatch):
+    deployment, _ = prepare_deployment(tmp_path)
+    calls = []
+    stub_release_steps(deployment, monkeypatch, calls)
+    monkeypatch.setattr(deployment, "use_image", lambda tag: pytest.fail("No image was asked for"))
+    deployment.release()
+    assert calls == ["build", "migrate", "deploy", "publish"]
+
+
+def test_a_missing_image_stops_the_release_before_anything_changes(tmp_path, monkeypatch, capsys):
+    deployment, _ = prepare_deployment(tmp_path)
+    calls = []
+    stub_release_steps(deployment, monkeypatch, calls)
+    monkeypatch.setattr(deployment, "gcloud", lambda *a, **kw: None)
+    with pytest.raises(RuntimeError, match="No image tagged"):
+        deployment.release("0000000")
+    assert calls == []  # migrate, deploy, publish는 시작도 하지 않는다
+    err = capsys.readouterr().err
+    assert "Stopped at use_image" in err and "was not changed" in err and "update-traffic" not in err
+
+
+def test_release_image_option_reaches_the_deployment(tmp_path, monkeypatch):
+    config_path = write_config(tmp_path)
+    ran = []
+    monkeypatch.setattr(cloudrun.Deployment, "release", lambda self, image=None: ran.append(image))
+    for argv, expected in ((["release", "--image", "1a2b3c4"], "1a2b3c4"), (["release", "--image", "latest"], "latest"), (["release"], None)):
+        monkeypatch.setattr(cloudrun.sys, "argv", ["cloudrun", "--config", str(config_path), *argv])
+        cloudrun.main()
+        assert ran[-1] == expected
+
+
+# ── GitHub 트리거용 빌드 설정 ────────────────────────────────────────────
+
+
+def trigger_build():
+    yaml = pytest.importorskip("yaml")
+    root = Path(__file__).resolve().parents[1]
+    text = (root / "deploy/cloudbuild.trigger.yaml").read_text(encoding="utf-8")
+    return yaml.safe_load(text), text
+
+
+def test_trigger_build_tags_the_image_with_the_commit_and_latest_and_deploys_nothing():
+    build, _ = trigger_build()
+    assert build["images"] == [
+        "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE}:${SHORT_SHA}",
+        "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE}:latest",
+    ]
+    docker_build = build["steps"][-1]
+    assert docker_build["args"][:4] == ["build", "--target", "cloudrun", "--tag"] and docker_build["args"][-1] == "."
+    assert [arg for arg in docker_build["args"] if "docker.pkg.dev" in arg] == build["images"]
+    assert build["options"]["logging"] == "CLOUD_LOGGING_ONLY"  # 사용자 지정 서비스 계정으로 돌리는 빌드에 필요하다
+    steps_text = str(build["steps"])
+    assert "run deploy" not in steps_text and "migrate" not in steps_text  # 배포는 사람이 cloudrun.py로 한다
+    assert set(build["substitutions"]) == {"_REGION", "_REPOSITORY", "_SERVICE"}  # 트리거가 따로 넣어야 하는 값은 없다
+
+
+def test_trigger_build_downloads_the_recipe_database_before_docker_builds_it():
+    build, text = trigger_build()
+    names = [step["name"].rsplit("/", 1)[-1] for step in build["steps"]]
+    assert names == ["docker", "cloud-sdk:slim", "docker"]
+    script = build["steps"][1]["args"][-1]
+    assert "gs://${PROJECT_ID}-${_SERVICE}-builds/recipe-seed/$$SHA/*" in script  # 빌드 버킷의 레시피 DB. $$는 셸 변수라는 표시다
+    assert "recipe_data/image-seed" in script
+    assert "$SHA" not in script.replace("$$SHA", "")  # 이스케이프하지 않은 셸 변수가 없다 (Cloud Build가 빈 값으로 바꿔 버린다)
+    assert "$(" not in script.replace("$$(", "")
+
+
+def test_the_recipe_hash_is_read_from_recipe_package_json_the_way_the_build_step_reads_it():
+    import re
+
+    root = Path(__file__).resolve().parents[1]
+    _, text = trigger_build()
+    assert r"""grep -o '"sha256": *"[a-f0-9]\{64\}"' recipe-package.json""" in text
+    found = re.search(r'"sha256": *"([a-f0-9]{64})"', (root / "recipe-package.json").read_text(encoding="utf-8"))
+    assert found and found.group(1) == cloudrun.recipe_pin()  # 파일 형식이 바뀌어 빌드 단계가 못 읽게 되는 일을 막는다
