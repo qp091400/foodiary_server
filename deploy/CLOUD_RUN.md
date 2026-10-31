@@ -99,8 +99,9 @@ python3 -m scripts.prepare_recipes
 - `python3 -m scripts.start_with_recipes`는 `prepare_recipes`의 옛 이름이다.
 - 준비된 폴더는 다음 소스 업로드(`tar -xzf`) 때 그대로 남는다. 레시피 버전을 바꿀 때만(`recipe-package.json`) 다시 준비한다.
 - 이미지는 `recipe-package.json`에 적힌 해시와 맞는 DB가 아니면 빌드에서 실패한다.
-- ZIP과 DB는 Git·압축본(`package_release.py`)에 들어가지 않는다. 업로드는 `.gcloudignore`가 준비된 DB와 manifest만 통과시킨다.
-- 이미지가 800MB쯤 커져서 빌드 업로드와 첫 시작이 느려질 수 있다. Cloud Run에서의 시간은 아직 측정하지 않았다.
+- ZIP과 DB는 Git·압축본(`package_release.py`)에 들어가지 않는다. 소스 업로드(`.gcloudignore`)에도 들어가지 않는다.
+- **DB는 빌드마다 올리지 않는다.** `build`가 레시피 버전(`recipe-package.json`의 해시)마다 한 번만 빌드용 버킷 `gs://<프로젝트>-<서비스>-builds/recipe-seed/<해시>/`에 올리고, Cloud Build가 거기서 받아 이미지에 넣는다. 버킷에 이미 있으면 올리지 않고(그때는 Cloud Shell의 `recipe_data/`가 없어도 된다) 소스만 올라간다. 처음 한 번, 그리고 레시피 버전을 바꾼 뒤 첫 `build`에서만 약 830MB를 올린다. 받은 DB는 Docker 빌드가 SHA-256을 `recipe-package.json`과 다시 비교하므로 틀린 파일이나 깨진 파일이면 빌드가 실패한다.
+- 이미지가 800MB쯤 커져서 첫 시작이 느려질 수 있다. Cloud Run에서의 시간은 아직 측정하지 않았다.
 
 ## 3. 리소스 생성과 비공개 배포
 
@@ -118,7 +119,7 @@ python3 scripts/cloudrun.py verify
 
 - `setup`: 필요한 API, 전용 런타임/마이그레이션/빌드 계정, 이미지 저장소, 사진/빌드 소스 버킷, 비밀 저장소를 준비한다. 버킷에 공개 접근 차단과 균일한 버킷 권한을 적용한다.
 - `secrets`: 로컬 비밀 파일을 Secret Manager로 올린다. 비밀값을 명령 인자나 로그에 출력하지 않는다. 다시 실행하면 새 버전을 만들고 다음 배포가 사용할 버전 번호를 기록한다.
-- `build`: 전용 계정으로 Cloud Build에서 `cloudrun` 타깃을 빌드한다. 모델 SHA256이 기존 검증값과 다르면 실패한다. 소스에는 `.gcloudignore`도 적용한다. 완료한 이미지는 digest로 고정한다.
+- `build`: 전용 계정으로 Cloud Build에서 `cloudrun` 타깃을 빌드한다. 모델 SHA256이 기존 검증값과 다르면 실패한다. 소스에는 `.gcloudignore`도 적용한다(레시피 DB는 소스에 넣지 않고 빌드용 버킷에서 받는다). 완료한 이미지는 digest로 고정한다.
 - `migrate`: DB 비밀값만 읽을 수 있는 별도 계정으로 작업 1개를 실행한다. OCR을 로드하지 않으며 재시도는 0이다. 성공한 이미지에만 배포를 허용한다.
 - `deploy`: 초기 접근을 IAM 비공개로 둔다. 비root 사용자 10001로 사진 버킷에 접근한다. 사진 볼륨이 없거나 쓸 수 없으면 시작하지 않는다. 실제 OCR 시작 추론이 통과해야 포트가 열린다.
 - `verify`: 임시 Google ID 토큰을 별도 헤더에 넣고 HTTPS로 OCR/DB 준비, 앱 인증, 문서·개발 페이지 차단을 읽기 전용으로 검사한다. 토큰을 출력하지 않는다.
@@ -214,6 +215,15 @@ Oracle용 `scripts/backup.sh`는 Compose 전용이므로 Cloud Run 백업에 사
 덤프는 DB 버전과 호환되는 `pg_dump`를 사용하고 DB 암호를 명령 인자·터미널 로그에 남기지 않는다.
 사진 버킷에는 보존 중인 영수증을 나이만으로 자동 삭제하는 규칙을 설정하지 않는다.
 오래된 빌드 소스·이미지는 저장 요금이 누적되므로 사용/롤백 여부를 확인한 후 정리한다.
+레시피 DB를 소스에 넣던 때의 빌드 소스는 한 번에 약 830MB라서 특히 쌓인다. 진행 중인 빌드가 없을 때 정리한다(`recipe-seed/`는 지우지 않는다):
+
+```sh
+gcloud storage ls -l 'gs://<프로젝트>-<서비스>-builds/source/'     # 먼저 무엇이 있는지 본다
+gcloud storage rm 'gs://<프로젝트>-<서비스>-builds/source/**'       # 소스 보관본만 지운다
+gcloud storage ls 'gs://<프로젝트>-<서비스>-builds/recipe-seed/*/'  # 레시피 버전별 DB. 쓰지 않는 옛 버전은 폴더째 지운다
+```
+
+`recipe-seed/`를 실수로 지워도 괜찮다. 다음 `build`가 Cloud Shell의 `recipe_data/`에서 다시 올린다(그 폴더도 없으면 위 "레시피 데이터 준비"부터 다시 한다).
 
 참조: [Storage 볼륨](https://docs.cloud.google.com/run/docs/configuring/services/cloud-storage-volume-mounts),
 [메모리 설정](https://docs.cloud.google.com/run/docs/configuring/services/memory-limits),
