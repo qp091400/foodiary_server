@@ -189,7 +189,7 @@ def catalogue() -> dict:
         return {"recipes": [], "sample": False, "source_total": 0, "imported_at": None}
 
 
-def rank(recipes: list[dict], foods: list, limit: int = 30) -> list[dict]:
+def rank(recipes: list[dict], foods: list, limit: int = 30, seed: int | None = None) -> list[dict]:
     if limit <= 0:
         return []
     available = set()
@@ -225,7 +225,7 @@ def rank(recipes: list[dict], foods: list, limit: int = 30) -> list[dict]:
         scored.append((score, summary, dish_family(recipe)))
     # Shuffle before stable sorting and limiting: equal-rank recipes, including
     # those beyond the first 30, have an equal chance on every request.
-    random.shuffle(scored)
+    (random if seed is None else random.Random(seed)).shuffle(scored)
     scored.sort(key=lambda row: row[0])
     result, seen = [], set()
     for _, summary, family in scored:

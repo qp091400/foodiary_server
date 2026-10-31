@@ -1,5 +1,7 @@
 """Read-only indexed catalogue; each request opens the current atomic snapshot."""
 import json
+import hashlib
+import secrets
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -17,12 +19,20 @@ def connect():
     return sqlite3.connect(store_path().resolve().as_uri() + '?mode=ro', uri=True)
 
 
-def recommendations(foods):
+def recommendations(foods, offset=0, seed=None, limit=30):
+    seed = secrets.randbits(31) if seed is None else seed
+    def page(rows, metadata, has_more=None):
+        return dict(metadata, recipes=rows[:limit], seed=seed,
+                    next_offset=offset + limit if (len(rows) > limit if has_more is None else has_more) else None)
     if not store_path().exists():
         data = catalogue()
-        return dict(recipes=rank(data['recipes'], foods), catalogue_count=len(data['recipes']),
-                    source_total=data['source_total'], sample=data['sample'], imported_at=data['imported_at'])
+        rows = rank(data['recipes'], foods, limit=offset + limit + 1, seed=seed)[offset:]
+        return page(rows, dict(catalogue_count=len(data['recipes']), source_total=data['source_total'],
+                              sample=data['sample'], imported_at=data['imported_at']))
     with closing(connect()) as db:
+        # A stable session shuffle makes page boundaries repeatable, including the
+        # chosen variant of each dish. A new selection gets a fresh seed.
+        db.create_function('recipe_order', 1, lambda rid: hashlib.sha256(f'{seed}:{rid}'.encode()).hexdigest(), deterministic=True)
         metadata = json.loads(db.execute('SELECT value FROM metadata').fetchone()[0])
         required = []
         for food in foods:
@@ -48,16 +58,16 @@ def recommendations(foods):
             params.extend(sorted(main))
             available_marks = ','.join('?' for _ in available)
             family = 'r.dish_family' if 'dish_family' in columns else 'r.id'
-            query = (f'WITH scored AS (SELECT r.payload, {family} AS family, '
+            query = (f'WITH scored AS (SELECT r.id, r.payload, {family} AS family, '
                      f'r.ingredient_count - (SELECT COUNT(*) FROM ingredients i '
                      f'WHERE i.recipe_id=r.id AND i.key IN ({available_marks})) AS missing '
                      'FROM recipes r WHERE ' + ' AND '.join(clauses) + '), '
-                     'variants AS (SELECT payload,missing,ROW_NUMBER() OVER '
-                     '(PARTITION BY family ORDER BY missing,RANDOM()) AS choice FROM scored) '
-                     'SELECT payload FROM variants WHERE choice=1 ORDER BY missing,RANDOM() LIMIT 30')
-            rows = [json.loads(row[0]) for row in db.execute(query, [*sorted(available), *params])]
+                     'variants AS (SELECT id,payload,missing,ROW_NUMBER() OVER '
+                     '(PARTITION BY family ORDER BY missing,recipe_order(id),id) AS choice FROM scored) '
+                     'SELECT payload FROM variants WHERE choice=1 ORDER BY missing,recipe_order(id),id LIMIT ? OFFSET ?')
+            rows = [json.loads(row[0]) for row in db.execute(query, [*sorted(available), *params, limit + 1, offset])]
         # Reuse the same strict all-selected rule and response contract as the legacy catalogue.
-        return dict(metadata, recipes=rank(rows, foods))
+        return page(rank(rows[:limit], foods, limit=limit, seed=seed), metadata, len(rows) > limit)
 
 
 def detail(recipe_id):
