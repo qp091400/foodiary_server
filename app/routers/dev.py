@@ -129,7 +129,8 @@ def _finish_test_photo(photo: _TestPhoto, boxes: list, db: Session) -> dict:
         "items_sum": items_sum,
         "warnings": draft_warnings(
             len(draft_items), items_sum, parsed.total_amount, name_cut=any(item["name_cut"] for item in draft_items),
-            discount_estimated=any(item["discount_estimated"] for item in draft_items)
+            discount_estimated=any(item["discount_estimated"] for item in draft_items),
+            name_unsure=any(item["name_unsure"] for item in draft_items),
         ),
         "raw_lines": parsed.lines,
         "ocr_seconds": photo.ocr_seconds,

@@ -206,6 +206,25 @@ class ReceiptItem(Base):
     food_item_id: Mapped[int | None] = mapped_column(ForeignKey("food_items.id", ondelete="SET NULL"))
 
 
+class NameCorrection(Base):
+    """영수증 초안의 상품 이름을 사용자가 고친 기록 ("코카율라" → "코카콜라"). 다음 영수증의 이름 보정에 쓴다 (app/services/learned_names.py).
+
+    사용자마다 같은 이름(seen)에 하나만 둔다: 다시 고치면 덮어쓴다. 사용자가 지워지면 그 사람의 기록도 함께 지워진다.
+    """
+
+    __tablename__ = "name_corrections"
+    __table_args__ = (
+        UniqueConstraint("user_id", "seen", name="uq_name_corrections_user_seen"),
+        Index("ix_name_corrections_seen", "seen"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    seen: Mapped[str] = mapped_column(String(100))  # OCR이 읽은 이름(낱말 하나, 또는 낱말 수가 달라진 이름 전체)
+    fixed: Mapped[str] = mapped_column(String(100))  # 사용자가 고친 이름
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
 class ConsumptionLog(Base):
     """먹음/버림 기록. 식품을 지워도 통계가 남도록 이름·카테고리를 복사해 둔다."""
 

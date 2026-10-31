@@ -81,6 +81,12 @@ class Settings(BaseSettings):
     # 커뮤니티 글의 링크 미리보기(제목·대표 이미지). 글을 쓸 때 서버가 그 주소에 한 번 접속한다(app/services/link_preview.py).
     # false면 미리보기를 만들지 않는다 (이미 만든 것은 그대로 보인다)
     link_preview_enabled: bool = True
+    # 영수증 상품 이름 보정. 사용자가 초안의 이름을 고친 기록(name_corrections)을 모아 다음 영수증에 적용한다(app/services/learned_names.py).
+    # 고친 본인에게는 바로 적용하고, 다른 사람에게는 서로 다른 사용자가 이 수 이상 같게 고쳤을 때만 적용한다.
+    name_learning_enabled: bool = True
+    name_learning_min_users: int = 2
+    # 줄의 OCR 신뢰도가 이 값보다 낮으면 이름 보정을 넓게 하고, 아는 낱말이 하나도 없으면 "이름을 확인해 주세요"로 알린다
+    name_unsure_below: float = 0.85
 
     @property
     def cors_origin_list(self) -> list[str]:

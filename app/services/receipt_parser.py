@@ -9,7 +9,7 @@ import statistics
 from dataclasses import dataclass, field, replace
 from datetime import date
 
-from app.services.name_fix import fix_name
+from app.services.name_fix import fix_name, is_blurry, is_recognized
 from app.services.ocr.base import OcrBox
 
 
@@ -25,6 +25,8 @@ class ParsedItem:
     confidence: float = 0.0
     name_cut: bool = False  # 화면에서 이름이 잘려 있다(주문내역 화면)
     discount_estimated: bool = False
+    name_unsure: bool = False  # 줄을 흐리게 읽었고 아는 낱말이 하나도 없다: 이름이 틀렸을 수 있다
+    read_name: str | None = None  # 이름 보정(사용자가 고친 기록) 전에 읽은 이름. 보정이 없었으면 None
 
 
 def merge_same_name(items: list[ParsedItem]) -> list[ParsedItem]:
@@ -48,6 +50,7 @@ def merge_same_name(items: list[ParsedItem]) -> list[ParsedItem]:
         first.confidence = min(first.confidence, item.confidence)
         first.name_cut = first.name_cut or item.name_cut
         first.discount_estimated = first.discount_estimated or item.discount_estimated
+        first.name_unsure = first.name_unsure or item.name_unsure
     return list(merged.values())
 
 
@@ -374,8 +377,9 @@ def parse_items(lines: list[tuple[str, float]]) -> list[ParsedItem]:
         quantity, unit_price, amount = _assign_numbers(numbers, waiting.quantity if waiting else None)
         if amount < MIN_ITEM_AMOUNT:
             return
+        fixed = fix_name(name, confidence)  # 흐리게 읽은 줄은 넓게 고친다
         items.append(
-            ParsedItem(len(items) + 1, fix_name(name), quantity, unit_price, amount, 0, barcode, round(confidence, 3))
+            ParsedItem(len(items) + 1, fixed, quantity, unit_price, amount, 0, barcode, round(confidence, 3), name_unsure=is_blurry(confidence) and not is_recognized(fixed))
         )
 
     for text, confidence in lines:
