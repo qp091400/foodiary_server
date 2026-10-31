@@ -47,6 +47,15 @@ def prepare(root=ROOT, package=None):
     target = data / 'image-seed'
     with (data / '.prepare-recipes.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        previous = data / '.image-seed.previous'
+        # Recover a preparation interrupted while switching directories.
+        if previous.exists():
+            if not target.exists():
+                os.rename(previous, target)
+            elif matching_seed(target, config):
+                shutil.rmtree(previous)
+            else:
+                raise ValueError(f'Interrupted preparation: previous seed preserved at {previous}')
         # Explicit packages are always checked, even if a matching cache exists.
         if package is None and matching_seed(target, config):
             print(f'Recipe data already prepared: {target}')
@@ -70,15 +79,20 @@ def prepare(root=ROOT, package=None):
                 prepare_seed(package, staged, config)
             # Validate the entire replacement before moving the previous seed.
             # Run preparation before builds; the directory switch is brief.
-            previous = work / 'previous'
-            if target.exists():
-                os.rename(target, previous)
+            # Keep recovery data outside the automatically cleaned staging area.
             try:
+                if target.exists():
+                    os.rename(target, previous)
                 os.rename(staged, target)
-            except OSError:
-                if previous.exists():
-                    os.rename(previous, target)
+            except BaseException:
+                if previous.exists() and not target.exists():
+                    try:
+                        os.rename(previous, target)
+                    except OSError as error:
+                        raise ValueError(f'Previous seed preserved at {previous}; rerun preparation to recover') from error
                 raise
+            if previous.exists():
+                shutil.rmtree(previous)
     print(f'Recipe data prepared: {target}')
     return target
 

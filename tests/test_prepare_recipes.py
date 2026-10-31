@@ -174,6 +174,25 @@ class RecipePreparationTests(unittest.TestCase):
         self.assertEqual(self.snapshot(), before)
         self.assert_no_staging()
 
+    def test_failed_rollback_preserves_recovery_data(self):
+        prepare(self.root, self.first['archive'])
+        before = self.snapshot()
+        second = self.make_package('second')
+        self.set_config(second)
+        original_rename = os.rename
+        def fail_promotion_and_rollback(source, destination):
+            if Path(destination) == self.target:
+                raise OSError('simulated rename failure')
+            return original_rename(source, destination)
+        with patch('scripts.prepare_recipes.os.rename', side_effect=fail_promotion_and_rollback):
+            with self.assertRaisesRegex(ValueError, 'preserved'):
+                prepare(self.root, second['archive'])
+        recovery = self.root / 'recipe_data' / '.image-seed.previous'
+        self.assertEqual({p.name: p.read_bytes() for p in recovery.iterdir()}, before)
+        prepare(self.root, second['archive'])
+        verify_seed(self.target, second['config'])
+        self.assertFalse(recovery.exists())
+
     def test_damaged_cached_seed_is_repaired_from_verified_package(self):
         prepare(self.root, self.first['archive'])
         (self.target / 'recipes.sqlite3').write_bytes(b'broken')
