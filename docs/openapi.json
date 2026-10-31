@@ -1887,7 +1887,7 @@
         "tags": [
           "영수증"
         ],
-        "summary": "초안(pending) 영수증 삭제",
+        "summary": "영수증 기록 삭제 (확정된 것은 그 영수증으로 넣은 식품·구매 기록·먹음/버림 기록까지). 같은 영수증을 다시 찍을 수 있게 된다",
         "operationId": "delete_receipt_fridges__fridge_id__receipts__receipt_id__delete",
         "security": [
           {
@@ -2798,120 +2798,6 @@
         }
       }
     },
-    "/friends": {
-      "get": {
-        "tags": [
-          "친구"
-        ],
-        "summary": "내 친구 목록",
-        "operationId": "list_friends_friends_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/FriendOut"
-                  },
-                  "type": "array",
-                  "title": "Response List Friends Friends Get"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "친구"
-        ],
-        "summary": "친구 코드로 친구 추가: 바로 서로 친구가 된다 (이미 친구면 200)",
-        "operationId": "add_friend_friends_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FriendAdd"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FriendOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/friends/{user_id}": {
-      "delete": {
-        "tags": [
-          "친구"
-        ],
-        "summary": "친구 끊기 (서로의 냉장고에서 받았던 권한도 함께 사라진다)",
-        "operationId": "remove_friend_friends__user_id__delete",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "User Id"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/fridges/{fridge_id}/share-links": {
       "post": {
         "tags": [
@@ -3119,7 +3005,7 @@
         "tags": [
           "공유 링크"
         ],
-        "summary": "링크로 들어오기: 주인과 친구가 되고 냉장고 권한을 받는다",
+        "summary": "초대 링크로 냉장고 참여",
         "operationId": "join_link_share_links__token__join_post",
         "security": [
           {
@@ -3217,7 +3103,7 @@
         "tags": [
           "공유 링크"
         ],
-        "summary": "권한 바꾸기: viewer(보기+변경 요청) / editor(주인처럼 고치기) (주인만)",
+        "summary": "권한 바꾸기: viewer(보기만) / editor(함께 관리) (주인만)",
         "operationId": "change_access_fridges__fridge_id__access__user_id__patch",
         "security": [
           {
@@ -3281,7 +3167,7 @@
         "tags": [
           "공유 링크"
         ],
-        "summary": "이 냉장고의 권한 거두기 (친구는 그대로) (주인만)",
+        "summary": "이 냉장고의 권한 거두기 (주인만)",
         "operationId": "remove_access_fridges__fridge_id__access__user_id__delete",
         "security": [
           {
@@ -3325,12 +3211,76 @@
         }
       }
     },
+    "/shared-fridges": {
+      "get": {
+        "tags": [
+          "공유 링크"
+        ],
+        "summary": "초대받아 참여 중인 냉장고",
+        "operationId": "shared_fridges_shared_fridges_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/shared-fridges/{fridge_id}": {
+      "delete": {
+        "tags": [
+          "공유 링크"
+        ],
+        "summary": "초대받은 냉장고에서 나가기",
+        "operationId": "leave_shared_fridge_shared_fridges__fridge_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/change-requests": {
       "post": {
         "tags": [
           "변경 요청"
         ],
-        "summary": "냉장고 주인에게 변경 요청 보내기 (보기 권한이 있는 친구만)",
+        "summary": "구버전 변경 요청 (신규 발행 종료)",
         "operationId": "send_request_change_requests_post",
         "requestBody": {
           "content": {
@@ -6509,7 +6459,6 @@
             "type": "string",
             "enum": [
               "private",
-              "friends",
               "public"
             ],
             "title": "Visibility"
@@ -6565,7 +6514,6 @@
             "type": "string",
             "enum": [
               "private",
-              "friends",
               "public"
             ],
             "title": "Visibility"
@@ -6604,7 +6552,6 @@
                 "type": "string",
                 "enum": [
                   "private",
-                  "friends",
                   "public"
                 ]
               },
@@ -6617,39 +6564,7 @@
         },
         "type": "object",
         "title": "FridgeUpdate",
-        "description": "바꿀 것만 보낸다. name은 이름, visibility는 멤버가 아닌 사람에게 보일 범위(private 나만 / friends 친구들도 / public 모두)."
-      },
-      "FriendAdd": {
-        "properties": {
-          "friend_code": {
-            "type": "string",
-            "maxLength": 16,
-            "minLength": 1,
-            "title": "Friend Code"
-          }
-        },
-        "type": "object",
-        "required": [
-          "friend_code"
-        ],
-        "title": "FriendAdd"
-      },
-      "FriendOut": {
-        "properties": {
-          "user": {
-            "$ref": "#/components/schemas/PublicUser"
-          },
-          "since": {
-            "type": "string",
-            "title": "Since"
-          }
-        },
-        "type": "object",
-        "required": [
-          "user",
-          "since"
-        ],
-        "title": "FriendOut"
+        "description": "바꿀 것만 보낸다. name은 이름, visibility는 멤버가 아닌 사람에게 보일 범위(private 참여자만 / public 모두)."
       },
       "HTTPValidationError": {
         "properties": {
@@ -7190,10 +7105,6 @@
               "editor"
             ],
             "title": "Permission"
-          },
-          "newly_friends": {
-            "type": "boolean",
-            "title": "Newly Friends"
           }
         },
         "type": "object",
@@ -7201,8 +7112,7 @@
           "owner",
           "fridge_id",
           "fridge_name",
-          "permission",
-          "newly_friends"
+          "permission"
         ],
         "title": "JoinResult"
       },
@@ -7609,10 +7519,6 @@
             "type": "string",
             "title": "Nickname"
           },
-          "friend_code": {
-            "type": "string",
-            "title": "Friend Code"
-          },
           "avatar_url": {
             "anyOf": [
               {
@@ -7628,11 +7534,10 @@
         "type": "object",
         "required": [
           "id",
-          "nickname",
-          "friend_code"
+          "nickname"
         ],
         "title": "PublicUser",
-        "description": "다른 사람에게 보여도 되는 정보. 닉네임은 겹칠 수 있어서 바뀌지 않는 친구 코드로 구별한다. 이메일·아이디는 넣지 않는다."
+        "description": "다른 사람에게 보여도 되는 프로필 정보. 이메일·로그인 아이디는 넣지 않는다."
       },
       "PurchaseGroup": {
         "properties": {
@@ -8862,7 +8767,6 @@
             "type": "string",
             "enum": [
               "private",
-              "friends",
               "public"
             ],
             "title": "Visibility"
@@ -9123,10 +9027,6 @@
             "type": "string",
             "title": "Created At"
           },
-          "friend_code": {
-            "type": "string",
-            "title": "Friend Code"
-          },
           "is_admin": {
             "type": "boolean",
             "title": "Is Admin"
@@ -9150,7 +9050,6 @@
           "email",
           "nickname",
           "created_at",
-          "friend_code",
           "is_admin"
         ],
         "title": "UserOut"

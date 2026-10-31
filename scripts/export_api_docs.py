@@ -240,7 +240,7 @@ def render(spec: dict) -> str:
         f'<p class="lead">{e(info.get("description", ""))}</p>'
         f'<p class="lead">경로 {total}개 · 버전 {e(info.get("version", ""))} · 코드에서 자동으로 만든 문서다. API를 고친 뒤에는 <code>python -m scripts.export_api_docs</code>로 다시 만든다.</p>'
         f'<p class="lead">"로그인 필요"가 붙은 경로는 <code>Authorization: Bearer 토큰</code> 헤더가 있어야 한다. 시각은 모두 UTC(<code>...Z</code>)로 온다.</p>'
-        f'<div class="tools"><input id="q" type="search" placeholder="경로나 설명으로 찾기 (예: 친구, notifications, review)" autocomplete="off">'
+        f'<div class="tools"><input id="q" type="search" placeholder="경로나 설명으로 찾기 (예: 초대, notifications, review)" autocomplete="off">'
         f'<span id="count" class="lead"></span><button id="open" type="button">모두 펼치기/접기</button></div><nav>{nav}</nav>{sections}'
         f'</main><script>{JS}</script></body></html>'
     )

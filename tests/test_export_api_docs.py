@@ -20,9 +20,10 @@ def test_every_route_of_the_app_is_in_the_page_and_the_json(tmp_path):
     assert len(operations) > 80 and page.count('class="op"') == len(operations)
     for method, path in operations:
         assert f'<code class="path">{html.escape(path)}</code>' in page, (method, path)
-    for needed in ("/notifications/summary", "/notifications/expiring", "/friends", "/recipes/{recipe_id}/reviews/mine", "/api"):
+    for needed in ("/notifications/summary", "/notifications/expiring", "/shared-fridges", "/recipes/{recipe_id}/reviews/mine", "/api"):
         assert any(path.startswith(needed) for _, path in operations) or needed == "/api"
-    assert "친구 코드로 친구 추가" in page and "로그인 필요" in page
+    assert "초대 링크로 냉장고 참여" in page and "로그인 필요" in page
+    assert not any(path.startswith("/friends") for _, path in operations)
 
 
 def test_the_page_opens_by_itself_without_any_outside_file(tmp_path):
