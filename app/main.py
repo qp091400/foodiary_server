@@ -14,7 +14,8 @@ from app import models  # noqa: F401  (create_all 전에 모델을 등록한다)
 from app.config import DEFAULT_JWT_SECRET, settings
 from app.database import Base, engine
 from app.errors import register_error_handlers
-from app.middleware import SecurityMiddleware
+from app.middleware import APIPrefixMiddleware, SecurityMiddleware
+from app.web_proxy import WebProxyMiddleware
 from app.routers import (
     admin,
     auth,
@@ -77,7 +78,10 @@ app.add_middleware(
 )
 register_error_handlers(app)
 app.add_middleware(SecurityMiddleware)
+app.add_middleware(WebProxyMiddleware)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_host_list)
+# Outermost: normalize the proxy prefix before routing and security checks.
+app.add_middleware(APIPrefixMiddleware)
 
 for module in (auth, users, fridges, items, receipts, recipes, recipe_reviews, products, stats, friends, sharing, change_requests, community, notifications, admin, dev):
     app.include_router(module.router)

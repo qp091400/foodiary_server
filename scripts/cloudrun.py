@@ -70,6 +70,14 @@ def validate_config(config: dict) -> None:
         url = urlsplit(origin)
         if url.scheme != "https" or not url.hostname or url.username or url.password or url.query or url.fragment or url.path:
             raise ValueError("Frontend origins must be HTTPS origins without paths or credentials")
+    for key in ('web_upstream', 'public_origin'):
+        value = config.get(key, '')
+        if value:
+            url = urlsplit(value)
+            if url.scheme != 'https' or not url.hostname or url.username or url.password or url.query or url.fragment or url.path:
+                raise ValueError(f'{key} must be an HTTPS origin without a path')
+    if config.get('web_upstream') and config.get('web_upstream') in {config.get('public_origin'), service_url(config)}:
+        raise ValueError('Web upstream must not point back to the API gateway')
     for key in ("smtp_host", "smtp_user", "mail_from"):
         if not config.get(key) or any(c in config[key] for c in "\r\n\x00"):
             raise ValueError(f"Invalid or missing {key}")
@@ -93,9 +101,14 @@ def service_url(config: dict) -> str:
 
 
 def environment(config: dict) -> dict[str, str]:
+    public_host = urlsplit(config.get('public_origin', '')).hostname
+    hosts = [urlsplit(service_url(config)).hostname, 'localhost', '127.0.0.1']
+    if public_host:
+        hosts.append(public_host)
     return dict(
+        WEB_UPSTREAM=config.get('web_upstream', ''),
         APP_ENV="production", DEV_TOOLS="false", AUTO_CREATE_TABLES="false",
-        TRUSTED_HOSTS=f"{urlsplit(service_url(config)).hostname},localhost,127.0.0.1",
+        TRUSTED_HOSTS=",".join(hosts),
         CORS_ORIGINS=",".join(config["origins"]), UPLOAD_DIR="/app/uploads", MAX_UPLOAD_MB="10",
         OCR_ENGINE="paddle", OCR_LANG="korean", OCR_DET_MAX_SIDE="1280", OCR_CPU_THREADS="4", OCR_ENGINES="2",
         OCR_ORIENTATION_MODEL="PP-LCNet_x1_0_doc_ori",

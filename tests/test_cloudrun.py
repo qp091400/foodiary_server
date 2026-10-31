@@ -564,3 +564,15 @@ def test_add_origin_is_an_offline_cli_command(tmp_path, monkeypatch, capsys):
     cloudrun.main()
     assert "https://foodiary.kr" in json.loads(path.read_text())["origins"]
     assert "foodiary.kr" in capsys.readouterr().out
+
+
+def test_existing_cloudrun_service_can_proxy_external_web():
+    value = config()
+    value.update(web_upstream='https://web.foodiary.test', public_origin='https://foodiary.kr')
+    cloudrun.validate_config(value)
+    env = cloudrun.environment(value)
+    assert env['WEB_UPSTREAM'] == value['web_upstream']
+    assert 'foodiary.kr' in env['TRUSTED_HOSTS'].split(',')
+    value['web_upstream'] = value['public_origin']
+    with pytest.raises(ValueError, match='point back'):
+        cloudrun.validate_config(value)

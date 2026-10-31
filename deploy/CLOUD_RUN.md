@@ -249,3 +249,32 @@ gcloud storage ls 'gs://<프로젝트>-<서비스>-builds/recipe-seed/*/'  # 레
 참조: [Storage 볼륨](https://docs.cloud.google.com/run/docs/configuring/services/cloud-storage-volume-mounts),
 [메모리 설정](https://docs.cloud.google.com/run/docs/configuring/services/memory-limits),
 [개발자 크레딧 적용](https://developers.google.com/profile/help/benefits#google-cloud-credits).
+
+## 도메인 하나에서 웹과 API 제공 (기존 API 서비스가 프록시)
+
+프로젝트가 다른 Firebase Hosting도 기존 Cloud Run API 서비스에서 HTTP로 전달할 수 있다.
+Firebase에 Cloud Run rewrite를 추가하는 방식은 사용하지 않는다.
+배포 설정 JSON에 다음 두 필드를 추가한다(비밀값이 아님).
+
+```json
+{
+  "web_upstream": "https://foodiary-app-ef2b5.web.app",
+  "public_origin": "https://foodiary.kr"
+}
+```
+
+기존 설정의 나머지 필드는 유지한다. `web_upstream`을 비우면 기존 API 전용 동작을 유지한다.
+활성화하면 `/api/*`는 같은 서비스의 API로, 나머지 GET/HEAD는 웹 upstream으로 전달한다.
+상태 검사 `/health`, `/ready`는 기존 Cloud Run 검사와 호환되도록 API에서 처리한다.
+API 토큰과 Cookie는 정적 웹 upstream으로 보내지 않는다.
+
+앱/웹은 `EXPO_PUBLIC_API_URL=https://foodiary.kr/api`로 새로 빌드한다.
+게이트웨이 모드에서는 이전 `/auth/login` 같은 비접두사 API 주소가 동작하지 않으므로
+기존 모바일 클라이언트도 `/api` 주소로 갱신해야 한다.
+운영 API 코드 재배포 후 `foodiary.kr`을 이 Cloud Run 서비스의 사용자 도메인으로 연결하고,
+웹도 새 API 주소로 빌드하여 기존 Firebase Hosting에 배포한다.
+DNS를 Cloud Run의 조회 시점 IP에 직접 고정하지 말고 사용자 도메인 연결에서 안내한 레코드를 사용한다.
+기존에 도메인이 Firebase에 연결돼 있으면 기존 연결을 확인하고 Cloud Run 쪽으로 이전해야 한다.
+`web_upstream`은 루프 방지를 위해 사용자 도메인 대신 Firebase의 원래 `.web.app` 주소를 사용한다.
+
+이 저장소의 코드 수정만으로 Cloud Run 재배포, 사용자 도메인 연결, DNS 변경이 수행되지는 않는다.
