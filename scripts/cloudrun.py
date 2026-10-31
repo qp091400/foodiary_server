@@ -434,6 +434,16 @@ def initialize(args, config_path: Path) -> None:
     print(f"Prepared private configuration at {config_path}. No cloud resources were created.")
 
 
+def add_origins(config_path: Path, origins: list[str]) -> list[str]:
+    """Allow more HTTPS frontend origins (CORS) without touching anything else in the private config."""
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    merged = list(dict.fromkeys([*config.get("origins", []), *(origin.strip().rstrip("/").lower() for origin in origins)]))
+    validate_config({**config, "origins": merged})
+    config["origins"] = merged
+    save_private(config_path, json.dumps(config, indent=2) + "\n")
+    return merged
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=ROOT / ".cloudrun" / "config.json")
@@ -446,6 +456,8 @@ def main() -> None:
     init.add_argument("--origin", action="append", help="Frontend HTTPS origin; can be specified multiple times")
     for action in ("plan", "setup", "secrets", "build", "migrate", "deploy", "verify", "publish"):
         commands.add_parser(action)
+    add_origin = commands.add_parser("add-origin", help="Allow another HTTPS frontend origin (CORS), e.g. https://foodiary.kr. Run deploy or release afterwards")
+    add_origin.add_argument("origins", nargs="+", help="HTTPS origins without a path")
     commands.add_parser("release", help="build, migrate, deploy and publish in one go (private from deploy until publish ends)")
     test_password = commands.add_parser("test-password", help="Set (or --disable) the /receipt-test page password")
     test_password.add_argument("--disable", action="store_true", help="Turn the test page off at the next deploy")
@@ -453,6 +465,10 @@ def main() -> None:
     try:
         if args.action == "init":
             initialize(args, args.config)
+            return
+        if args.action == "add-origin":
+            origins = add_origins(args.config, args.origins)
+            print("Allowed frontend origins: " + ", ".join(origins) + "\nRun deploy or release to apply. No cloud resources were changed.")
             return
         deployment = Deployment(json.loads(args.config.read_text(encoding="utf-8")), args.config.parent)
         if args.action == "plan":

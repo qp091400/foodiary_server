@@ -529,3 +529,38 @@ def test_gcloud_treats_no_matching_objects_as_missing_without_noise(tmp_path, mo
     assert capsys.readouterr().err == ""
     with pytest.raises(RuntimeError):  # missing_ok가 아니면 여전히 실패다
         deployment.gcloud("storage", "ls", "gs://bucket/x/*", capture=True)
+
+
+def write_config(tmp_path, **changes):
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({**config(), **changes}))
+    return path
+
+
+def test_add_origin_keeps_the_rest_of_the_private_config_and_the_existing_origins(tmp_path):
+    path = write_config(tmp_path)
+    before = json.loads(path.read_text())
+    merged = cloudrun.add_origins(path, ["https://foodiary.kr/", " HTTPS://WWW.Foodiary.kr ", "https://app.example.com"])
+    assert merged == ["https://app.example.com", "https://foodiary.kr", "https://www.foodiary.kr"]  # 있던 것 먼저, 중복과 끝의 /는 정리
+    after = json.loads(path.read_text())
+    assert after["origins"] == merged and {k: v for k, v in after.items() if k != "origins"} == {k: v for k, v in before.items() if k != "origins"}
+    assert cloudrun.environment(after)["CORS_ORIGINS"] == ",".join(merged)  # 다음 deploy에 그대로 들어간다
+    assert cloudrun.add_origins(path, ["https://foodiary.kr"]) == merged  # 다시 해도 같다
+
+
+@pytest.mark.parametrize("bad", ["http://foodiary.kr", "https://foodiary.kr/app", "https://user:pw@foodiary.kr", "https://foodiary.kr?x=1", "foodiary.kr", "*"])
+def test_add_origin_rejects_unsafe_origins_without_changing_the_file(tmp_path, bad):
+    path = write_config(tmp_path)
+    before = path.read_text()
+    with pytest.raises(ValueError):
+        cloudrun.add_origins(path, ["https://foodiary.kr", bad])
+    assert path.read_text() == before  # 하나라도 틀리면 아무것도 바꾸지 않는다
+
+
+def test_add_origin_is_an_offline_cli_command(tmp_path, monkeypatch, capsys):
+    path = write_config(tmp_path)
+    monkeypatch.setattr(cloudrun.shutil, "which", lambda name: pytest.fail("add-origin must not look for or run gcloud"))
+    monkeypatch.setattr(cloudrun.sys, "argv", ["cloudrun", "--config", str(path), "add-origin", "https://foodiary.kr"])
+    cloudrun.main()
+    assert "https://foodiary.kr" in json.loads(path.read_text())["origins"]
+    assert "foodiary.kr" in capsys.readouterr().out

@@ -188,6 +188,27 @@ gcloud scheduler jobs delete foodiary-keepalive --location asia-northeast1
 - 요청 기반 과금에서는 요청을 처리하지 않는 인스턴스의 CPU·RAM은 과금되지 않는다([요금](https://cloud.google.com/run/pricing)). 5분마다 가벼운 요청 하나는 요청 수 무료 한도에 비해 아주 작지만 이 구성에서 실제로 측정하지는 않았으니 청구 콘솔에서 확인한다. Cloud Scheduler는 결제 계정마다 작업 3개까지 무료다([요금](https://cloud.google.com/scheduler/pricing)).
 - 최소 인스턴스를 1로 두는 방법(`--min-instances 1`)도 있지만 CPU 8개·RAM 8GiB 인스턴스가 항상 떠 있게 되어 유휴 비용이 크다. 이 구성에서는 쓰지 않는다.
 
+### 웹 앱에 도메인 연결 (foodiary.kr)
+
+도메인은 **웹 앱**(Firebase Hosting `foodiary-app-ef2b5`)에 붙인다. API 서버는 `run.app` 주소를 그대로 쓴다. 사용자에게 API 주소는 보이지 않고, 그래야 앱 설정(`EXPO_PUBLIC_API_URL`)도 바꾸지 않는다. 서버 응답에는 `X-Robots-Tag: noindex`가 붙어 검색에 나오지 않는다.
+
+1. **Firebase에 도메인 추가**: Firebase 콘솔 → Hosting → 사이트 `foodiary-app-ef2b5` → 맞춤 도메인 추가 → `foodiary.kr`. 콘솔이 보여 주는 레코드(소유 확인용 TXT, 연결용 A)를 등록업체(가비아)의 DNS 설정에 **콘솔에 나온 값 그대로** 입력한다. `www.foodiary.kr`도 쓰려면 같은 방식으로 추가하고 `foodiary.kr`로 리디렉션하게 한다. 인증서는 자동으로 발급되며 몇 분에서 몇 시간 걸릴 수 있다.
+2. **서버가 새 주소를 허용하게 하기**(브라우저 요청 허용, CORS). Cloud Shell에서 현재 허용 목록을 보고(비밀값은 출력하지 않는다) 추가한 뒤 배포한다.
+
+   ```sh
+   cd ~/foodiary-cloudrun
+   python3 -c "import json; print(json.load(open('.cloudrun/config.json'))['origins'])"
+   python3 scripts/cloudrun.py add-origin https://foodiary-app-ef2b5.web.app https://foodiary.kr https://www.foodiary.kr
+   python3 scripts/cloudrun.py release     # 새 소스와 함께 올릴 때. 설정만 바꿨다면 deploy 다음 publish
+   ```
+
+   `add-origin`은 있던 주소를 지우지 않고(중복과 끝의 `/`는 정리) 클라우드에는 아무것도 하지 않는다. 설정은 다음 `deploy`부터 적용된다.
+3. **웹 다시 빌드·배포**: 웹 앱을 평소 하던 방식으로 다시 내보내 Firebase Hosting에 올린다. 검색용 제목·설명, `robots.txt`, `sitemap.xml`이 이때 함께 올라간다.
+4. **검색 등록**(본인 계정으로 직접): Google Search Console과 네이버 서치어드바이저에 `https://foodiary.kr`을 등록해 소유를 확인하고 `https://foodiary.kr/sitemap.xml`을 제출한다. 소유 확인을 HTML 태그로 하면 받은 값을 `foodiary_app`의 `src/lib/seo.ts` 처음 화면 메타데이터에 `verification`(`google`, `other: { "naver-site-verification": "..." }`)으로 넣고 다시 배포한다. 파일로 하면 받은 파일을 `public/` 폴더에 넣는다.
+5. **(선택) 옛 주소 정리**: `foodiary.kr`이 정상으로 열린 뒤에 `firebase.json`의 `redirects`로 `foodiary-app-ef2b5.web.app`을 새 주소로 보낼 수 있다. 기존 공유 링크가 옛 주소로 만들어져 있으면 그대로 열리게 두거나 리디렉션이 경로(`/share/...`)를 유지하는지 확인한다.
+
+색인까지는 며칠에서 몇 주 걸리고 검색 순위는 보장되지 않는다.
+
 ## 5. 업데이트·복구
 
 소스 변경 후 `build → migrate → deploy → verify → publish`를 실행한다. `deploy`는 다시 IAM 비공개로 바꾸므로

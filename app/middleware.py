@@ -79,6 +79,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         else:
             response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"  # 검색에 보이는 것은 웹 앱 주소다. API 서버와 /receipt-test는 색인하지 않는다
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
         if settings.app_env == "production":
