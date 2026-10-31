@@ -1,0 +1,8 @@
+{
+  "samples": 1000,
+  "max_absolute_error": 9.500696351860682e-08,
+  "typescript_1000_inferences_ms": 11.871667000000002,
+  "hardware": "development Mac / Node, not mobile hardware",
+  "ranking_json_bytes": 14016,
+  "checkpoint_bytes": 5269
+}

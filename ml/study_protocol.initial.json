@@ -1,0 +1,64 @@
+{
+  "seed": 42,
+  "chronological_split": {
+    "train_event_fraction": 0.7,
+    "validation_event_fraction": 0.1,
+    "test_event_fraction": 0.2,
+    "same_day_never_split": true
+  },
+  "candidate_representation": {
+    "title_weight": 0.65,
+    "projection": "balanced PCA",
+    "dimension": 32,
+    "pca_per_domain_limit": 30000,
+    "korean_fit_split": "SHA256(dish_family) mod 10 < 6"
+  },
+  "korean_evaluation": {
+    "development_split": "family hash mod 10 6..7",
+    "test_split": "family hash mod 10 8..9",
+    "relevance": "same existing canonical dish_family; weak proxy, not human semantic labels",
+    "max_variants_per_family": 4,
+    "minimum_candidate_count": 100,
+    "duplicate_policy": "one recipe per distinct encoded title per family; exact title duplicates excluded"
+  },
+  "ranking_evaluation": {
+    "minimum_observed_candidates": 20,
+    "require_positive_and_negative": true,
+    "minimum_eligible_users_for_promotion": 30,
+    "unknown_items_are_not_negatives": true,
+    "tie_break": "SHA256(user_id,recipe_id)",
+    "bootstrap_unit": "user",
+    "bootstrap_replicates": 2000
+  },
+  "model_selection": "Choose one candidate from the predeclared grid using validation NDCG only, requiring Korean development Recall@10 above full V1 baseline; test remains sealed until candidate identity is recorded.",
+  "promotion_gate": {
+    "candidate_vs_retrained_v1_full_ndcg_bootstrap_lower_gt": 0,
+    "candidate_vs_retrained_v1_sample_ndcg_bootstrap_lower_gt": 0,
+    "test_auc_must_not_decrease_vs_full_baseline": true,
+    "korean_test_recall_at_10_must_increase": true,
+    "latest_incumbent_auc_must_not_decrease": true
+  },
+  "incumbent_note": "Exact deployed V1 was trained through 2015-04-19 and early-stopped using data through 2017-02-21; its unbiased comparison window starts 2017-02-22 and has only five users with >=20 mixed-class candidates. Controlled V1 replications use the new shared chronological split.",
+  "candidate_grid": [
+    {
+      "name": "title65_ko25",
+      "title_weight": 0.65,
+      "korean_ratio": 0.25
+    },
+    {
+      "name": "title65_ko50",
+      "title_weight": 0.65,
+      "korean_ratio": 0.5
+    },
+    {
+      "name": "title30_ko25",
+      "title_weight": 0.3,
+      "korean_ratio": 0.25
+    },
+    {
+      "name": "body_ko25",
+      "title_weight": 0.0,
+      "korean_ratio": 0.25
+    }
+  ]
+}
