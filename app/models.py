@@ -364,3 +364,18 @@ class Report(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     handled_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     handled_at: Mapped[datetime | None]
+
+
+class RecipeEvent(Base):
+    """Private behavioral audit; rating truth remains RecipeReview."""
+    __tablename__ = 'recipe_events'
+    __table_args__ = (UniqueConstraint('user_id', 'event_key', name='uq_recipe_events_user_key'),
+                      Index('ix_recipe_events_user_recipe', 'user_id', 'recipe_id', 'event_type'))
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'))
+    recipe_id: Mapped[str] = mapped_column(String(100))
+    event_key: Mapped[str] = mapped_column(String(100))
+    event_type: Mapped[str] = mapped_column(String(20))
+    source: Mapped[str] = mapped_column(String(30))
+    rating: Mapped[int | None]
+    selected_at: Mapped[datetime] = mapped_column(default=utcnow)

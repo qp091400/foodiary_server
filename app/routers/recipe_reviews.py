@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import get_current_user
-from app.models import RecipeReview, User
+from app.models import RecipeReview, User, RecipeEvent
 from app.schemas import MessageResponse, MyReviewList, PublicUser, ReportCreate, ReviewList, ReviewOut, ReviewWrite
 from app.services import recipe_store
 from app.services.community import delete_review, file_report
@@ -113,6 +113,7 @@ def write_review(recipe_id: str, payload: ReviewWrite, response: Response, me: U
     ensure_can_write(db, me)  # 후기는 커뮤니티 레시피게시판에도 올라가므로 정지 중에는 쓸 수 없다
     name = _recipe_name(recipe_id)
     review = _my_live_review(db, recipe_id, me)
+    rating_changed = review is None or review.rating != payload.rating
     if review is None:
         recent = db.scalar(
             select(func.count()).select_from(RecipeReview).where(RecipeReview.author_id == me.id, RecipeReview.created_at >= utcnow() - timedelta(hours=1))
@@ -131,6 +132,9 @@ def write_review(recipe_id: str, payload: ReviewWrite, response: Response, me: U
             review.rating, review.body, review.updated_at = payload.rating, payload.body, utcnow()
         review.recipe_name = name
     try:
+        if rating_changed:
+            from uuid import uuid4
+            db.add(RecipeEvent(user_id=me.id,recipe_id=recipe_id,event_key=str(uuid4()),event_type="rating",source="review",rating=payload.rating))
         sync_review_post(db, review)
         db.commit()
     except IntegrityError:  # 같은 사람이 같은 레시피에 동시에 두 번 보냈다

@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import Comment, Post, PostPhoto, RecipeReview, Report, User
+from app.models import Comment, Post, PostPhoto, RecipeReview, Report, User, RecipeEvent
 from app.schemas import MessageResponse, ReportCreate
 from app.timeutil import utcnow
 
@@ -24,12 +24,18 @@ def _mark_post_deleted(db: Session, post: Post, by_user_id: int) -> None:
         db.delete(photo)
 
 
+def _rating_deleted(db: Session, review: RecipeReview):
+    from uuid import uuid4
+    db.add(RecipeEvent(user_id=review.author_id,recipe_id=review.recipe_id,event_key=str(uuid4()),event_type='rating_deleted',source='review'))
+
+
 def delete_post(db: Session, post: Post, by_user_id: int) -> None:
     """후기에서 자동 등록된 글은 원본 후기와 함께 지운다."""
     _mark_post_deleted(db, post, by_user_id)
     if post.review_id is not None:
         review = db.get(RecipeReview, post.review_id)
         if review is not None and review.deleted_at is None:
+            _rating_deleted(db, review)
             review.deleted_at, review.deleted_by = post.deleted_at, by_user_id
     db.commit()
 
@@ -40,6 +46,7 @@ def delete_comment(db: Session, comment: Comment, by_user_id: int) -> None:
 
 
 def delete_review(db: Session, review: RecipeReview, by_user_id: int) -> None:
+    _rating_deleted(db, review)
     review.deleted_at, review.deleted_by = utcnow(), by_user_id
     post = db.scalar(select(Post).where(Post.review_id == review.id, Post.deleted_at.is_(None)))
     if post is not None:

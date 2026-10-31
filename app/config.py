@@ -61,6 +61,8 @@ class Settings(BaseSettings):
 
     foodsafety_api_key: str = ""  # 비우면 바코드 조회 비활성
     recipe_data_dir: str = "recipe_data"  # 별도 볼륨; 원본/색인은 Git에 넣지 않는다
+    recommendation_model_dir: str = ""  # offline installed immutable bundle; empty disables AI
+    recommendation_weights: str = "0.6,0.3,0.1"
     mafra_api_key: str = ""
     mafra_api_base: str = "http://211.237.50.150:7080/openapi"
     cors_origins: str = "*"
