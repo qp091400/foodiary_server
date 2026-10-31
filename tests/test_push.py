@@ -186,3 +186,15 @@ def test_web_transport_encrypts_and_signs_payload_without_logging_credentials(cl
     assert options["headers"]["content-encoding"] == "aes128gcm"
     assert isinstance(options["data"], bytes)
     assert "새 댓글".encode() not in options["data"]
+
+
+def test_new_comment_is_sent_during_request_without_waiting_for_scheduler(client, world, monkeypatch):
+    monkeypatch.setattr(settings, "push_immediate_enabled", True)
+    sent=[]
+    monkeypatch.setattr(push, "send", lambda device,payload: sent.append(payload))
+    assert register(client, world).status_code==200
+    post_comment(client,world)
+    assert len(sent)==1 and sent[0]['data']['kind']=='comment'
+    with SessionLocal() as db:
+        assert push.dispatch(db)['sent']==0
+    assert len(sent)==1

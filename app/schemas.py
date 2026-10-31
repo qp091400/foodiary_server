@@ -155,6 +155,7 @@ class SignupRequest(BaseModel):
     email: Email
     password: Password
     nickname: Nickname
+    household_size: int = Field(ge=1, le=20, strict=True)
     verification_token: str
 
 
@@ -198,6 +199,7 @@ class UserOut(BaseModel):
     username: str
     email: str
     nickname: str
+    household_size: int | None = None
     created_at: UtcDatetime
     is_admin: bool
     avatar_url: str | None = None
@@ -215,7 +217,14 @@ class TokenResponse(TokenPair):
 
 
 class UserUpdate(BaseModel):
-    nickname: Nickname
+    nickname: Nickname | None = None
+    household_size: int | None = Field(default=None, ge=1, le=20, strict=True)
+
+    @model_validator(mode="after")
+    def validate_changes(self):
+        if not self.model_fields_set or any(getattr(self, key) is None for key in self.model_fields_set):
+            raise ValueError("변경할 닉네임 또는 가구 인원을 입력해주세요.")
+        return self
 
 
 class PasswordChangeRequest(BaseModel):

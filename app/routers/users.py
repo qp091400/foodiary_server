@@ -35,7 +35,8 @@ def get_me(user: User = Depends(get_current_user)):
 
 @router.patch("/me", response_model=UserOut, summary="닉네임 변경")
 def update_me(payload: UserUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    user.nickname = payload.nickname
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(user, key, value)
     db.commit()
     return user
 

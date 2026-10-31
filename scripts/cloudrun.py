@@ -88,6 +88,14 @@ def validate_config(config: dict) -> None:
         raise ValueError("push_web_public_key must be the base64url VAPID public key")
     if "push_expo_enabled" in config and not isinstance(config["push_expo_enabled"], bool):
         raise ValueError("push_expo_enabled must be a boolean")
+    if "push_immediate_enabled" in config and not isinstance(config["push_immediate_enabled"], bool):
+        raise ValueError("push_immediate_enabled must be a boolean")
+    if config.get("push_immediate_enabled"):
+        if not config.get("push_web_public_key") or not re.fullmatch(r"[a-zA-Z0-9_-]+:[0-9]+", config.get("push_vapid_secret", "")):
+            raise ValueError("Immediate web push needs the existing public key and push_vapid_secret as SECRET:VERSION")
+        subject = urlsplit(config.get("push_vapid_subject", ""))
+        if not (subject.scheme == "https" and subject.hostname or subject.scheme == "mailto" and "@" in subject.path):
+            raise ValueError("push_vapid_subject must be a contact HTTPS or mailto address")
 
 
 def save_private(path: Path, value: str, *, exclusive: bool = False) -> None:
@@ -123,6 +131,8 @@ def environment(config: dict) -> dict[str, str]:
         TIMEZONE="Asia/Seoul",
         PUSH_WEB_PUBLIC_KEY=config.get("push_web_public_key", ""),
         PUSH_EXPO_ENABLED="true" if config.get("push_expo_enabled", False) else "false",
+        PUSH_IMMEDIATE_ENABLED="true" if config.get("push_immediate_enabled", False) else "false",
+        **({"PUSH_VAPID_SUBJECT": config["push_vapid_subject"]} if config.get("push_immediate_enabled") else {}),
     )
 
 
@@ -265,7 +275,10 @@ class Deployment:
         versions = self.versions()
         if any(not str(versions.get(key, "")).isdigit() for key in keys):
             raise ValueError("Upload secrets before deploying")
-        return ",".join(f"{key}={self.secret_name(key)}:{versions[key]}" for key in keys)
+        bindings = [f"{key}={self.secret_name(key)}:{versions[key]}" for key in keys]
+        if "JWT_SECRET" in keys and self.config.get("push_immediate_enabled"):
+            bindings.append(f"PUSH_VAPID_PRIVATE_KEY={self.config['push_vapid_secret']}")
+        return ",".join(bindings)
 
     def set_test_password(self, *, disable: bool = False) -> None:
         versions = self.versions()

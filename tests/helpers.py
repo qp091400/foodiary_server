@@ -42,6 +42,7 @@ def signup(client, username: str = "minsu", address: str | None = None, nickname
             "email": address,
             "password": PASSWORD,
             "nickname": nickname or username,
+            "household_size": 1,
             "verification_token": get_verification_token(client, address, "signup"),
         },
     )

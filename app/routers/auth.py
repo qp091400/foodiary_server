@@ -127,6 +127,7 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)):
         email=payload.email,
         password_hash=hash_password(payload.password),
         nickname=payload.nickname,
+        household_size=payload.household_size,
     )
     db.add(user)
     try:

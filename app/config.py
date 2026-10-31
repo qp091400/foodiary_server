@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     push_vapid_subject: str = ""
     push_expo_access_token: str = ""
     push_expo_enabled: bool = False
+    push_immediate_enabled: bool = False
     # 게시판 검색의 의미 점수(임베딩). local: 서버 안에서 계산(키·네트워크 불필요, docs/post-search.md)
     # none: 끈다 → 키워드 점수만으로 검색한다. 문제가 생기면 이 값만 바꿔 다시 시작하면 된다
     embedding_provider: Literal["local", "none"] = "local"
