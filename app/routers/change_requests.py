@@ -25,6 +25,7 @@ def _out(db: Session, request: ChangeRequest) -> ChangeRequestOut:
     fridge = db.get(Fridge, request.fridge_id)
     requester = db.get(User, request.requester_id)
     payload = request.payload or {}
+    item = db.get(FoodItem, request.item_id) if request.item_id else None
     return ChangeRequestOut(
         id=request.id,
         fridge_id=request.fridge_id,
@@ -34,6 +35,7 @@ def _out(db: Session, request: ChangeRequest) -> ChangeRequestOut:
         item_id=request.item_id,
         item_name=request.item_name,
         quantity=payload.get("quantity"),
+        unit=item.unit if item else "개",
         category=payload.get("category"),
         storage=payload.get("storage"),
         expiry_date=payload.get("expiry_date"),

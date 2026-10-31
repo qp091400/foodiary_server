@@ -73,6 +73,7 @@ def list_purchases(
             category=item.category,
             category_label=label_of(item.category),
             quantity=item.quantity,
+            unit=item.unit,
             unit_price=item.unit_price,
             total_price=item.total_price,
             purchased_on=item.purchased_on,

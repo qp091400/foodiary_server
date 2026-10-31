@@ -19,7 +19,7 @@ from pathlib import Path
 from urllib.request import urlopen
 
 from app.config import settings
-from app.services.recipes import ingredient_parts
+from app.services.recipes import image_url, ingredient_parts
 from app.services.recipe_quality import QUALITY_VERSION, screen
 
 MAFRA_SOURCE = '농림수산식품교육문화정보원 · 농식품 레시피'
@@ -72,10 +72,13 @@ def mafra_recipes(data):
         rid = str(row['RECIPE_ID'])
         raw = '\n'.join(f"{r['IRDNT_NM']} {r.get('IRDNT_CPCTY', '')}" for r in
                         sorted(ingredients[rid], key=lambda r: int(r['IRDNT_SN'])))
-        ordered = sorted(steps[rid], key=lambda r: int(r['COOKING_NO']))
+        ordered = [r for r in sorted(steps[rid], key=lambda r: int(r['COOKING_NO'])) if r.get('COOKING_DC', '').strip()]
         yield dict(id='mafra:' + rid, name=row['RECIPE_NM_KO'], category=row.get('TY_NM', ''),
                    method='', ingredients=ingredient_parts(raw), ingredients_text=raw,
-                   steps=[r['COOKING_DC'] for r in ordered if r.get('COOKING_DC', '').strip()],
+                   steps=[r['COOKING_DC'] for r in ordered],
+                   # 농식품 조리과정 사진과 대표 사진 (순서와 같은 길이). 공공 자료라 앱에서 보여 줄 수 있다.
+                   step_images=[image_url(r.get('STRE_STEP_IMAGE_URL')) for r in ordered],
+                   image=image_url(row.get('IMG_URL')),
                    tip='\n'.join(r['STEP_TIP'] for r in ordered if r.get('STEP_TIP')),
                    description=row.get('SUMRY', ''), cooking_time=row.get('COOKING_TIME', ''),
                    difficulty=row.get('LEVEL_NM', ''), servings=row.get('QNT', ''),

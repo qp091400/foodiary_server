@@ -533,3 +533,18 @@ def test_real_barcode_decoding():
     receipt.paste(barcode, (60, 340))
     assert barcode_service.decode_receipt_barcode(receipt) == "2026101000120034"
     assert barcode_service.decode_receipt_barcode(Image.new("RGB", (300, 300), "white")) is None
+
+
+def test_confirm_keeps_the_unit_of_each_line(client, fridge):
+    use_ocr(RECEIPT_ROWS)
+    draft = upload(client, fridge).json()
+    milk, tofu = draft["draft_items"][0], draft["draft_items"][1]
+    items = [{**milk, "quantity": 1, "unit": "L"}, {**tofu, "unit": "개"}]
+    confirmed = client.post(f"/fridges/{fridge['id']}/receipts/{draft['id']}/confirm", headers=fridge["headers"], json={"items": items})
+    assert confirmed.status_code == 200, confirmed.text
+    stored = {item["name"]: item for item in client.get(f"/fridges/{fridge['id']}/items", headers=fridge["headers"]).json()}
+    assert (stored["서울우유 1L"]["quantity"], stored["서울우유 1L"]["unit"]) == (1, "L")
+    # 팩 단가는 L로 센 수량과 맞지 않아 비워 둔다. 개수로 센 두부는 그대로다.
+    assert stored["서울우유 1L"]["unit_price"] is None and stored["풀무원 두부"]["unit_price"] == 1500
+    lines = client.get(f"/fridges/{fridge['id']}/receipts/{draft['id']}", headers=fridge["headers"]).json()["items"]
+    assert [line["unit"] for line in lines[:2]] == ["L", "개"]

@@ -87,6 +87,8 @@ ItemName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1,
 Barcode = Annotated[str | None, BeforeValidator(_blank_to_none), AfterValidator(_barcode)]
 CategoryKey = Annotated[str | None, BeforeValidator(_blank_to_none), AfterValidator(_category)]
 Storage = Literal["fridge", "freezer", "room"]
+# 수량 단위. 무게·부피는 g/kg, ml/L로 그대로 세고(우유 1L 2개 → 2 L), 나머지는 개수.
+Unit = Literal["개", "g", "kg", "ml", "L"]
 Purpose = Literal["signup", "find_id", "reset_password"]
 # DB의 naive UTC 시각을 "2026-10-13T05:21:09Z" 형태로 내보낸다.
 UtcDatetime = Annotated[datetime, PlainSerializer(_utc_iso, return_type=str, when_used="json")]
@@ -281,6 +283,7 @@ class ItemCreate(BaseModel):
 
     name: ItemName
     quantity: float = Field(1, gt=0)
+    unit: Unit = "개"
     category: CategoryKey = None
     storage: Storage | None = None
     barcode: Barcode = None
@@ -301,6 +304,7 @@ class ItemUpdate(BaseModel):
     storage: Storage | None = None
     quantity: float | None = Field(None, gt=0)
     remaining_quantity: float | None = Field(None, gt=0)
+    unit: Unit | None = None
     unit_price: int | None = Field(None, ge=0)
     total_price: int | None = Field(None, ge=0)
     expiry_date: date | None = None
@@ -308,7 +312,7 @@ class ItemUpdate(BaseModel):
 
     @model_validator(mode="after")
     def _required_fields_not_null(self) -> "ItemUpdate":
-        for name in ("name", "category", "storage", "quantity", "remaining_quantity"):
+        for name in ("name", "category", "storage", "quantity", "remaining_quantity", "unit"):
             if name in self.model_fields_set and getattr(self, name) is None:
                 raise ValueError(f"{name} 값은 비울 수 없습니다.")
         return self
@@ -332,6 +336,7 @@ class ItemOut(SizeFields):
     barcode: str | None
     quantity: float
     remaining_quantity: float
+    unit: str = "개"
     unit_price: int | None
     total_price: int | None
     purchased_on: date
@@ -387,6 +392,7 @@ class ReceiptItemOut(SizeFields):
     name: str
     barcode: str | None
     quantity: float
+    unit: str = "개"
     unit_price: int | None
     amount: int
     discount: int
@@ -452,6 +458,7 @@ class ConfirmItem(BaseModel):
     line_no: int | None = Field(None, description="초안의 line_no. 보내면 초안과 대조해 소비기한 출처를 유지한다")
     name: ItemName
     quantity: float = Field(gt=0)
+    unit: Unit = "개"
     unit_price: int | None = Field(None, ge=0)
     amount: int = Field(ge=0)
     discount: int = Field(0, ge=0)
@@ -513,6 +520,7 @@ class PurchaseOut(SizeFields):
     category: str
     category_label: str
     quantity: float
+    unit: str = "개"
     unit_price: int | None
     total_price: int | None
     purchased_on: date
@@ -690,6 +698,7 @@ class ChangeRequestOut(BaseModel):
     item_id: int | None
     item_name: str | None  # 요청할 때의 품목 이름 (add면 만들 품목 이름)
     quantity: float | None
+    unit: str = "개"  # quantity의 단위 (그 품목의 단위, add는 개)
     category: str | None
     storage: str | None
     expiry_date: date | None

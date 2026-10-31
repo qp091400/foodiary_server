@@ -8,7 +8,7 @@ from pathlib import Path
 
 from app.config import settings
 from app.services.recipe_names import with_display_name
-from app.services.recipes import PARENTS, STAPLES, catalogue, ingredient_key, rank
+from app.services.recipes import PARENTS, STAPLES, catalogue, ingredient_key, presentable, rank
 
 
 def store_path():
@@ -58,13 +58,16 @@ def recommendations(foods, offset=0, seed=None, limit=30):
             params.extend(sorted(main))
             available_marks = ','.join('?' for _ in available)
             family = 'r.dish_family' if 'dish_family' in columns else 'r.id'
-            query = (f'WITH scored AS (SELECT r.id, r.payload, {family} AS family, '
+            # Fewest missing ingredients first; among equals, recipes the app can show step by step
+            # (public sources) come before link-only ones.
+            no_steps = '(r.has_steps=0)' if 'has_steps' in columns else '0'
+            query = (f'WITH scored AS (SELECT r.id, r.payload, {family} AS family, {no_steps} AS no_steps, '
                      f'r.ingredient_count - (SELECT COUNT(*) FROM ingredients i '
                      f'WHERE i.recipe_id=r.id AND i.key IN ({available_marks})) AS missing '
                      'FROM recipes r WHERE ' + ' AND '.join(clauses) + '), '
-                     'variants AS (SELECT id,payload,missing,ROW_NUMBER() OVER '
-                     '(PARTITION BY family ORDER BY missing,recipe_order(id),id) AS choice FROM scored) '
-                     'SELECT payload FROM variants WHERE choice=1 ORDER BY missing,recipe_order(id),id LIMIT ? OFFSET ?')
+                     'variants AS (SELECT id,payload,missing,no_steps,ROW_NUMBER() OVER '
+                     '(PARTITION BY family ORDER BY missing,no_steps,recipe_order(id),id) AS choice FROM scored) '
+                     'SELECT payload FROM variants WHERE choice=1 ORDER BY missing,no_steps,recipe_order(id),id LIMIT ? OFFSET ?')
             rows = [json.loads(row[0]) for row in db.execute(query, [*sorted(available), *params, limit + 1, offset])]
         # Reuse the same strict all-selected rule and response contract as the legacy catalogue.
         return page(rank(rows[:limit], foods, limit=limit, seed=seed), metadata, len(rows) > limit)
@@ -72,7 +75,7 @@ def recommendations(foods, offset=0, seed=None, limit=30):
 
 def detail(recipe_id):
     if not store_path().exists():
-        return with_display_name(next((r for r in catalogue()['recipes'] if r['id'] == recipe_id), None))
+        return presentable(with_display_name(next((r for r in catalogue()['recipes'] if r['id'] == recipe_id), None)))
     with closing(connect()) as db:
         row = db.execute('SELECT payload FROM recipes WHERE id=?', (recipe_id,)).fetchone()
-        return with_display_name(json.loads(row[0])) if row else None
+        return presentable(with_display_name(json.loads(row[0]))) if row else None
