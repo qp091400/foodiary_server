@@ -1,7 +1,7 @@
 """글에 붙인 링크의 미리보기(제목·설명·대표 이미지). YouTube는 썸네일과 제목을 만든다.
 
 글을 쓰거나 고칠 때 한 번만 만들어 글에 저장한다. 글을 읽을 때마다 바깥 사이트를 부르지 않는다.
-못 만들면 None이고, 글쓰기는 그대로 성공한다 (미리보기는 덤이다).
+글에 주소가 여럿이면 주소마다 만든다(최대 MAX_PREVIEWS개). 못 만든 주소는 빠질 뿐이고, 글쓰기는 그대로 성공한다 (미리보기는 덤이다).
 
 서버가 사용자가 적은 주소로 직접 접속하므로, 서버 안쪽(내부망, 클라우드 메타데이터 서버 등)을 건드리지 못하게 막는다(SSRF):
 - http/https, 기본 포트(80/443)만 쓴다. 아이디·비밀번호가 든 주소는 거절한다.
@@ -15,6 +15,7 @@ import logging
 import re
 import socket
 import time
+from concurrent.futures import ThreadPoolExecutor
 from html.parser import HTMLParser
 from urllib.parse import parse_qs, quote, urljoin, urlsplit
 
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 URL_RE = re.compile(r"https?://[^\s<>\"'`]+", re.IGNORECASE)
 TRAILING = ".,;:!?'\"…"  # 문장 끝의 문장부호는 주소가 아니다
 MAX_URL = 2048
+MAX_PREVIEWS = 5  # 글 하나에 미리보기를 만들어 주는 주소의 수. 서버가 바깥에 접속하는 횟수의 상한이다
 MAX_REDIRECTS = 3
 MAX_BYTES = 300_000  # HTML 앞부분이면 메타 태그는 충분하다
 TOTAL_SECONDS = 5.0  # 한 주소를 읽는 데 쓸 수 있는 전체 시간
@@ -65,14 +67,17 @@ def _clean(url: str) -> str | None:
     return url
 
 
-def first_url(*texts: str | None) -> str | None:
-    """앞에서부터 처음 나오는 http(s) 주소. 글 본문을 먼저, 없으면 제목에서 찾는다."""
+def urls_in(*texts: str | None, limit: int = MAX_PREVIEWS) -> list[str]:
+    """나온 순서대로 http(s) 주소들(같은 주소는 한 번만, 최대 limit개). 글 본문을 먼저, 그다음 제목에서 찾는다."""
+    found: list[str] = []
     for text in texts:
         for match in URL_RE.finditer(text or ""):
             url = _clean(match.group(0))
-            if url:
-                return url
-    return None
+            if url and url not in found:
+                found.append(url)
+                if len(found) == limit:
+                    return found
+    return found
 
 
 _YOUTUBE_HOSTS = {
@@ -293,13 +298,8 @@ def _page_preview(url: str) -> dict | None:
     return parse_page(_decode(body, None), final_url)
 
 
-def build_preview(*texts: str | None) -> dict | None:
-    """글의 제목·본문에서 처음 나오는 주소의 미리보기. 주소가 없거나 만들 수 없으면 None. 예외는 던지지 않는다."""
-    if not settings.link_preview_enabled:
-        return None
-    url = first_url(*texts)
-    if url is None:
-        return None
+def _preview_of(url: str) -> dict | None:
+    """주소 하나의 미리보기. 만들 수 없으면 None. 예외는 던지지 않는다."""
     try:
         video_id = youtube_id(url)
         found = _youtube_preview(url, video_id) if video_id else _page_preview(url)
@@ -309,11 +309,16 @@ def build_preview(*texts: str | None) -> dict | None:
     return {"url": url, **found} if found else None
 
 
-def refreshed_preview(current: dict | None, *texts: str | None) -> dict | None:
-    """글을 고친 뒤의 미리보기. 처음 나오는 주소가 그대로면 있던 것을 쓰고(다시 접속하지 않는다), 바뀌었으면 새로 만든다."""
-    url = first_url(*texts)
-    if url is None:
-        return None
-    if current and current.get("url") == url:
-        return current
-    return build_preview(*texts)
+def build_previews(*texts: str | None, reuse: list[dict] | None = None) -> list[dict]:
+    """글의 본문·제목에 나온 주소들(최대 MAX_PREVIEWS개)의 미리보기. 주소가 나온 순서대로이고, 만들 수 없는 주소는 빠진다.
+
+    reuse는 이미 만들어 둔 미리보기들이다. 같은 주소가 있으면 다시 접속하지 않고 그것을 쓴다(글을 고칠 때).
+    새로 만들 주소가 여럿이어도 동시에 접속하므로 가장 느린 한 곳만큼만 걸린다.
+    """
+    known = {item["url"]: item for item in reuse or [] if isinstance(item, dict) and isinstance(item.get("url"), str)}
+    urls = urls_in(*texts)
+    todo = [url for url in urls if url not in known]
+    if todo and settings.link_preview_enabled:
+        with ThreadPoolExecutor(max_workers=len(todo)) as pool:
+            known.update(zip(todo, pool.map(_preview_of, todo)))
+    return [known[url] for url in urls if known.get(url)]

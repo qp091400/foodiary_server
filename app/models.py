@@ -255,7 +255,10 @@ class Post(Base):
     body: Mapped[str] = mapped_column(Text)
     board: Mapped[str] = mapped_column(String(10), default="general", server_default="general")
     review_id: Mapped[int | None] = mapped_column(ForeignKey("recipe_reviews.id", ondelete="SET NULL"), unique=True)
-    # 글에 붙인 첫 링크의 미리보기(app/services/link_preview.py). 글을 쓰거나 고칠 때 한 번 만들어 저장한다. 없으면 None
+    # 글에 나온 주소마다의 미리보기 목록(app/services/link_preview.py). 글을 쓰거나 고칠 때 한 번 만들어 저장한다.
+    # None은 이 칸이 생기기 전에 쓴 글(link_preview만 있다), []는 만들어 봤는데 없다는 뜻이다
+    link_previews: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # 첫 번째 미리보기. 목록을 모르는 옛 서버·옛 앱을 위해 계속 같이 저장한다 (0014에서 만든 칸)
     link_preview: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     updated_at: Mapped[datetime | None]
     created_at: Mapped[datetime] = mapped_column(default=utcnow)

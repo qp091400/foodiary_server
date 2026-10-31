@@ -6312,7 +6312,7 @@
           "kind"
         ],
         "title": "LinkPreviewOut",
-        "description": "글에 붙인 첫 링크의 미리보기. 글을 쓰거나 고칠 때 서버가 만들어 저장한다. 누르면 url을 연다."
+        "description": "글 속 링크 하나의 미리보기. 글을 쓰거나 고칠 때 서버가 만들어 저장한다. url은 본문에 적힌 주소 그대로이고, 누르면 그것을 연다."
       },
       "LoginRequest": {
         "properties": {
@@ -6629,6 +6629,14 @@
               "recipe"
             ],
             "title": "Board"
+          },
+          "link_previews": {
+            "items": {
+              "$ref": "#/components/schemas/LinkPreviewOut"
+            },
+            "type": "array",
+            "title": "Link Previews",
+            "default": []
           },
           "link_preview": {
             "anyOf": [

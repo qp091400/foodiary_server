@@ -679,7 +679,7 @@ class PostPhotoOut(BaseModel):
 
 
 class LinkPreviewOut(BaseModel):
-    """글에 붙인 첫 링크의 미리보기. 글을 쓰거나 고칠 때 서버가 만들어 저장한다. 누르면 url을 연다."""
+    """글 속 링크 하나의 미리보기. 글을 쓰거나 고칠 때 서버가 만들어 저장한다. url은 본문에 적힌 주소 그대로이고, 누르면 그것을 연다."""
 
     url: str
     kind: Literal["link", "youtube"]  # youtube면 영상 썸네일이다 (앱이 재생 표시를 얹는다)
@@ -695,7 +695,8 @@ class PostOut(BaseModel):
     title: str
     body: str
     board: PostBoard
-    link_preview: LinkPreviewOut | None = None  # 본문(없으면 제목)에서 처음 나온 링크. 링크가 없거나 못 만들면 없다
+    link_previews: list[LinkPreviewOut] = []  # 본문·제목에 나온 링크마다(최대 5개, 나온 순서). 앱은 본문의 그 링크 바로 아래에 카드를 놓는다
+    link_preview: LinkPreviewOut | None = None  # link_previews의 첫 번째. 목록을 모르는 옛 앱용이다
     review: PostReviewOut | None
     updated_at: UtcDatetime | None
     can_edit: bool

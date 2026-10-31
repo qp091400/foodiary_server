@@ -34,7 +34,7 @@ from app.schemas import (
     ReportCreate,
 )
 from app.services.community import delete_comment, delete_post, file_report, remove_photo_file
-from app.services.link_preview import build_preview, refreshed_preview
+from app.services.link_preview import build_previews
 from app.services.post_search import find_posts
 from app.services.suspension import ensure_can_write
 from app.timeutil import utcnow
@@ -52,14 +52,27 @@ def _photo_url(post_id: int, photo_id: int) -> str:
     return f"/posts/{post_id}/photos/{photo_id}"
 
 
-def _preview_out(data: dict | None) -> LinkPreviewOut | None:
-    """글에 저장된 미리보기를 응답 모양으로. 저장된 모양이 이상하면(옛 형식 등) 없는 것으로 친다."""
-    if not data:
-        return None
-    try:
-        return LinkPreviewOut.model_validate(data)
-    except ValidationError:
-        return None
+def _stored_previews(post: Post) -> list[dict]:
+    """글에 저장된 미리보기들. 목록 칸이 생기기 전에 쓴 글(None)은 예전 칸의 하나짜리 미리보기를 쓴다."""
+    if post.link_previews is not None:
+        return [item for item in post.link_previews if isinstance(item, dict)] if isinstance(post.link_previews, list) else []
+    return [post.link_preview] if isinstance(post.link_preview, dict) else []
+
+
+def _previews_out(post: Post) -> list[LinkPreviewOut]:
+    """저장된 미리보기를 응답 모양으로. 모양이 이상한 것(옛 형식 등)은 빼고 나머지는 보여 준다."""
+    shown = []
+    for data in _stored_previews(post):
+        try:
+            shown.append(LinkPreviewOut.model_validate(data))
+        except ValidationError:
+            continue
+    return shown
+
+
+def _save_previews(post: Post, previews: list[dict]) -> None:
+    post.link_previews = previews
+    post.link_preview = previews[0] if previews else None  # 옛 앱·옛 서버가 읽는 칸
 
 
 def _decorate(db: Session, rows: list[tuple[Post, User]], me: User) -> list[PostOut]:
@@ -81,6 +94,7 @@ def _decorate(db: Session, rows: list[tuple[Post, User]], me: User) -> list[Post
         )
         for photo in db.scalars(select(PostPhoto).where(PostPhoto.post_id.in_(ids)).order_by(PostPhoto.id)).all():
             photos.setdefault(photo.post_id, []).append(PostPhotoOut(id=photo.id, url=_photo_url(photo.post_id, photo.id)))
+    previews = {post.id: _previews_out(post) for post, _ in rows}
     return [
         PostOut(
             id=post.id,
@@ -88,7 +102,8 @@ def _decorate(db: Session, rows: list[tuple[Post, User]], me: User) -> list[Post
             title=post.title,
             body=post.body,
             board=post.board,
-            link_preview=_preview_out(post.link_preview),
+            link_previews=previews[post.id],
+            link_preview=previews[post.id][0] if previews[post.id] else None,
             review=PostReviewOut(id=review.id, recipe_id=review.recipe_id, recipe_name=review.recipe_name, rating=review.rating)
             if (review := reviews.get(post.review_id)) else None,
             updated_at=post.updated_at,
@@ -141,8 +156,9 @@ def create_post(payload: PostCreate, me: User = Depends(get_current_user), db: S
     )
     if recent >= POSTS_PER_HOUR:
         raise _too_many("글", POSTS_PER_HOUR)
-    # 본문(없으면 제목)의 첫 링크 미리보기. 못 만들어도 글은 올라간다
-    post = Post(author_id=me.id, title=payload.title, body=payload.body, board=payload.board, link_preview=build_preview(payload.body, payload.title))
+    post = Post(author_id=me.id, title=payload.title, body=payload.body, board=payload.board)
+    # 본문과 제목에 나온 링크마다 미리보기를 만든다. 못 만들어도 글은 올라간다
+    _save_previews(post, build_previews(payload.body, payload.title))
     db.add(post)
     db.commit()
     return _decorate(db, [(post, me)], me)[0]
@@ -184,8 +200,8 @@ def update_post(post_id: int, payload: PostUpdate, me: User = Depends(get_curren
     if any(getattr(post, key) != value for key, value in changes.items()):
         for key, value in changes.items():
             setattr(post, key, value)
-        # 처음 나오는 링크가 그대로면 있던 미리보기를 쓰고, 바뀌었거나 없어졌으면 새로 만든다
-        post.link_preview = refreshed_preview(post.link_preview, post.body, post.title)
+        # 그대로인 링크는 있던 미리보기를 쓰고(다시 접속하지 않는다), 새 링크만 만들고, 없어진 링크의 것은 뺀다
+        _save_previews(post, build_previews(post.body, post.title, reuse=_stored_previews(post)))
         post.updated_at = utcnow()
         db.commit()
     return _decorate(db, [(post, author)], me)[0]
