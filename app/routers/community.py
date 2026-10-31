@@ -330,7 +330,7 @@ def _comment_out(comment: Comment, author: User, me: User) -> CommentOut:
 
 @router.post("/{post_id}/comments", response_model=CommentOut, status_code=201, summary="댓글 쓰기")
 def create_comment(post_id: int, payload: CommentCreate, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    _live_post(db, post_id)
+    post, _ = _live_post(db, post_id)
     ensure_can_write(db, me)
     recent = db.scalar(
         select(func.count()).select_from(Comment).where(Comment.author_id == me.id, Comment.created_at >= utcnow() - timedelta(hours=1))
@@ -340,6 +340,9 @@ def create_comment(post_id: int, payload: CommentCreate, me: User = Depends(get_
     comment = Comment(post_id=post_id, author_id=me.id, body=payload.body)
     db.add(comment)
     db.commit()
+    if post.author_id != me.id:
+        from app.services.push import dispatch_for_user
+        dispatch_for_user(post.author_id)
     return _comment_out(comment, me, me)
 
 

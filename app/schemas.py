@@ -381,6 +381,9 @@ class DraftItem(SizeFields):
     product_name: str | None = None
     confidence: float = 0.0
     name_cut: bool = Field(False, description="쇼핑몰 주문내역 화면에서 이름이 잘려 있다. 확정 전에 이름을 확인하게 한다")
+    discount_estimated: bool = Field(False, description="전체 할인을 품목별 금액에 비례해 나누었다. 확정 전에 확인한다")
+    name_unsure: bool = Field(False, description="줄을 흐리게 읽었고 아는 낱말이 하나도 없어서 이름이 틀렸을 수 있다. warnings에도 안내가 붙는다")
+    read_name: str | None = Field(None, description="사용자들이 고친 기록으로 이름을 바꿨다면, 바꾸기 전에 OCR이 읽은 이름. 바꾸지 않았으면 비어 있다")
 
 
 class ReceiptItemOut(SizeFields):

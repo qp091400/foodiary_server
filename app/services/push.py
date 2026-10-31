@@ -2,6 +2,9 @@
 import json
 import logging
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
+import hashlib
 from datetime import timedelta, timezone, datetime
 from zoneinfo import ZoneInfo
 
@@ -16,6 +19,7 @@ from app.models import Comment, FoodItem, Fridge, FridgeMember, Post, PushDelive
 from app.timeutil import utcnow
 
 log = logging.getLogger(__name__)
+DELIVERY_TIMEOUT = ContextVar("push_delivery_timeout", default=10)
 EXPO_API = "https://exp.host/--/api/v2/push/"
 
 
@@ -27,7 +31,7 @@ class PushError(Exception):
 def _expo(path, body):
     headers = {"Authorization": "Bearer " + settings.push_expo_access_token} if settings.push_expo_access_token else {}
     try:
-        response = httpx.post(EXPO_API + path, json=body, headers=headers, timeout=10)
+        response = httpx.post(EXPO_API + path, json=body, headers=headers, timeout=DELIVERY_TIMEOUT.get())
         if response.status_code in (400, 401, 403):
             raise PushError("expo_configuration", permanent=True)
         response.raise_for_status()
@@ -51,13 +55,13 @@ def send(device: PushDevice, payload: dict) -> str | None:
                 transport.max_redirects = 0
                 webpush(subscription_info=device.credential, data=json.dumps(payload, ensure_ascii=False),
                         vapid_private_key=settings.push_vapid_private_key, requests_session=transport,
-                        vapid_claims={"sub": settings.push_vapid_subject}, ttl=3600, timeout=10)
+                        vapid_claims={"sub": settings.push_vapid_subject}, ttl=3600, timeout=DELIVERY_TIMEOUT.get(), headers={"Urgency": "high"})
         except WebPushException as error:
             status = error.response.status_code if error.response is not None else 0
             raise PushError("web_" + str(status), dead=status in (404, 410), permanent=status in (400, 401, 403, 413)) from None
         return None
     data = _expo("send", {"to": device.credential["token"], "title": payload["title"], "body": payload["body"],
-                          "sound": "default", "channelId": "foodiary", "ttl": 3600,
+                          "sound": "default", "channelId": "foodiary", "ttl": 3600, "priority": "high",
                           "data": payload["data"]})
     if data.get("status") != "ok":
         _expo_error(data)
@@ -97,7 +101,7 @@ def _payload(db, device, event, now):
             "url": f"/?pushFridgeId={fridge.id}&pushUserId={user.id}"}
 
 
-def _enqueue(db, device, now):
+def _enqueue(db, device, now, include_expiry=True):
     events = []
     if device.comments:
         comments = db.scalars(select(Comment).join(Post, Post.id == Comment.post_id).join(User, User.id == Post.author_id).where(
@@ -109,7 +113,7 @@ def _enqueue(db, device, now):
         if comments:
             device.comments_after_id = comments[-1].id
     local = now.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(settings.timezone))
-    if device.expiry and local.hour >= 9:
+    if include_expiry and device.expiry and local.hour >= 9:
         ids = db.scalars(select(FridgeMember.fridge_id).where(FridgeMember.user_id == device.user_id)).all()
         events += [(f"expiry:{local.date()}:{id}", "expiry", id) for id in ids if _expiry_items(db, device.user_id, id, local.date())]
     for key, kind, target in events:
@@ -129,68 +133,111 @@ def _failure(device, event, error, now):
     log.warning("Push delivery %s: %s", event.id, event.error_code)
 
 
-def dispatch(db: Session, now=None, budget_seconds=40):
+def dispatch(db: Session, now=None, budget_seconds=40, user_id=None):
     now = now or utcnow()
     deadline = time.monotonic() + budget_seconds
     sent, skipped = 0, 0
     # Expired credentials are never sent after a password reset, nor indefinitely.
     devices = db.scalars(select(PushDevice).join(User, User.id == PushDevice.user_id).where(
+        (PushDevice.user_id == user_id if user_id is not None else True),
         PushDevice.enabled.is_(True), PushDevice.token_version == User.token_version,
         PushDevice.updated_at >= now - timedelta(days=90)
     ).order_by(PushDevice.updated_at)).all()
     for device in devices:
         if time.monotonic() >= deadline:
             break
-        receipts = db.scalars(select(PushDelivery).where(PushDelivery.device_id == device.id,
-            PushDelivery.status == "accepted", PushDelivery.next_attempt_at <= now).limit(100)).all()
-        if receipts:
-            try:
-                results = _expo("getReceipts", {"ids": [event.ticket for event in receipts]})
-                for event in receipts:
-                    result = results.get(event.ticket)
-                    if result and result.get("status") == "ok":
-                        event.status = "sent"
-                    elif result:
-                        try:
-                            _expo_error(result)
-                        except PushError as error:
-                            _failure(device, event, error, now)
-                    elif event.created_at < now - timedelta(days=1):
-                        event.status, event.error_code = "failed", "receipt_expired"
-                    else:
-                        event.next_attempt_at = now + timedelta(minutes=15)
-                db.commit()
-            except PushError:
-                pass  # Retry receipt lookup next minute; never resend an accepted ticket.
-        if not device.enabled:
-            continue
-        _enqueue(db, device, now)
-        pending = db.scalars(select(PushDelivery).where(PushDelivery.device_id == device.id,
-            PushDelivery.status == "pending", PushDelivery.next_attempt_at <= now).order_by(PushDelivery.id).limit(30)).all()
-        for event in pending:
-            if time.monotonic() >= deadline:
-                break
-            # Refresh the opt-in and access checks immediately before sending.
-            db.refresh(device)
-            payload = _payload(db, device, event, now)
-            if payload is None:
-                event.status = "skipped"
-                skipped += 1
-                db.commit()
+        with _device_lock(db, device.id) as acquired:
+            if not acquired: continue
+            receipts = db.scalars(select(PushDelivery).where(PushDelivery.device_id == device.id,
+                PushDelivery.status == "accepted", PushDelivery.next_attempt_at <= now).limit(100)).all() if user_id is None else []
+            if receipts:
+                try:
+                    results = _expo("getReceipts", {"ids": [event.ticket for event in receipts]})
+                    for event in receipts:
+                        result = results.get(event.ticket)
+                        if result and result.get("status") == "ok":
+                            event.status = "sent"
+                        elif result:
+                            try:
+                                _expo_error(result)
+                            except PushError as error:
+                                _failure(device, event, error, now)
+                        elif event.created_at < now - timedelta(days=1):
+                            event.status, event.error_code = "failed", "receipt_expired"
+                        else:
+                            event.next_attempt_at = now + timedelta(minutes=15)
+                    db.commit()
+                except PushError:
+                    pass  # Retry receipt lookup next minute; never resend an accepted ticket.
+            if not device.enabled:
                 continue
-            event.attempts += 1
-            event.next_attempt_at = now + timedelta(minutes=5)
-            db.commit()  # Durable retry lease before making the external request.
-            try:
-                ticket = send(device, payload)
-                event.ticket, event.status = ticket, "accepted" if ticket else "sent"
-                event.next_attempt_at = now + timedelta(minutes=15)
-                sent += 1
-            except PushError as error:
-                _failure(device, event, error, now)
-            except Exception:
-                _failure(device, event, PushError("transport"), now)
-            db.commit()
-    db.execute(delete(PushDelivery).where(PushDelivery.created_at < now - timedelta(days=30)))
+            _enqueue(db, device, now, include_expiry=user_id is None)
+            pending = db.scalars(select(PushDelivery).where(PushDelivery.device_id == device.id,
+                (PushDelivery.kind == "comment" if user_id is not None else True),
+                PushDelivery.status == "pending", PushDelivery.next_attempt_at <= now).order_by(PushDelivery.id).limit(30)).all()
+            for event in pending:
+                if time.monotonic() >= deadline:
+                    break
+                # Refresh the opt-in and access checks immediately before sending.
+                db.refresh(device)
+                payload = _payload(db, device, event, now)
+                if payload is None:
+                    event.status = "skipped"
+                    skipped += 1
+                    db.commit()
+                    continue
+                event.attempts += 1
+                event.next_attempt_at = now + timedelta(minutes=5)
+                db.commit()  # Durable retry lease before making the external request.
+                try:
+                    ticket = send(device, payload)
+                    event.ticket, event.status = ticket, "accepted" if ticket else "sent"
+                    event.next_attempt_at = now + timedelta(minutes=15)
+                    sent += 1
+                except PushError as error:
+                    _failure(device, event, error, now)
+                except Exception:
+                    _failure(device, event, PushError("transport"), now)
+                db.commit()
+    if user_id is None:
+        db.execute(delete(PushDelivery).where(PushDelivery.created_at < now - timedelta(days=30)))
     db.commit()
     return {"sent": sent, "skipped": skipped}
+
+
+@contextmanager
+def _device_lock(db, device_id):
+    postgres = db.get_bind().dialect.name == "postgresql"
+    key = int.from_bytes(hashlib.sha256(device_id.encode()).digest()[:4], "big", signed=True)
+    if postgres:
+        from sqlalchemy import text
+        acquired = db.scalar(text("SELECT pg_try_advisory_lock(738245194, :key)"), {"key": key})
+        db.commit()
+    else:
+        acquired = True
+    try:
+        yield acquired
+    finally:
+        if postgres and acquired:
+            db.rollback()
+            db.execute(text("SELECT pg_advisory_unlock(738245194, :key)"), {"key": key})
+            db.commit()
+
+
+def dispatch_for_user(user_id):
+    """Bounded delivery while the comment request still has Cloud Run CPU time.
+
+    A dedicated connection preserves per-device advisory locks across commits.
+    The minute job handles skipped, slow or failed deliveries durably.
+    """
+    if not settings.push_immediate_enabled:
+        return
+    from app.database import engine
+    timeout = DELIVERY_TIMEOUT.set(2)
+    try:
+        with engine.connect() as connection, Session(bind=connection, expire_on_commit=False) as db:
+            return dispatch(db, user_id=user_id, budget_seconds=3)
+    except Exception:
+        log.warning("Immediate push unavailable; scheduled worker will retry")
+    finally:
+        DELIVERY_TIMEOUT.reset(timeout)

@@ -5363,6 +5363,30 @@
             "description": "쇼핑몰 주문내역 화면에서 이름이 잘려 있다. 확정 전에 이름을 확인하게 한다",
             "default": false
           },
+          "discount_estimated": {
+            "type": "boolean",
+            "title": "Discount Estimated",
+            "description": "전체 할인을 품목별 금액에 비례해 나누었다. 확정 전에 확인한다",
+            "default": false
+          },
+          "name_unsure": {
+            "type": "boolean",
+            "title": "Name Unsure",
+            "description": "줄을 흐리게 읽었고 아는 낱말이 하나도 없어서 이름이 틀렸을 수 있다. warnings에도 안내가 붙는다",
+            "default": false
+          },
+          "read_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read Name",
+            "description": "사용자들이 고친 기록으로 이름을 바꿨다면, 바꾸기 전에 OCR이 읽은 이름. 바꾸지 않았으면 비어 있다"
+          },
           "size_text": {
             "anyOf": [
               {
@@ -7906,6 +7930,24 @@
               }
             ],
             "title": "Seed"
+          },
+          "q": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Q",
+            "default": ""
+          },
+          "profile_version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Version"
           }
         },
         "type": "object",

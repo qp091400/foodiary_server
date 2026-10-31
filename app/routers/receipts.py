@@ -9,7 +9,7 @@ import uuid
 from collections import deque
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
 from typing import Any, Literal
@@ -39,6 +39,7 @@ from app.schemas import (
     ReceiptSummary,
 )
 from app.services import barcode as barcode_service
+from app.services import learned_names
 from app.services.expiry import OTHER, classify, estimate
 from app.services.foodsafety import ProductInfo, lookup_barcode
 from app.services.ocr import OcrEngine, get_ocr_engine
@@ -58,6 +59,7 @@ WARN_SUM_MISMATCH = "일부 품목을 못 읽었을 수 있어요"
 WARN_NO_ITEMS = "품목을 찾지 못했어요. 직접 추가해 주세요"
 WARN_NO_TOTAL = "영수증 총액을 찾지 못했어요. 빠진 품목이 없는지 확인해 주세요"
 WARN_NAME_CUT = "상품 이름이 화면에서 잘려 있어요. 이름을 확인해 주세요"
+WARN_NAME_UNSURE = "이름이 흐릿하게 읽힌 품목이 있어요. 이름을 확인해 주세요"
 OCR_BUSY = "다른 영수증을 분석 중입니다. 잠시 후 다시 시도해 주세요."
 TOO_MANY_REQUESTS = "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."
 BATCH_TIME_UP = "사진이 많아 정해진 시간 안에 읽지 못했어요. 이 사진부터 다시 올려 주세요."
@@ -115,10 +117,13 @@ def _remove_file(relative_path: str | None) -> None:
         (Path(settings.upload_dir) / relative_path).unlink(missing_ok=True)
 
 
-def build_draft(db: Session, parsed: ParsedReceipt, purchased_on: date) -> list[dict]:
+def build_draft(db: Session, parsed: ParsedReceipt, purchased_on: date, user_id: int | None = None) -> list[dict]:
     lookup = _ProductLookup(db)
+    # 사용자들이 고쳐 둔 이름이 있으면 먼저 바꾼다 (같은 이름이 하나로 합쳐지도록 합치기 전에)
+    learned = learned_names.load(db, user_id, (item.name for item in parsed.items))
+    items = [replace(item, name=fixed, read_name=item.name, name_unsure=False) if (fixed := learned.fix(item.name)) else item for item in parsed.items]
     draft = []
-    for item in merge_same_name(parsed.items):
+    for item in merge_same_name(items):
         product = lookup.get(item.barcode)
         guess = estimate(item.name, purchased_on, product)
         # 쇼핑몰 주문에는 옷·생활용품이 많이 섞여 있다. 식품으로 알아본 것만 넣고 모르는 것은 제외로 둔다(사용자가 켠다).
@@ -142,6 +147,9 @@ def build_draft(db: Session, parsed: ParsedReceipt, purchased_on: date) -> list[
                 product_name=product.name if product else None,
                 confidence=item.confidence,
                 name_cut=item.name_cut,
+                discount_estimated=item.discount_estimated,
+                name_unsure=item.name_unsure,
+                read_name=item.read_name,
             ).model_dump(mode="json")
         )
     return draft
@@ -193,7 +201,7 @@ def read_receipt(
     )
 
 
-def draft_warnings(item_count: int, items_sum: int, total_amount: int | None, *, name_cut: bool = False) -> list[str]:
+def draft_warnings(item_count: int, items_sum: int, total_amount: int | None, *, name_cut: bool = False, discount_estimated: bool = False, name_unsure: bool = False) -> list[str]:
     if item_count == 0:
         return [WARN_NO_ITEMS]
     warnings = []
@@ -203,6 +211,10 @@ def draft_warnings(item_count: int, items_sum: int, total_amount: int | None, *,
         warnings.append(WARN_SUM_MISMATCH)
     if name_cut:
         warnings.append(WARN_NAME_CUT)
+    if name_unsure:
+        warnings.append(WARN_NAME_UNSURE)
+    if discount_estimated:
+        warnings.append("전체 할인을 품목 금액에 비례해 나눴어요. 실제 품목별 할인은 확정 전에 확인해주세요.")
     return warnings
 
 
@@ -235,6 +247,8 @@ def _detail(db: Session, receipt: Receipt) -> ReceiptDetail:
         warnings=draft_warnings(
             count, items_sum, receipt.total_amount,
             name_cut=receipt.status == "pending" and any(item.name_cut for item in draft_items),
+            discount_estimated=receipt.status == "pending" and any(item.discount_estimated for item in draft_items),
+            name_unsure=receipt.status == "pending" and any(item.name_unsure for item in draft_items),
         ),
         raw_lines=receipt.raw_lines or [],
     )
@@ -513,7 +527,7 @@ def _finish_draft(photo: DraftPhoto, boxes: list[OcrBox], access: FridgeAccess, 
         receipt_barcode=photo.receipt_barcode,
         image_path=photo.relative_path,
         raw_lines=parsed.lines,
-        draft_items=build_draft(db, parsed, purchased_on or today()),
+        draft_items=build_draft(db, parsed, purchased_on or today(), access.user.id),
     )
     db.add(receipt)
     try:
@@ -616,6 +630,7 @@ def confirm_receipt(
     lookup = _ProductLookup(db)
 
     created: list[FoodItem] = []
+    edits: list[tuple[str, str, str]] = []  # (OCR이 읽은 이름, 초안에 보여 준 이름, 확정한 이름)
     for line_no, line in enumerate(payload.items, start=1):
         category = line.category or classify(line.name)
         record = ReceiptItem(
@@ -638,6 +653,11 @@ def confirm_receipt(
         # 소비기한을 비웠거나 초안의 추정값을 그대로 돌려보냈으면 자동 추정으로 본다.
         # (확정하면서 구매일이나 카테고리를 고쳤다면 그 값으로 다시 계산된다)
         draft = match_draft(line)
+        if draft is not None and draft.get("name"):
+            shown = draft["name"]
+            read = draft.get("read_name") or shown
+            if line.name != shown or line.name != read:  # 이름을 고쳤거나, 보정된 이름을 되돌렸거나, 보정된 이름을 그대로 받아들였다
+                edits.append((read, shown, line.name))
         untouched = draft is not None and draft.get("expiry_date") == (
             line.expiry_date.isoformat() if line.expiry_date else None
         )
@@ -679,11 +699,13 @@ def confirm_receipt(
     if payload.store_name:
         receipt.store_name = payload.store_name
     db.commit()
-    return ReceiptConfirmResponse(
+    response = ReceiptConfirmResponse(
         receipt_id=receipt.id,
         created_items=[ItemOut.model_validate(food) for food in created],
         skipped=len(payload.items) - len(created),
     )
+    learned_names.learn(db, access.user.id, edits)
+    return response
 
 
 @router.delete(

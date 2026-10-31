@@ -7,10 +7,12 @@
 - 한글 덩어리 전체나 그 끝부분만 고친다. 한국어 상품명은 핵심 명사가 끝에 온다. ("마스카포네"가 "마스크"가 되지 않게)
 - 초성·중성·종성 중 하나만 다르고, 그렇게 고친 결과가 하나뿐일 때만 고친다. ("소서지"는 소시지·소세지 둘 다라서 그대로)
 - 덩어리 안에 이미 아는 낱말(두 글자 키워드 포함)이 있으면 OCR이 제대로 읽은 것으로 보고 손대지 않는다.
+- 그 줄의 OCR 신뢰도가 낮으면(NAME_UNSURE_BELOW 미만) 세 글자 낱말도 한 글자가 통째로 달라진 것까지 고친다. 신뢰도가 높으면 위 규칙 그대로다.
 """
 
 import re
 
+from app.config import settings
 from app.services.expiry import CATEGORIES
 
 # 카테고리 키워드 말고도 영수증에 자주 나오는 세 글자 이상 낱말 (상품명·브랜드). 고칠 대상으로만 쓴다.
@@ -59,19 +61,32 @@ def _one_syllable_off(seen: str, word: str) -> bool:
     return len(wrong) == 1 and any(a == b for a, b in zip(_jamo(wrong[0][0]), _jamo(wrong[0][1])))
 
 
-def _fix_run(run: str) -> str:
+def _fix_run(run: str, loose: bool) -> str:
     if any(word in run for word in _KNOWN):
         return run
     # 고친 결과로 비교한다: "칠성사이디"는 "칠성사이다"로도 "사이다"로도 같은 결과가 된다.
     # 네 글자 이상 낱말은 나머지 글자가 모두 맞으면 한 글자가 통째로 달라도(자모 둘 이상) 고친다. 우연히 맞을 가능성이 낮다.
+    # 줄을 흐리게 읽었을 때(loose)는 세 글자 낱말도 그렇게 고친다.
+    shortest = 3 if loose else 4
     fixed = {
         run[: -len(word)] + word
         for word in _TARGETS
         if len(word) <= len(run)
-        and (_close(run[-len(word):], word) or (len(word) >= 4 and _one_syllable_off(run[-len(word):], word)))
+        and (_close(run[-len(word):], word) or (len(word) >= shortest and _one_syllable_off(run[-len(word):], word)))
     }
     return fixed.pop() if len(fixed) == 1 else run
 
 
-def fix_name(name: str) -> str:
-    return _RUN_RE.sub(lambda match: _fix_run(match.group()), name)
+def is_blurry(confidence: float | None) -> bool:
+    """줄의 OCR 신뢰도가 낮다. 신뢰도를 모르면(None) 낮다고 보지 않는다."""
+    return confidence is not None and confidence < settings.name_unsure_below
+
+
+def fix_name(name: str, confidence: float | None = None) -> str:
+    loose = is_blurry(confidence)
+    return _RUN_RE.sub(lambda match: _fix_run(match.group(), loose), name)
+
+
+def is_recognized(name: str) -> bool:
+    """이름에 아는 낱말(카테고리 키워드, 자주 나오는 상품명)이 하나라도 들어 있다."""
+    return any(word in name for word in _KNOWN)

@@ -215,7 +215,7 @@ def catalogue() -> dict:
         return {"recipes": [], "sample": False, "source_total": 0, "imported_at": None}
 
 
-def rank(recipes: list[dict], foods: list, limit: int = 30, seed: int | None = None) -> list[dict]:
+def rank(recipes: list[dict], foods: list, limit: int = 30, seed: int | None = None, rank_key=None, allow_empty=False) -> list[dict]:
     if limit <= 0:
         return []
     available = set()
@@ -232,17 +232,17 @@ def rank(recipes: list[dict], foods: list, limit: int = 30, seed: int | None = N
         if len(combination_keys(recipe)) < 2:
             continue  # Hard policy, including legacy catalogues and manual overrides.
         recipe_keys = {part["key"] for part in recipe["ingredients"]}
-        if not required or any(not (options & recipe_keys) for options in required):
+        if (not required and not allow_empty) or any(not (options & recipe_keys) for options in required):
             continue  # Every selected ingredient must occur in this one recipe.
         matched, missing = [], []
         for part in recipe["ingredients"]:
             (matched if part["key"] in available else missing).append(part)
         main_matches = sum(not part["staple"] for part in matched)
-        if not main_matches:
+        if not main_matches and not allow_empty:
             continue  # Salt/water alone should not recommend the entire catalogue.
         main_missing = sum(not part["staple"] for part in missing)
         # Fewest missing ingredients first; among equals, recipes the app can show step by step come first.
-        score = (len(missing), 0 if recipe.get("steps") else 1)
+        score = (len(missing), 0 if recipe.get("steps") else 1, *(rank_key(recipe) if rank_key else ()))
         summary = {key: recipe[key] for key in ("id", "name", "category", "method")}
         summary['display_name'] = display_name(recipe)
         summary.update({key: recipe.get(key, '') for key in ('source', 'cooking_time', 'difficulty', 'servings')})
