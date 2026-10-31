@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import JSON, ForeignKey, Index, String, Text, UniqueConstraint, text
+from sqlalchemy import JSON, ForeignKey, Index, LargeBinary, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -227,6 +227,21 @@ class Post(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     deleted_at: Mapped[datetime | None]
     deleted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+
+
+class PostEmbedding(Base):
+    """글 검색용 벡터(임베딩). 검색할 때 없거나 낡은 것만 다시 만든다 (app/services/post_search.py).
+
+    글이 바뀌었는지는 content_hash로, 만든 방식이 바뀌었는지는 model로 알아본다. 그래서 글을 쓰고 고치고 지우는 코드는 이 표를 몰라도 된다.
+    """
+
+    __tablename__ = "post_embeddings"
+
+    post_id: Mapped[int] = mapped_column(ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True)
+    model: Mapped[str] = mapped_column(String(60))  # 벡터를 만든 방식 (Embedder.name)
+    content_hash: Mapped[str] = mapped_column(String(40))  # 벡터를 만들 때 쓴 글 내용의 SHA-1
+    vector: Mapped[bytes] = mapped_column(LargeBinary)  # float32 배열
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
 class PostLike(Base):

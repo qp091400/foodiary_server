@@ -131,18 +131,23 @@ def create_post(payload: PostCreate, me: User = Depends(get_current_user), db: S
     return _decorate(db, [(post, me)], me)[0]
 
 
-@router.get("", response_model=PostList, summary="글 목록·제목/본문 검색 (최신순). 다음 쪽도 같은 q·board를 보낸다")
+@router.get(
+    "",
+    response_model=PostList,
+    summary="글 목록·검색. 검색어가 없으면 최신순, 있으면 관련도순(키워드+임베딩). 다음 쪽도 같은 q·board를 보낸다",
+)
 def list_posts(
-    q: str = Query("", max_length=100, description="제목·본문에 포함된 검색어. 빈 값·공백이면 전체 목록"),
+    q: str = Query("", max_length=100, description="검색어. 제목·본문과 키워드·의미가 맞는 글을 관련도순으로 돌려준다. 빈 값·공백이면 전체 목록(최신순)"),
     board: PostBoard | None = Query(None, description="general: 자유게시판, recipe: 레시피게시판. 생략하면 전체"),
-    before_id: int | None = Query(None, ge=1, description="이 번호보다 오래된 글부터"),
+    before_id: int | None = Query(
+        None, ge=1, description="다음 쪽 표시. 응답의 next_before_id를 그대로 보낸다 (검색어가 없으면 이 번호보다 오래된 글부터, 있으면 이미 받은 결과 수 다음부터)"
+    ),
     limit: int = Query(20, ge=1, le=50),
     me: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    rows = find_posts(db, query=q, board=board, before_id=before_id, limit=limit)
-    page = rows[:limit]
-    return PostList(posts=_decorate(db, page, me), next_before_id=page[-1][0].id if len(rows) > limit else None)
+    page, next_cursor = find_posts(db, query=q, board=board, before_id=before_id, limit=limit)
+    return PostList(posts=_decorate(db, page, me), next_before_id=next_cursor)
 
 
 @router.get("/{post_id}", response_model=PostOut, summary="글 하나 보기")

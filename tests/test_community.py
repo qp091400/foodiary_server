@@ -158,7 +158,7 @@ def test_search_matches_title_or_body_and_ignores_case(client, users):
     body_match = write(client, me, title="아침 메뉴", body="달걀을 익혀요").json()["id"]
     english = write(client, me, title="TOFU Soup", body="두부국").json()["id"]
     result = client.get("/posts", headers=me["headers"], params={"q": "  달걀  "}).json()
-    assert [p["id"] for p in result["posts"]] == [body_match, title_match]
+    assert [p["id"] for p in result["posts"]] == [title_match, body_match]  # 검색은 관련도순: 제목에 있는 글이 먼저 (더 오래됐어도)
     assert result["next_before_id"] is None
     result = client.get("/posts", headers=me["headers"], params={"q": "tofu"}).json()
     assert [p["id"] for p in result["posts"]] == [english]
@@ -177,12 +177,19 @@ def test_search_treats_special_characters_as_literal_text(client, users, keyword
 def test_search_keeps_board_and_cursor_filters_and_excludes_deleted_posts(client, users):
     headers = users["minsu"]["headers"]
     rows = []
-    for board, body in [("recipe", "요리 팁"), ("general", "요리 이야기"), ("recipe", "다른 내용"), ("recipe", "요리 후기"), ("recipe", "요리 삭제")]:
-        rows.append(client.post("/posts", headers=headers, json={"title": "제목", "body": body, "board": board}).json()["id"])
+    for board, title, body in [
+        ("recipe", "제목", "요리 팁"),
+        ("general", "제목", "요리 이야기"),
+        ("recipe", "제목", "다른 내용"),
+        ("recipe", "요리 후기", "맛있었어요"),
+        ("recipe", "제목", "요리 삭제"),
+    ]:
+        rows.append(client.post("/posts", headers=headers, json={"title": title, "body": body, "board": board}).json()["id"])
     client.delete(f"/posts/{rows[-1]}", headers=headers)
+    # 관련도순: 제목에 '요리'가 있는 글(rows[3])이 먼저, 본문에만 있는 글(rows[0])이 다음. 다른 게시판·지운 글·무관한 글은 빠진다.
     first = client.get("/posts", headers=headers, params={"q": "요리", "board": "recipe", "limit": 1}).json()
     assert [p["id"] for p in first["posts"]] == [rows[3]]
-    assert first["next_before_id"] == rows[3]
+    assert first["next_before_id"] == 1  # 검색 중에는 이미 받은 결과 수. 앱은 그대로 돌려보낸다
     last = client.get("/posts", headers=headers, params={"q": "요리", "board": "recipe", "limit": 1, "before_id": first["next_before_id"]}).json()
     assert [p["id"] for p in last["posts"]] == [rows[0]]
     assert last["next_before_id"] is None
