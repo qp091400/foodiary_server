@@ -24,6 +24,7 @@ class ParsedItem:
     barcode: str | None = None
     confidence: float = 0.0
     name_cut: bool = False  # 화면에서 이름이 잘려 있다(주문내역 화면)
+    discount_estimated: bool = False
 
 
 def merge_same_name(items: list[ParsedItem]) -> list[ParsedItem]:
@@ -46,6 +47,7 @@ def merge_same_name(items: list[ParsedItem]) -> list[ParsedItem]:
         first.barcode = first.barcode or item.barcode
         first.confidence = min(first.confidence, item.confidence)
         first.name_cut = first.name_cut or item.name_cut
+        first.discount_estimated = first.discount_estimated or item.discount_estimated
     return list(merged.values())
 
 
@@ -68,7 +70,7 @@ TAX_LINE = r"세\s*물\s*품|물품\s*가\s*액|부\s*[^\s\d]?\s*가\s*세|가\s
 # "압계"는 OCR이 "합계"를 잘못 읽은 것. "할인금액 :"은 품목 아래에 붙는 할인 합계(이미 각 금액에 반영됨)다.
 END_RE = re.compile(
     r"[합압]\s*계|총\s*액|총\s*금액|" + TAX_LINE + r"|받을\s*금액|결제\s*금액"
-    r"|판매\s*총액|공급가|카드\s*승인|신용\s*카드|총\s*구매|할인\s*금액\s*:|총\s*할인|할인\s*합계"
+    r"|판매\s*총액|공급가|카드\s*승인|신용\s*카드|총\s*구\s*매|할인\s*금액\s*:|총\s*할인|할인\s*합계"
 )
 DISCOUNT_RE = re.compile(r"할인|행사|쿠폰|D/?C|에누리", re.IGNORECASE)
 # 주소·대표·전화·TEL·POS는 낱말 첫머리에 올 때만 본다. ("맥주소시지"의 "주소" 같은 오매칭 방지)
@@ -102,8 +104,8 @@ SHORT_DATE_RE = re.compile(r"(?<![\d-])(\d{2})[-./](\d{1,2})[-./](\d{1,2})(?:(?!
 DATE_LABEL_RE = re.compile(r"판매|거래|구매|일시|일자|날짜")
 # 시각, 전화번호, 사업자번호가 있는 줄은 품목이 아니다.
 META_RE = re.compile(r"\d{1,2}:\d{2}|\d{2,4}-\d{3,4}-\d{4}|\d{3}-\d{2}-\d{5}")
-PAY_TOTAL_RE = re.compile(r"받을\s*금액|결제\s*금액")
-SUM_TOTAL_RE = re.compile(r"[합압]\s*계|총\s*액|총\s*금액|판매\s*총액")
+PAY_TOTAL_RE = re.compile(r"받\s*을\s*금\s*액|결\s*제\s*금\s*액")
+SUM_TOTAL_RE = re.compile(r"[합압]\s*계|총\s*액|총\s*금액|판매\s*총액|총\s*구\s*매\s*액")
 SUBTOTAL_RE = re.compile(r"[과관]세|면세|" + TAX_LINE + r"|할인|에누리|수량")
 CODE_RE = re.compile(r"\d{8,14}")
 GROUPED_NUMBER_RE = re.compile(r"[1-9]\d{0,2}(?:[,.]\d{3})+")  # OCR이 쉼표를 마침표로 읽는 경우 포함
@@ -366,6 +368,7 @@ def parse_items(lines: list[tuple[str, float]]) -> list[ParsedItem]:
     """품목 구간의 (정규화된 줄, confidence) 목록을 품목으로 해석한다."""
     items: list[ParsedItem] = []
     waiting: _Waiting | None = None
+    basket_discount = 0
 
     def add_item(name: str, numbers: list[int], barcode: str | None, confidence: float) -> None:
         quantity, unit_price, amount = _assign_numbers(numbers, waiting.quantity if waiting else None)
@@ -409,7 +412,12 @@ def parse_items(lines: list[tuple[str, float]]) -> list[ParsedItem]:
             is_discount = True
         if is_discount:
             if items:
-                items[-1].discount += abs(line.numbers[-1])
+                amount = abs(line.numbers[-1])
+                label = re.sub(r"\s+", "", line.name)
+                if label in {"상품할인", "전체할인", "영수증할인", "구매할인"} or amount > items[-1].amount - items[-1].discount:
+                    basket_discount += amount
+                else:
+                    items[-1].discount += amount
             waiting = None
             continue
 
@@ -429,6 +437,19 @@ def parse_items(lines: list[tuple[str, float]]) -> list[ParsedItem]:
         waiting = None
         add_item(line.name, line.numbers, line.barcode, confidence)
 
+    # A receipt-wide discount has no attributable item. Allocate it visibly and
+    # exactly by remaining item value, never making a cheap last item negative.
+    available = [max(0, item.amount - item.discount) for item in items]
+    total = sum(available)
+    if basket_discount and total:
+        discount = min(basket_discount, total)
+        shares = [discount * value // total for value in available]
+        remainder = discount - sum(shares)
+        order = sorted(range(len(items)), key=lambda i: (-(discount * available[i] % total), i))
+        for index in order[:remainder]: shares[index] += 1
+        for item, share in zip(items, shares):
+            item.discount += share
+            item.discount_estimated = bool(share)
     return items
 
 

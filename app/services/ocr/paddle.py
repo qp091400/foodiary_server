@@ -126,6 +126,38 @@ def enhance_contrast(bgr: Any) -> Any:
     return cv2.cvtColor(cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray), cv2.COLOR_GRAY2BGR)
 
 
+def crop_receipt(bgr: Any) -> Any | None:
+    """밝은 종이 사각형(영수증)을 찾아 똑바로 펴서 돌려준다. 사진 전체이거나 작거나 정사각형에 가까우면 None."""
+    import cv2
+    import numpy as np
+
+    height, width = bgr.shape[:2]
+    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, np.array([0, 0, 135]), np.array([180, 80, 255]))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), dtype=np.uint8))
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:3]:
+        area = cv2.contourArea(contour)
+        if not 0.18 * width * height < area < 0.94 * width * height:
+            continue
+        corners = cv2.approxPolyDP(cv2.convexHull(contour), 0.025 * cv2.arcLength(contour, True), True)
+        if len(corners) != 4:
+            continue
+        points = corners.reshape(4, 2).astype(np.float32)
+        sums, differences = points.sum(axis=1), np.diff(points, axis=1).ravel()
+        rect = points[[sums.argmin(), differences.argmin(), sums.argmax(), differences.argmax()]]
+        if len(np.unique(rect, axis=0)) != 4:
+            continue
+        tl, tr, br, bl = rect
+        out_width = int(max(np.linalg.norm(tr-tl), np.linalg.norm(br-bl)))
+        out_height = int(max(np.linalg.norm(bl-tl), np.linalg.norm(br-tr)))
+        if min(out_width, out_height) < 160 or max(out_width, out_height) / min(out_width, out_height) < 1.2:
+            continue
+        target = np.array([[0,0],[out_width-1,0],[out_width-1,out_height-1],[0,out_height-1]], dtype=np.float32)
+        return cv2.warpPerspective(bgr, cv2.getPerspectiveTransform(rect, target), (out_width, out_height), borderMode=cv2.BORDER_REPLICATE)
+    return None
+
+
 @dataclass(eq=False)
 class _Job:
     """줄에 선 사진 한 장."""
@@ -323,6 +355,14 @@ class PaddleOcrEngine:
         first_verdict = judge(first)
         if first_verdict == Verdict.GOOD:
             return first
+        try:
+            cropped = crop_receipt(bgr)
+        except Exception:  # 자르기는 덤이다. 실패해도 원래 순서대로 읽는다
+            cropped = None
+        if cropped is not None:
+            candidate = read(cropped)
+            if judge(candidate) == Verdict.GOOD:
+                return candidate
         enhanced = read(enhance_contrast(bgr))
         enhanced_verdict = judge(enhanced)
         if enhanced_verdict == Verdict.GOOD:

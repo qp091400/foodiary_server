@@ -142,6 +142,7 @@ def build_draft(db: Session, parsed: ParsedReceipt, purchased_on: date) -> list[
                 product_name=product.name if product else None,
                 confidence=item.confidence,
                 name_cut=item.name_cut,
+                discount_estimated=item.discount_estimated,
             ).model_dump(mode="json")
         )
     return draft
@@ -193,7 +194,7 @@ def read_receipt(
     )
 
 
-def draft_warnings(item_count: int, items_sum: int, total_amount: int | None, *, name_cut: bool = False) -> list[str]:
+def draft_warnings(item_count: int, items_sum: int, total_amount: int | None, *, name_cut: bool = False, discount_estimated: bool = False) -> list[str]:
     if item_count == 0:
         return [WARN_NO_ITEMS]
     warnings = []
@@ -203,6 +204,8 @@ def draft_warnings(item_count: int, items_sum: int, total_amount: int | None, *,
         warnings.append(WARN_SUM_MISMATCH)
     if name_cut:
         warnings.append(WARN_NAME_CUT)
+    if discount_estimated:
+        warnings.append("전체 할인을 품목 금액에 비례해 나눴어요. 실제 품목별 할인은 확정 전에 확인해주세요.")
     return warnings
 
 
@@ -235,6 +238,7 @@ def _detail(db: Session, receipt: Receipt) -> ReceiptDetail:
         warnings=draft_warnings(
             count, items_sum, receipt.total_amount,
             name_cut=receipt.status == "pending" and any(item.name_cut for item in draft_items),
+            discount_estimated=receipt.status == "pending" and any(item.discount_estimated for item in draft_items),
         ),
         raw_lines=receipt.raw_lines or [],
     )
