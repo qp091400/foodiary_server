@@ -624,6 +624,7 @@ def confirm_receipt(
             name=line.name,
             barcode=line.barcode,
             quantity=line.quantity,
+            unit=line.unit,
             unit_price=line.unit_price,
             amount=line.amount,
             discount=line.discount,
@@ -657,7 +658,10 @@ def confirm_receipt(
             barcode=line.barcode,
             quantity=line.quantity,
             remaining_quantity=line.quantity,
-            unit_price=line.unit_price if line.unit_price is not None else math.floor(total_price / line.quantity + 0.5),
+            unit=line.unit,
+            # 영수증 단가는 한 개(한 팩) 값이라 g·ml로 센 수량과는 맞지 않는다. 그때는 비워 둔다.
+            unit_price=None if line.unit != "개"
+            else line.unit_price if line.unit_price is not None else math.floor(total_price / line.quantity + 0.5),
             total_price=total_price,
             purchased_on=purchased_on,
             expiry_date=expiry_date,

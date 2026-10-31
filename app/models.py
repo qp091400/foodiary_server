@@ -107,6 +107,7 @@ class FoodItem(Base):
     barcode: Mapped[str | None] = mapped_column(String(14))
     quantity: Mapped[float]
     remaining_quantity: Mapped[float]
+    unit: Mapped[str] = mapped_column(String(4), default="개", server_default="개")  # 수량 단위: 개 / g / kg / ml / L
     unit_price: Mapped[int | None]
     total_price: Mapped[int | None]  # 할인 반영 실결제액
     purchased_on: Mapped[date]
@@ -131,6 +132,7 @@ class ReceiptItem(Base):
     name: Mapped[str] = mapped_column(String(200))
     barcode: Mapped[str | None] = mapped_column(String(14))
     quantity: Mapped[float]
+    unit: Mapped[str] = mapped_column(String(4), default="개", server_default="개")
     unit_price: Mapped[int | None]
     amount: Mapped[int]
     discount: Mapped[int] = mapped_column(default=0)

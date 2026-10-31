@@ -97,6 +97,7 @@ def create_item(
         barcode=payload.barcode,
         quantity=payload.quantity,
         remaining_quantity=payload.quantity,
+        unit=payload.unit,
         unit_price=unit_price,
         total_price=total_price,
         purchased_on=purchased_on,

@@ -150,6 +150,23 @@ def test_resend_within_60_seconds_429(client):
     assert client.post("/auth/email/send-code", json={**body, "purpose": "find_id"}).status_code == 200
 
 
+def test_resend_after_60_seconds_only_newest_code_works(client):
+    body = {"email": "a@example.com", "purpose": "signup"}
+    assert client.post("/auth/email/send-code", json=body).status_code == 200
+    first = last_code("a@example.com", "signup")
+    # 60초가 지난 것처럼 앞선 발송 시각을 당긴다
+    with SessionLocal() as db:
+        row = db.scalar(select(EmailVerification).where(EmailVerification.email == "a@example.com"))
+        row.created_at = utcnow() - timedelta(seconds=61)
+        db.commit()
+    assert client.post("/auth/email/send-code", json=body).status_code == 200
+    second = last_code("a@example.com", "signup")
+    if first != second:
+        response = client.post("/auth/email/verify", json={**body, "code": first})
+        assert response.status_code == 400
+    assert client.post("/auth/email/verify", json={**body, "code": second}).status_code == 200
+
+
 def test_verification_token_cannot_be_reused(client):
     token = get_verification_token(client, "a@example.com", "signup")
     body = {

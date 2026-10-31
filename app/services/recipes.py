@@ -163,16 +163,42 @@ def ingredient_parts(raw: str) -> list[dict]:
     return result
 
 
+def clean_step(text: str) -> str:
+    """식약처 조리 순서 끝의 사진 표시 글자("…찐다.c")와 앞 번호("1. ")를 지우고, 문장 중간 줄바꿈을 잇는다."""
+    text = re.sub(r"\s*\n\s*", " ", re.sub(r"^\s*\d+[.)]\s*", "", str(text))).strip()
+    return re.sub(r"(?<=[가-힣.!?)\]])\s*[a-zA-Z]$", "", text).strip()
+
+
+def image_url(value) -> str:
+    """공공 API 사진 주소. 같은 서버가 https도 제공하므로 앱이 막지 않게 https로 바꾼다."""
+    url = str(value or "").strip()
+    if not re.match(r"^https?://", url):
+        return ""
+    return re.sub(r"^http://(www\.foodsafetykorea\.go\.kr|ext\.foodsafetykorea\.go\.kr)/", r"https://\1/", url)
+
+
+def presentable(recipe: dict | None) -> dict | None:
+    """상세 응답용: 조리 순서 글을 다듬고, 순서별 사진(step_images)을 순서와 같은 길이로 맞춘다."""
+    if recipe is None:
+        return None
+    steps = [clean_step(step) for step in recipe.get("steps") or []]
+    images = [image_url(url) for url in recipe.get("step_images") or []]
+    return {**recipe, "steps": steps, "step_images": (images + [""] * len(steps))[:len(steps)],
+            "image": image_url(recipe.get("image"))}
+
+
 def normalize(row: dict) -> dict | None:
-    steps = [re.sub(r"^\s*\d+[.)]\s*", "", str(row.get(f"MANUAL{i:02}", "")).strip())
+    pairs = [(clean_step(row.get(f"MANUAL{i:02}", "")), image_url(row.get(f"MANUAL_IMG{i:02}")))
              for i in range(1, 21) if str(row.get(f"MANUAL{i:02}", "")).strip()]
+    steps = [text for text, _ in pairs if text]
     ingredients = ingredient_parts(row.get("RCP_PARTS_DTLS", ""))
     if not row.get("RCP_SEQ") or not row.get("RCP_NM") or not steps or not ingredients:
         return None
     return {"id": str(row["RCP_SEQ"]), "name": row["RCP_NM"],
             "category": row.get("RCP_PAT2", ""), "method": row.get("RCP_WAY2", ""),
             "ingredients": ingredients, "ingredients_text": row.get("RCP_PARTS_DTLS", ""),
-            "steps": steps, "tip": row.get("RCP_NA_TIP", ""),
+            "steps": steps, "step_images": [image for text, image in pairs if text],
+            "image": image_url(row.get("ATT_FILE_NO_MAIN")), "tip": row.get("RCP_NA_TIP", ""),
             "source": SOURCE, "source_url": SOURCE_URL}
 
 
@@ -215,7 +241,8 @@ def rank(recipes: list[dict], foods: list, limit: int = 30, seed: int | None = N
         if not main_matches:
             continue  # Salt/water alone should not recommend the entire catalogue.
         main_missing = sum(not part["staple"] for part in missing)
-        score = len(missing)
+        # Fewest missing ingredients first; among equals, recipes the app can show step by step come first.
+        score = (len(missing), 0 if recipe.get("steps") else 1)
         summary = {key: recipe[key] for key in ("id", "name", "category", "method")}
         summary['display_name'] = display_name(recipe)
         summary.update({key: recipe.get(key, '') for key in ('source', 'cooking_time', 'difficulty', 'servings')})
