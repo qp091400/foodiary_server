@@ -31,7 +31,7 @@ def test_signup_flow_then_login(client):
             "email": "minsu@example.com",
             "password": PASSWORD,
             "nickname": "민수",
-            "household_size": 1, "verification_token": response.json()["verification_token"],
+            "verification_token": response.json()["verification_token"],
         },
     )
     assert response.status_code == 201
@@ -82,7 +82,7 @@ def test_duplicate_username_409_and_token_survives_failed_signup(client):
         "email": "other@example.com",
         "password": PASSWORD,
         "nickname": "다른사람",
-        "household_size": 1, "verification_token": token,
+        "verification_token": token,
     }
     response = client.post("/auth/signup", json=body)
     assert response.status_code == 409
@@ -117,7 +117,7 @@ def test_duplicate_email_409(client):
             "email": "minsu@example.com",
             "password": PASSWORD,
             "nickname": "민수2",
-            "household_size": 1, "verification_token": token,
+            "verification_token": token,
         },
     )
     assert response.status_code == 409
@@ -174,7 +174,7 @@ def test_verification_token_cannot_be_reused(client):
         "email": "a@example.com",
         "password": PASSWORD,
         "nickname": "첫째",
-        "household_size": 1, "verification_token": token,
+        "verification_token": token,
     }
     assert client.post("/auth/signup", json=body).status_code == 201
     response = client.post("/auth/signup", json={**body, "username": "second_user"})
@@ -190,8 +190,8 @@ def test_token_types_are_not_interchangeable(client):
     assert client.post("/auth/refresh", json={"refresh_token": tokens["access_token"]}).status_code == 401
     # signup용 인증 토큰으로 find-id 불가, access 토큰을 인증 토큰 자리에 넣어도 불가
     signup_token = get_verification_token(client, "b@example.com", "signup")
-    assert client.post("/auth/find-id", json={"household_size": 1, "verification_token": signup_token}).status_code == 400
-    assert client.post("/auth/find-id", json={"household_size": 1, "verification_token": tokens["access_token"]}).status_code == 400
+    assert client.post("/auth/find-id", json={"verification_token": signup_token}).status_code == 400
+    assert client.post("/auth/find-id", json={"verification_token": tokens["access_token"]}).status_code == 400
     assert client.get("/users/me").status_code == 401
 
     refreshed = client.post("/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
@@ -202,11 +202,11 @@ def test_token_types_are_not_interchangeable(client):
 def test_find_id(client):
     signup(client, "minsu", "minsu@example.com")
     token = get_verification_token(client, "minsu@example.com", "find_id")
-    response = client.post("/auth/find-id", json={"household_size": 1, "verification_token": token})
+    response = client.post("/auth/find-id", json={"verification_token": token})
     assert response.status_code == 200
     assert response.json()["username"] == "minsu"
     assert response.json()["created_at"].endswith("Z")
-    assert client.post("/auth/find-id", json={"household_size": 1, "verification_token": token}).status_code == 400
+    assert client.post("/auth/find-id", json={"verification_token": token}).status_code == 400
 
 
 def test_reset_password_invalidates_old_password_and_refresh_token(client):
@@ -214,7 +214,7 @@ def test_reset_password_invalidates_old_password_and_refresh_token(client):
     token = get_verification_token(client, "minsu@example.com", "reset_password", username="minsu")
     response = client.post(
         "/auth/reset-password",
-        json={"username": "minsu", "household_size": 1, "verification_token": token, "new_password": "newpass5678"},
+        json={"username": "minsu", "verification_token": token, "new_password": "newpass5678"},
     )
     assert response.status_code == 200
 
@@ -258,7 +258,7 @@ def test_find_id_and_reset_do_not_reveal_whether_account_exists(client):
 
 def test_password_rules_and_korean_validation_errors(client):
     token = get_verification_token(client, "a@example.com", "signup")
-    body = {"username": "minsu", "email": "a@example.com", "nickname": "민수", "household_size": 1, "verification_token": token}
+    body = {"username": "minsu", "email": "a@example.com", "nickname": "민수", "verification_token": token}
 
     for bad in ("short1", "onlyletters", "12345678"):
         response = client.post("/auth/signup", json={**body, "password": bad})

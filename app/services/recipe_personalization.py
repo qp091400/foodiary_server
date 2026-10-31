@@ -3,7 +3,6 @@ import hashlib
 import json
 import re
 from collections import defaultdict
-from fractions import Fraction
 
 from sqlalchemy import select
 from app.models import RecipeReview
@@ -25,12 +24,12 @@ def features(recipe):
     return result
 
 class PreferenceProfile:
-    def __init__(self, reviews=(), household_size=None, detail=None):
+    def __init__(self, reviews=(), detail=None):
         self.weights = defaultdict(float)
         self.evidence = defaultdict(list)
         self.count = len(reviews)
         raw = [(r.id, r.recipe_id, r.rating, r.body, str(r.updated_at)) for r in reviews]
-        self.version = hashlib.sha256(json.dumps([household_size, raw], ensure_ascii=False).encode()).hexdigest()[:20]
+        self.version = hashlib.sha256(json.dumps(raw, ensure_ascii=False).encode()).hexdigest()[:20]
         for review in reviews:
             weight = {1: -2, 2: -1, 3: 0, 4: 1, 5: 2}[review.rating]
             recipe = detail(review.recipe_id) if detail else None
@@ -78,44 +77,4 @@ def load_profile(db, user):
     reviews = db.scalars(select(RecipeReview).where(RecipeReview.author_id == user.id,
         RecipeReview.deleted_at.is_(None)).order_by(RecipeReview.id.desc()).limit(100)).all()
     reviews = [r for r in reviews if not (r.body or "").startswith(("[시연용", "[검색 시연용"))]
-    return PreferenceProfile(reviews, user.household_size, recipe_store.detail)
-
-def serving_count(value):
-    match = re.fullmatch(r"\s*(\d+)\s*인분(?:\s*기준)?\s*", str(value or ""))
-    return int(match[1]) if match and 1 <= int(match[1]) <= 100 else None
-
-def serving_distance(value, target):
-    source = serving_count(value)
-    return abs(source - target) if source and target else 100
-
-def portions(recipe, target):
-    result = dict(recipe)
-    original = recipe.get("servings") or ""
-    source = serving_count(original)
-    result.update(original_servings=original, target_servings=target, source_servings=source)
-    if not target:
-        result["portion_note"] = "내 정보에서 가구 인원을 설정하면 인원에 맞춰 추천해요."
-        return result
-    if not source:
-        result["portion_note"] = f"{target}명 식사 기준 · 원본 인분 정보가 없어 재료 양은 원문대로 표시해요."
-        return result
-    factor = Fraction(target, source)
-    result.update(servings=f"{target}인분", serving_scale=float(factor))
-    adjusted = []
-    for part in recipe.get("ingredients", []):
-        item = dict(part)
-        item["original_text"] = part["text"]
-        amount = part["text"][len(part["name"]):].strip() if part["text"].startswith(part["name"]) else ""
-        match = re.fullmatch(r"(\d+(?:\.\d+)?|\d+/\d+)\s*(kg|g|ml|mL|L|l|개|장|컵|큰술|작은술|마리|쪽|캔|봉|T|t)", amount)
-        if match and not re.fullmatch(r"\d+/0+", match[1]):
-            number = float(Fraction(match[1]) * factor)
-            item["text"] = f"{part['name']} {number:.2f}".rstrip("0").rstrip(".") + match[2]
-            item["amount_adjusted"] = True
-        else:
-            item["amount_adjusted"] = False
-        adjusted.append(item)
-    if "ingredients" in recipe:
-        result["ingredients"] = adjusted
-        result["ingredients_text"] = ", ".join(p["text"] for p in adjusted)
-    result["portion_note"] = f"원본 {source}인분 → {target}인분 기준. 수치가 명확한 재료만 {float(factor):g}배로 계산했어요. 약간·취향껏·복합 표기는 원문을 확인하고, 조리 시간과 온도는 양에 맞게 확인해주세요."
-    return result
+    return PreferenceProfile(reviews, detail=recipe_store.detail)

@@ -9,7 +9,6 @@ from pathlib import Path
 from app.config import settings
 from app.services.recipe_names import with_display_name
 from app.services.recipes import PARENTS, STAPLES, catalogue, ingredient_key, presentable, rank
-from app.services.recipe_personalization import serving_distance
 
 def matches_search(recipe, query):
     text = ' '.join(str(recipe.get(key) or '') for key in ('name', 'display_name', 'dish_name', 'category', 'method'))
@@ -26,10 +25,10 @@ def connect():
     return sqlite3.connect(store_path().resolve().as_uri() + '?mode=ro', uri=True)
 
 
-def recommendations(foods, offset=0, seed=None, limit=30, query='', profile=None, household_size=None):
+def recommendations(foods, offset=0, seed=None, limit=30, query='', profile=None):
     seed = secrets.randbits(31) if seed is None else seed
-    personalized = profile is not None or household_size is not None
-    rank_key = lambda recipe: (-(profile.score(recipe) if profile else 0), serving_distance(recipe.get('servings'), household_size))
+    personalized = profile is not None
+    rank_key = lambda recipe: (-(profile.score(recipe) if profile else 0),)
     def page(rows, metadata, has_more=None):
         return dict(metadata, recipes=rows[:limit], seed=seed,
                     next_offset=offset + limit if (len(rows) > limit if has_more is None else has_more) else None)
@@ -44,7 +43,6 @@ def recommendations(foods, offset=0, seed=None, limit=30, query='', profile=None
         # chosen variant of each dish. A new selection gets a fresh seed.
         db.create_function('recipe_order', 1, lambda rid: hashlib.sha256(f'{seed}:{rid}'.encode()).hexdigest(), deterministic=True)
         db.create_function('recipe_preference', 1, lambda payload: profile.score(json.loads(payload)) if profile else 0, deterministic=True)
-        db.create_function('recipe_portions', 1, lambda value: serving_distance(value, household_size), deterministic=True)
         db.create_function('recipe_matches', 1, lambda payload: int(matches_search(json.loads(payload), query)), deterministic=True)
         metadata = json.loads(db.execute('SELECT value FROM metadata').fetchone()[0])
         required = []
@@ -77,8 +75,8 @@ def recommendations(foods, offset=0, seed=None, limit=30, query='', profile=None
             # Fewest missing ingredients first; among equals, recipes the app can show step by step
             # (public sources) come before link-only ones.
             no_steps = '(r.has_steps=0)' if 'has_steps' in columns else '0'
-            extra = ", recipe_preference(r.payload) AS preference, recipe_portions(json_extract(r.payload,'$.servings')) AS portions" if personalized else ''
-            ordering = 'missing,no_steps,preference DESC,portions,recipe_order(id),id' if personalized else 'missing,no_steps,recipe_order(id),id'
+            extra = ", recipe_preference(r.payload) AS preference" if personalized else ''
+            ordering = 'missing,no_steps,preference DESC,recipe_order(id),id' if personalized else 'missing,no_steps,recipe_order(id),id'
             statement = (f'WITH scored AS (SELECT r.id, r.payload, {family} AS family, {no_steps} AS no_steps{extra}, '
                      f'r.ingredient_count - (SELECT COUNT(*) FROM ingredients i '
                      f'WHERE i.recipe_id=r.id AND i.key IN ({available_marks})) AS missing '

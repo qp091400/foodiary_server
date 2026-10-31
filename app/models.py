@@ -18,7 +18,6 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True)
     password_hash: Mapped[str] = mapped_column(String(100))
     nickname: Mapped[str] = mapped_column(String(20))
-    household_size: Mapped[int | None]
     # 비밀번호 변경·재설정 때 +1 → 이전에 발급한 토큰 무효화
     token_version: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)

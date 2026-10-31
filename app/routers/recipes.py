@@ -9,7 +9,7 @@ from app.deps import FridgeAccess, get_fridge_access
 from app.models import FoodItem, RecipeReview
 from app.services import recipe_store
 from app.services.recipe_reviews import rating_summaries
-from app.services.recipe_personalization import load_profile, portions
+from app.services.recipe_personalization import load_profile
 from app.timeutil import today
 
 router = APIRouter(prefix="/fridges/{fridge_id}/recipes", tags=["레시피"])
@@ -35,15 +35,14 @@ def recommendations(payload: Selection, access: FridgeAccess = Depends(get_fridg
     usable = [f for f in foods if f not in expired]
     profile = load_profile(db, access.user)
     if payload.profile_version and payload.profile_version != profile.version:
-        raise HTTPException(409, "인원이나 후기 정보가 바뀌었어요. 추천 새로고침을 눌러주세요.")
-    result = recipe_store.recommendations(usable, offset=payload.offset, seed=payload.seed, query=payload.q.strip(), profile=profile, household_size=access.user.household_size)
+        raise HTTPException(409, "후기 정보가 바뀌었어요. 추천 새로고침을 눌러주세요.")
+    result = recipe_store.recommendations(usable, offset=payload.offset, seed=payload.seed, query=payload.q.strip(), profile=profile)
     summaries = rating_summaries(db, [recipe["id"] for recipe in result["recipes"]])
     for recipe in result["recipes"]:
         rating = summaries[recipe["id"]]
         recipe["rating_average"], recipe["rating_count"] = rating.average, rating.count
         recipe.update(profile.explain(recipe_store.detail(recipe['id']) or recipe))
-    result['recipes'] = [portions(recipe, access.user.household_size) for recipe in result['recipes']]
-    return {**result, "excluded_expired": [f.name for f in expired], "household_size": access.user.household_size,
+    return {**result, "excluded_expired": [f.name for f in expired],
             "profile_version": profile.version, "preference_review_count": profile.count, "query": payload.q.strip()}
 
 
@@ -55,4 +54,4 @@ def detail(recipe_id: str, access: FridgeAccess = Depends(get_fridge_access), db
     mine = db.scalar(select(RecipeReview.id).where(RecipeReview.recipe_id == recipe_id, RecipeReview.author_id == access.user.id,
                                                    RecipeReview.deleted_at.is_(None)))
     # 후기 목록·쓰기는 /recipes/{recipe_id}/reviews. 여기서는 별점 요약과 내가 썼는지만 알려 준다.
-    return {**portions(recipe, access.user.household_size), "rating": rating_summaries(db, [recipe_id])[recipe_id], "my_review_id": mine}
+    return {**recipe, "rating": rating_summaries(db, [recipe_id])[recipe_id], "my_review_id": mine}

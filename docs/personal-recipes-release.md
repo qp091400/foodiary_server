@@ -1,5 +1,7 @@
 # 2026-11-01 개인화 추천 · 즉시 댓글 푸시 반영
 
+이 문서는 최초 배포 이력이다. 이후 요청으로 식사 인원 기능은 제거했으며 현재 동작과 0017 배포 순서는 [personal-recipes.md](personal-recipes.md)를 따른다.
+
 - 서버: `foodiary-00030-mlb`, `asia-northeast1`.
 - 이미지: `asia-northeast1-docker.pkg.dev/virtual-primer-512512-g0/foodiary/foodiary@sha256:8de58bdc53a3b53356172e36e2244f7bced715dd8f8533ca4860eca3d8bbf9c4`.
 - `0016` 마이그레이션 작업 성공. 기존 계정의 인원은 NULL이며 내 정보에서 설정 가능하다.
