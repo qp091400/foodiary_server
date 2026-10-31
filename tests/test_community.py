@@ -31,7 +31,7 @@ def test_write_and_read_a_post(client, users):
     post = created.json()
     assert (post["title"], post["body"], post["mine"], post["can_delete"]) == ("안녕하세요", "냉장고 정리했어요", True, True)
     assert (post["author"]["id"], post["author"]["nickname"]) == (users["minsu"]["id"], "minsu")
-    assert set(post["author"]) == {"id", "nickname", "friend_code", "avatar_url"}  # 이메일·아이디는 보이지 않는다. 닉네임이 같은 사람은 친구 코드로 구별한다
+    assert set(post["author"]) == {"id", "nickname", "avatar_url"}  # 이메일·아이디는 보이지 않는다
     seen = client.get(f"/posts/{post['id']}", headers=users["jiyeon"]["headers"]).json()  # 다른 사람에게도 보인다 (전체 공개)
     assert (seen["title"], seen["mine"], seen["can_delete"]) == ("안녕하세요", False, False)
 

@@ -65,7 +65,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         retry_after = 0
         if settings.rate_limit_enabled and request.method == "POST":
-            path = request.url.path
+            path = request.scope["path"]
             group = "auth" if path.startswith("/auth/") else "ocr" if _OCR_PATH.fullmatch(path) else None
             if group:
                 limit = settings.auth_requests_per_minute if group == "auth" else settings.ocr_requests_per_minute
@@ -79,10 +79,11 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         else:
             response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"  # 검색에 보이는 것은 웹 앱 주소다. API 서버와 /receipt-test는 색인하지 않는다
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
         if settings.app_env == "production":
             response.headers["Strict-Transport-Security"] = "max-age=31536000"
-        if request.url.path.startswith(("/auth/", "/users/", "/fridges", "/receipt-test", "/dev/")):
+        if request.scope["path"].startswith(("/auth/", "/users/", "/fridges", "/receipt-test", "/dev/")):
             response.headers["Cache-Control"] = "no-store"
         return response

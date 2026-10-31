@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DIRECTORIES = ("app", "alembic", "scripts", "deploy")
-FILES = (".dockerignore", ".gcloudignore", "Dockerfile", "compose.production.yml", "requirements.txt", "requirements-ocr.txt", "constraints-production.txt", "alembic.ini", "README.md", "recipe-package.json")
+FILES = (".dockerignore", ".gcloudignore", "Dockerfile", "requirements.txt", "requirements-ocr.txt", "constraints-production.txt", "alembic.ini", "README.md", "recipe-package.json")
 
 
 def main() -> None:
@@ -25,7 +25,7 @@ def main() -> None:
                 continue
             if path.name.endswith(".secrets.json"):
                 continue
-            if path.name.startswith(".env") and path.name != ".env.production.example":
+            if path.name.startswith(".env"):
                 continue
             archive.add(path, arcname=relative.as_posix(), recursive=False)
     digest = hashlib.sha256(args.output.read_bytes()).hexdigest()

@@ -5,10 +5,10 @@
 - POST /users/me/avatar: multipart의 file에 jpg/png/webp. 기존 업로드 크기 제한 적용.
 - DELETE /users/me/avatar: 기본 아이콘으로 복원. 여러 번 호출해도 204.
 - GET /users/{id}/avatar/{filename}: 로그인 사용자에게만 JPEG 제공.
-- UserOut과 PublicUser에 avatar_url을 포함하므로 내 정보, 친구, 글/댓글 작성자에 사용할 수 있다.
-- GET /users/{id}/profile: 닉네임, 사진 주소, 친구 여부 등 공개 프로필만 제공. 이메일/로그인 아이디는 제외.
+- UserOut과 PublicUser에 avatar_url을 포함하므로 내 정보, 냉장고 멤버, 글/댓글 작성자에 사용할 수 있다.
+- GET /users/{id}/profile: 닉네임과 사진 주소만 담은 공개 프로필을 제공. 이메일/로그인 아이디는 제외.
 - 프로필의 냉장고는 기존 /users/{id}/fridges와 /users/{id}/fridges/{fridge_id}/items로 읽는다.
-  전체 공개는 로그인한 모든 회원, 친구 공개는 친구, 비공개는 본인과 별도로 초대한 사용자만 볼 수 있다.
+  전체 공개는 로그인한 모든 회원, 비공개는 주인과 공유 링크로 들어온 멤버만 볼 수 있다.
   볼 수 없는 냉장고 이름/개수는 프로필 목록에 노출하지 않는다. 품목 직접 조회도 서버에서 다시 검사한다.
 
 사진은 방향 보정 후 512x512로 중앙 크롭하고 JPEG로 다시 저장한다.

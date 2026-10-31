@@ -178,8 +178,34 @@ def test_confirm_twice_409(client, fridge):
     assert again.status_code == 409
     assert "이미 확정" in again.json()["detail"]
     assert len(client.get(f"/fridges/{fridge['id']}/items", headers=fridge["headers"]).json()) == 2
-    # 확정된 영수증은 지울 수 없다
-    assert client.delete(f"/fridges/{fridge['id']}/receipts/{draft['id']}", headers=fridge["headers"]).status_code == 409
+
+
+def test_deleting_a_confirmed_receipt_undoes_it_and_allows_scanning_again(client, fridge, monkeypatch):
+    use_ocr(RECEIPT_ROWS)
+    monkeypatch.setattr(barcode_service, "decode_receipt_barcode", lambda image: "2026101000120034")
+    base = f"/fridges/{fridge['id']}"
+    draft = upload(client, fridge).json()
+    assert client.post(f"{base}/receipts/{draft['id']}/confirm", headers=fridge["headers"], json={"items": draft["draft_items"]}).status_code == 200
+    milk, tofu = client.get(f"{base}/items", headers=fridge["headers"]).json()
+    assert client.post(f"{base}/items/{milk['id']}/consume", headers=fridge["headers"], json={}).status_code == 200
+    # 수동으로 넣은 식품은 영수증과 무관하니 남아야 한다
+    manual = client.post(f"{base}/items", headers=fridge["headers"], json={"name": "사과", "quantity": 1}).json()
+
+    # 확정된 영수증이 남아 있는 동안은 같은 영수증을 다시 올릴 수 없다
+    assert upload(client, fridge).status_code == 409
+
+    assert client.delete(f"{base}/receipts/{draft['id']}", headers=fridge["headers"]).status_code == 204
+    # 그 영수증으로 넣은 식품, 구매 기록, 먹음 기록이 모두 사라진다
+    assert [item["id"] for item in client.get(f"{base}/items?status=all", headers=fridge["headers"]).json()] == [manual["id"]]
+    assert client.get(f"{base}/receipts/{draft['id']}", headers=fridge["headers"]).status_code == 404
+    assert [row["id"] for row in client.get(f"{base}/receipts", headers=fridge["headers"]).json()] == []
+    stats = client.get(f"{base}/stats/monthly?year=2026&month=10", headers=fridge["headers"]).json()
+    assert (stats["consumed_value"], stats["non_food_spent"]) == (0, 0)
+    assert uploaded_files() == []
+
+    # 기록을 지웠으니 같은 영수증을 다시 찍을 수 있다
+    assert upload(client, fridge).status_code == 201
+    assert client.delete(f"{base}/receipts/999999", headers=fridge["headers"]).status_code == 404
 
 
 def test_duplicate_receipt_barcode_409(client, fridge, monkeypatch):
@@ -535,16 +561,31 @@ def test_real_barcode_decoding():
     assert barcode_service.decode_receipt_barcode(Image.new("RGB", (300, 300), "white")) is None
 
 
-def test_confirm_keeps_the_unit_of_each_line(client, fridge):
-    use_ocr(RECEIPT_ROWS)
-    draft = upload(client, fridge).json()
-    milk, tofu = draft["draft_items"][0], draft["draft_items"][1]
-    items = [{**milk, "quantity": 1, "unit": "L"}, {**tofu, "unit": "개"}]
-    confirmed = client.post(f"/fridges/{fridge['id']}/receipts/{draft['id']}/confirm", headers=fridge["headers"], json={"items": items})
+def test_same_name_lines_on_one_receipt_become_one_draft_item(client, fridge):
+    rows = [
+        ["이마트 성수점"],
+        ["2026-10-10 14:22"],
+        ["상품명", "단가", "수량", "금액"],
+        ["홍합살", "3,000", "1", "3,000"],
+        ["풀무원 두부", "1,500", "1", "1,500"],
+        ["홍합살", "3,000", "1", "3,000"],
+        ["합계", "7,500"],
+    ]
+    use_ocr(rows)
+    first = upload(client, fridge).json()
+    assert [(item["name"], item["quantity"], item["amount"]) for item in first["draft_items"]] == [
+        ("홍합살", 2.0, 6000), ("풀무원 두부", 1.0, 1500),
+    ]
+    assert first["items_sum"] == 7500 and first["warnings"] == []
+    confirmed = client.post(
+        f"/fridges/{fridge['id']}/receipts/{first['id']}/confirm", headers=fridge["headers"],
+        json={"items": [{**item, "include": True} for item in first["draft_items"]]},
+    )
     assert confirmed.status_code == 200, confirmed.text
-    stored = {item["name"]: item for item in client.get(f"/fridges/{fridge['id']}/items", headers=fridge["headers"]).json()}
-    assert (stored["서울우유 1L"]["quantity"], stored["서울우유 1L"]["unit"]) == (1, "L")
-    # 팩 단가는 L로 센 수량과 맞지 않아 비워 둔다. 개수로 센 두부는 그대로다.
-    assert stored["서울우유 1L"]["unit_price"] is None and stored["풀무원 두부"]["unit_price"] == 1500
-    lines = client.get(f"/fridges/{fridge['id']}/receipts/{draft['id']}", headers=fridge["headers"]).json()["items"]
-    assert [line["unit"] for line in lines[:2]] == ["L", "개"]
+
+    # 다음 영수증의 홍합살은 이미 냉장고에 있는 홍합살과 합치지 않는다
+    use_ocr([["이마트 성수점"], ["2026-10-11 10:00"], ["상품명", "단가", "수량", "금액"], ["홍합살", "3,000", "1", "3,000"], ["합계", "3,000"]])
+    second = upload(client, fridge, data=image_bytes(size=(610, 900))).json()
+    assert [(item["name"], item["quantity"]) for item in second["draft_items"]] == [("홍합살", 1.0)]
+    items = client.get(f"/fridges/{fridge['id']}/items", headers=fridge["headers"]).json()
+    assert sorted((item["name"], item["quantity"]) for item in items) == [("풀무원 두부", 1.0), ("홍합살", 2.0)]

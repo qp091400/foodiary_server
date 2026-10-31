@@ -1,0 +1,7742 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "냉장고 영수증 API",
+    "description": "영수증 사진으로 식품을 등록하고 소비기한·지출·낭비를 관리하는 백엔드",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/auth/check-username": {
+      "get": {
+        "tags": [
+          "인증"
+        ],
+        "summary": "아이디 형식·중복 확인",
+        "operationId": "check_username_auth_check_username_get",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 100,
+              "title": "Username"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsernameCheck"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/email/send-code": {
+      "post": {
+        "tags": [
+          "인증"
+        ],
+        "summary": "이메일 인증코드 발송",
+        "operationId": "send_code_auth_email_send_code_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendCodeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/email/verify": {
+      "post": {
+        "tags": [
+          "인증"
+        ],
+        "summary": "인증코드 확인 → 1회용 인증 토큰 발급",
+        "operationId": "verify_email_auth_email_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyCodeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyCodeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/signup": {
+      "post": {
+        "tags": [
+          "인증"
+        ],
+        "summary": "회원가입 (기본 냉장고 자동 생성)",
+        "operationId": "signup_auth_signup_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "tags": [
+          "인증"
+        ],
+        "summary": "로그인",
+        "operationId": "login_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "tags": [
+          "인증"
+        ],
+        "summary": "토큰 갱신",
+        "operationId": "refresh_auth_refresh_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPair"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/find-id": {
+      "post": {
+        "tags": [
+          "인증"
+        ],
+        "summary": "아이디 찾기",
+        "operationId": "find_id_auth_find_id_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FindIdRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindIdResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/reset-password": {
+      "post": {
+        "tags": [
+          "인증"
+        ],
+        "summary": "비밀번호 재설정",
+        "operationId": "reset_password_auth_reset_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/me": {
+      "get": {
+        "tags": [
+          "사용자"
+        ],
+        "summary": "내 정보",
+        "operationId": "get_me_users_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "사용자"
+        ],
+        "summary": "닉네임 변경",
+        "operationId": "update_me_users_me_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/users/me/avatar": {
+      "post": {
+        "tags": [
+          "사용자"
+        ],
+        "summary": "프로필 사진 설정",
+        "operationId": "upload_avatar_users_me_avatar_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_avatar_users_me_avatar_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "사용자"
+        ],
+        "summary": "프로필 사진 삭제",
+        "operationId": "delete_avatar_users_me_avatar_delete",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/users/{user_id}/avatar/{filename}": {
+      "get": {
+        "tags": [
+          "사용자"
+        ],
+        "summary": "로그인 사용자에게 프로필 사진 제공",
+        "operationId": "get_avatar_users__user_id__avatar__filename__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "filename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Filename"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/me/password": {
+      "post": {
+        "tags": [
+          "사용자"
+        ],
+        "summary": "비밀번호 변경",
+        "operationId": "change_password_users_me_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordChangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordChangeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/users/{user_id}/profile": {
+      "get": {
+        "tags": [
+          "사용자"
+        ],
+        "summary": "공개 프로필 (로그인 필요)",
+        "operationId": "public_profile_users__user_id__profile_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicUser"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{user_id}/fridges": {
+      "get": {
+        "tags": [
+          "사용자"
+        ],
+        "summary": "이 사람의 냉장고 중 내가 볼 수 있는 것과 내 권한",
+        "operationId": "list_user_fridges_users__user_id__fridges_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SharedFridgeOut"
+                  },
+                  "title": "Response List User Fridges Users  User Id  Fridges Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{user_id}/fridges/{fridge_id}/items": {
+      "get": {
+        "tags": [
+          "사용자"
+        ],
+        "summary": "이 사람의 냉장고 품목 (남아 있는 것만. 가격·메모·영수증은 안 보인다)",
+        "operationId": "list_user_fridge_items_users__user_id__fridges__fridge_id__items_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SharedItemOut"
+                  },
+                  "title": "Response List User Fridge Items Users  User Id  Fridges  Fridge Id  Items Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fridges": {
+      "get": {
+        "tags": [
+          "냉장고"
+        ],
+        "summary": "내가 속한 냉장고 목록 (내 냉장고 + 공유 링크로 들어온 냉장고)",
+        "operationId": "list_fridges_fridges_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FridgeOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Fridges Fridges Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "냉장고"
+        ],
+        "summary": "새 냉장고 만들기",
+        "operationId": "create_fridge_fridges_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FridgeCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FridgeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/fridges/{fridge_id}": {
+      "get": {
+        "tags": [
+          "냉장고"
+        ],
+        "summary": "냉장고 상세 + 멤버 목록",
+        "operationId": "get_fridge_fridges__fridge_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FridgeDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "냉장고"
+        ],
+        "summary": "냉장고 이름·공개 범위 변경 (주인만)",
+        "operationId": "update_fridge_fridges__fridge_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FridgeUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FridgeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "냉장고"
+        ],
+        "summary": "냉장고 삭제 (주인만, 식품·영수증 함께 삭제. 공유 링크도 더 열리지 않는다)",
+        "operationId": "delete_fridge_fridges__fridge_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fridges/{fridge_id}/members/{user_id}": {
+      "delete": {
+        "tags": [
+          "냉장고"
+        ],
+        "summary": "멤버 내보내기 (주인) / 나가기 (본인)",
+        "operationId": "remove_member_fridges__fridge_id__members__user_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fridges/{fridge_id}/items": {
+      "get": {
+        "tags": [
+          "식품"
+        ],
+        "summary": "식품 목록",
+        "operationId": "list_items_fridges__fridge_id__items_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "active",
+                "consumed",
+                "discarded",
+                "all"
+              ],
+              "type": "string",
+              "default": "active",
+              "title": "Status"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "이름 검색",
+              "title": "Q"
+            },
+            "description": "이름 검색"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "expiry",
+                "recent"
+              ],
+              "type": "string",
+              "description": "expiry=소비기한 임박순, recent=최근 추가순",
+              "default": "expiry",
+              "title": "Sort"
+            },
+            "description": "expiry=소비기한 임박순, recent=최근 추가순"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ItemOut"
+                  },
+                  "title": "Response List Items Fridges  Fridge Id  Items Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "식품"
+        ],
+        "summary": "식품 수동 추가",
+        "operationId": "create_item_fridges__fridge_id__items_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ItemCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fridges/{fridge_id}/items/expiring": {
+      "get": {
+        "tags": [
+          "식품"
+        ],
+        "summary": "소비기한 임박 목록 (지난 것 포함)",
+        "operationId": "list_expiring_fridges__fridge_id__items_expiring_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 365,
+              "minimum": 0,
+              "description": "오늘부터 며칠 안에 끝나는 것까지 볼지",
+              "default": 3,
+              "title": "Days"
+            },
+            "description": "오늘부터 며칠 안에 끝나는 것까지 볼지"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ItemOut"
+                  },
+                  "title": "Response List Expiring Fridges  Fridge Id  Items Expiring Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fridges/{fridge_id}/items/{item_id}": {
+      "get": {
+        "tags": [
+          "식품"
+        ],
+        "summary": "식품 상세",
+        "operationId": "get_item_fridges__fridge_id__items__item_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "식품"
+        ],
+        "summary": "식품 수정",
+        "operationId": "update_item_fridges__fridge_id__items__item_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ItemUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "식품"
+        ],
+        "summary": "잘못 넣은 식품 삭제 (구매 통계에서도 빠짐)",
+        "operationId": "delete_item_fridges__fridge_id__items__item_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fridges/{fridge_id}/items/{item_id}/consume": {
+      "post": {
+        "tags": [
+          "식품"
+        ],
+        "summary": "먹음 처리 (수량을 비우면 남은 양 전부)",
+        "operationId": "consume_item_fridges__fridge_id__items__item_id__consume_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ConsumeRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fridges/{fridge_id}/items/{item_id}/discard": {
+      "post": {
+        "tags": [
+          "식품"
+        ],
+        "summary": "버림 처리 (수량을 비우면 남은 양 전부)",
+        "operationId": "discard_item_fridges__fridge_id__items__item_id__discard_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ConsumeRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fridges/{fridge_id}/receipts": {
+      "post": {
+        "tags": [
+          "영수증"
+        ],
+        "summary": "영수증 사진 업로드 → 초안(pending) 반환",
+        "operationId": "upload_receipt_fridges__fridge_id__receipts_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_receipt_fridges__fridge_id__receipts_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptDetail"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "같은 영수증이 이미 등록됨. 응답에 기존 receipt_id가 들어 있다"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "영수증"
+        ],
+        "summary": "영수증 목록",
+        "operationId": "list_receipts_fridges__fridge_id__receipts_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "confirmed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ReceiptSummary"
+                  },
+                  "title": "Response List Receipts Fridges  Fridge Id  Receipts Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fridges/{fridge_id}/receipts/batch": {
+      "post": {
+        "tags": [
+          "영수증"
+        ],
+        "summary": "영수증 사진 여러 장 업로드 → 장마다 초안 또는 실패 사유",
+        "description": "보낸 순서대로 저장하고 읽는다(엔진이 여러 개면 여러 장을 동시에). 장마다 따로 저장되므로 한 장이 실패(중복·바쁨 등)해도 나머지는 초안이 된다.\n\n실패한 장은 `status_code`와 `detail`을 보고, 503·429면 `retry_after`초 뒤에 그 장만 다시 올리면 된다.",
+        "operationId": "upload_receipts_fridges__fridge_id__receipts_batch_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_receipts_fridges__fridge_id__receipts_batch_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptBatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "사진이 0장이거나 50장보다 많다"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fridges/{fridge_id}/receipts/{receipt_id}": {
+      "get": {
+        "tags": [
+          "영수증"
+        ],
+        "summary": "영수증 상세 (초안 + OCR 원문 줄)",
+        "operationId": "get_receipt_fridges__fridge_id__receipts__receipt_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "receipt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Receipt Id"
+            }
+          },
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "영수증"
+        ],
+        "summary": "영수증 기록 삭제 (확정된 것은 그 영수증으로 넣은 식품·구매 기록·먹음/버림 기록까지). 같은 영수증을 다시 찍을 수 있게 된다",
+        "operationId": "delete_receipt_fridges__fridge_id__receipts__receipt_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "receipt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Receipt Id"
+            }
+          },
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fridges/{fridge_id}/receipts/{receipt_id}/confirm": {
+      "post": {
+        "tags": [
+          "영수증"
+        ],
+        "summary": "수정한 품목으로 영수증 확정 → 냉장고에 넣기",
+        "operationId": "confirm_receipt_fridges__fridge_id__receipts__receipt_id__confirm_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "receipt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Receipt Id"
+            }
+          },
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReceiptConfirmRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptConfirmResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fridges/{fridge_id}/recipes/recommendations": {
+      "post": {
+        "tags": [
+          "레시피"
+        ],
+        "summary": "Recommendations",
+        "operationId": "recommendations_fridges__fridge_id__recipes_recommendations_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Selection"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fridges/{fridge_id}/recipes/{recipe_id}": {
+      "get": {
+        "tags": [
+          "레시피"
+        ],
+        "summary": "Detail",
+        "operationId": "detail_fridges__fridge_id__recipes__recipe_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "recipe_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Recipe Id"
+            }
+          },
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/recipes/reviews/mine": {
+      "get": {
+        "tags": [
+          "레시피 후기"
+        ],
+        "summary": "내가 쓴 후기 모아 보기 (최신순). 다음 쪽은 before_id에 next_before_id를 넣어 부른다",
+        "operationId": "list_my_reviews_recipes_reviews_mine_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "before_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "이 번호보다 오래된 후기부터",
+              "title": "Before Id"
+            },
+            "description": "이 번호보다 오래된 후기부터"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyReviewList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/recipes/{recipe_id}/reviews": {
+      "get": {
+        "tags": [
+          "레시피 후기"
+        ],
+        "summary": "레시피의 별점 요약과 후기 목록 (최신순). 다음 쪽은 before_id에 next_before_id를 넣어 부른다",
+        "operationId": "list_reviews_recipes__recipe_id__reviews_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "recipe_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Recipe Id"
+            }
+          },
+          {
+            "name": "before_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "이 번호보다 오래된 후기부터",
+              "title": "Before Id"
+            },
+            "description": "이 번호보다 오래된 후기부터"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/recipes/{recipe_id}/reviews/mine": {
+      "put": {
+        "tags": [
+          "레시피 후기"
+        ],
+        "summary": "별점과 후기 남기기. 이미 썼으면 고친다 (처음이면 201, 고치면 200)",
+        "operationId": "write_review_recipes__recipe_id__reviews_mine_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "recipe_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Recipe Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/recipes/{recipe_id}/reviews/{review_id}": {
+      "delete": {
+        "tags": [
+          "레시피 후기"
+        ],
+        "summary": "후기 지우기 (쓴 사람 또는 관리자)",
+        "operationId": "remove_review_recipes__recipe_id__reviews__review_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "recipe_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Recipe Id"
+            }
+          },
+          {
+            "name": "review_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Review Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/recipes/{recipe_id}/reviews/{review_id}/report": {
+      "post": {
+        "tags": [
+          "레시피 후기"
+        ],
+        "summary": "후기 신고하기",
+        "operationId": "report_review_recipes__recipe_id__reviews__review_id__report_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "recipe_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Recipe Id"
+            }
+          },
+          {
+            "name": "review_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Review Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/products/barcode/{code}": {
+      "get": {
+        "tags": [
+          "바코드·카테고리"
+        ],
+        "summary": "상품 바코드로 제품·소비기한 조회 (식품안전나라 C005)",
+        "operationId": "get_product_by_barcode_products_barcode__code__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BarcodeLookupOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/categories": {
+      "get": {
+        "tags": [
+          "바코드·카테고리"
+        ],
+        "summary": "카테고리 목록 (앱의 선택 메뉴용)",
+        "operationId": "list_categories_categories_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CategoryOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Categories Categories Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fridges/{fridge_id}/purchases": {
+      "get": {
+        "tags": [
+          "구매 기록·통계"
+        ],
+        "summary": "산 식품 목록 (구매일 내림차순)",
+        "operationId": "list_purchases_fridges__fridge_id__purchases_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "시작일. start·end를 모두 비우면 이번 달",
+              "title": "Start"
+            },
+            "description": "시작일. start·end를 모두 비우면 이번 달"
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "이름 검색",
+              "title": "Q"
+            },
+            "description": "이름 검색"
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PurchaseOut"
+                  },
+                  "title": "Response List Purchases Fridges  Fridge Id  Purchases Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fridges/{fridge_id}/purchases/summary": {
+      "get": {
+        "tags": [
+          "구매 기록·통계"
+        ],
+        "summary": "구매 집계 (예: 우유 3번, 4개, 8,940원)",
+        "operationId": "purchase_summary_fridges__fridge_id__purchases_summary_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "시작일. start·end를 모두 비우면 이번 달",
+              "title": "Start"
+            },
+            "description": "시작일. start·end를 모두 비우면 이번 달"
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          },
+          {
+            "name": "group_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "item",
+                "category"
+              ],
+              "type": "string",
+              "default": "item",
+              "title": "Group By"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fridges/{fridge_id}/stats/monthly": {
+      "get": {
+        "tags": [
+          "구매 기록·통계"
+        ],
+        "summary": "월별 지출·낭비 통계",
+        "operationId": "monthly_stats_fridges__fridge_id__stats_monthly_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          },
+          {
+            "name": "year",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 2100,
+                  "minimum": 2000
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Year"
+            }
+          },
+          {
+            "name": "month",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 12,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Month"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonthlyStats"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fridges/{fridge_id}/share-link": {
+      "post": {
+        "tags": [
+          "공유 링크"
+        ],
+        "summary": "공유 링크 받기 (멤버 누구나). 처음 누르면 만들어지고, 그다음부터는 같은 링크",
+        "operationId": "share_link_fridges__fridge_id__share_link_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareLinkOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fridges/{fridge_id}/share-link/qr": {
+      "get": {
+        "tags": [
+          "공유 링크"
+        ],
+        "summary": "공유 링크 QR 이미지 (멤버 누구나). 휴대폰 카메라로 찍으면 링크가 열린다. 링크가 아직 없으면 만든다",
+        "operationId": "share_link_qr_fridges__fridge_id__share_link_qr_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "png",
+                "svg"
+              ],
+              "type": "string",
+              "description": "png(사진으로 저장하거나 보내기) / svg(화면에 크게 그리기)",
+              "default": "png",
+              "title": "Format"
+            },
+            "description": "png(사진으로 저장하거나 보내기) / svg(화면에 크게 그리기)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "공유 링크 주소를 담은 QR",
+            "content": {
+              "image/png": {},
+              "image/svg+xml": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fridges/{fridge_id}/share-link/reset": {
+      "post": {
+        "tags": [
+          "공유 링크"
+        ],
+        "summary": "공유 링크 바꾸기 (주인만). 이전 링크와 QR로는 더 들어올 수 없다. 이미 들어온 멤버는 그대로",
+        "operationId": "reset_share_link_fridges__fridge_id__share_link_reset_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareLinkOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/share-links/{token}": {
+      "get": {
+        "tags": [
+          "공유 링크"
+        ],
+        "summary": "링크를 열었을 때: 누구의 어떤 냉장고인지, 내가 이미 멤버인지",
+        "operationId": "preview_link_share_links__token__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareLinkPreview"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/share-links/{token}/join": {
+      "post": {
+        "tags": [
+          "공유 링크"
+        ],
+        "summary": "링크로 들어오기: 그 냉장고의 멤버가 되어 주인처럼 고칠 수 있고, 내 냉장고 목록에 들어온다 (이미 멤버면 그대로)",
+        "operationId": "join_link_share_links__token__join_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JoinResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/posts": {
+      "post": {
+        "tags": [
+          "커뮤니티"
+        ],
+        "summary": "글쓰기 (사진은 글을 쓴 뒤 POST /posts/{id}/photos로 붙인다)",
+        "operationId": "create_post_posts_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "커뮤니티"
+        ],
+        "summary": "글 목록 (최신순). 다음 쪽은 before_id에 next_before_id를 넣어 부른다",
+        "operationId": "list_posts_posts_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "before_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "이 번호보다 오래된 글부터",
+              "title": "Before Id"
+            },
+            "description": "이 번호보다 오래된 글부터"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/posts/{post_id}": {
+      "get": {
+        "tags": [
+          "커뮤니티"
+        ],
+        "summary": "글 하나 보기",
+        "operationId": "get_post_posts__post_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "post_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Post Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "커뮤니티"
+        ],
+        "summary": "글 지우기 (쓴 사람 또는 관리자). 붙인 사진도 함께 지워진다",
+        "operationId": "remove_post_posts__post_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "post_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Post Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/posts/{post_id}/photos": {
+      "post": {
+        "tags": [
+          "커뮤니티"
+        ],
+        "summary": "사진 붙이기 (내가 쓴 글에, 글 하나에 4장까지)",
+        "operationId": "add_photos_posts__post_id__photos_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "post_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Post Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_add_photos_posts__post_id__photos_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/posts/{post_id}/photos/{photo_id}": {
+      "get": {
+        "tags": [
+          "커뮤니티"
+        ],
+        "summary": "사진 받기 (JPEG)",
+        "operationId": "get_photo_posts__post_id__photos__photo_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "post_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Post Id"
+            }
+          },
+          {
+            "name": "photo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Photo Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "커뮤니티"
+        ],
+        "summary": "사진 빼기 (글쓴이 또는 관리자)",
+        "operationId": "remove_photo_posts__post_id__photos__photo_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "post_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Post Id"
+            }
+          },
+          {
+            "name": "photo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Photo Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/posts/{post_id}/like": {
+      "put": {
+        "tags": [
+          "커뮤니티"
+        ],
+        "summary": "좋아요 (이미 눌렀으면 그대로)",
+        "operationId": "like_post_posts__post_id__like_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "post_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Post Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LikeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "커뮤니티"
+        ],
+        "summary": "좋아요 취소 (안 눌렀으면 그대로)",
+        "operationId": "unlike_post_posts__post_id__like_delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "post_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Post Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LikeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/posts/{post_id}/comments": {
+      "post": {
+        "tags": [
+          "커뮤니티"
+        ],
+        "summary": "댓글 쓰기",
+        "operationId": "create_comment_posts__post_id__comments_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "post_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Post Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommentCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "커뮤니티"
+        ],
+        "summary": "댓글 목록 (오래된 것부터). 다음 쪽은 after_id에 next_after_id를 넣어 부른다",
+        "operationId": "list_comments_posts__post_id__comments_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "post_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Post Id"
+            }
+          },
+          {
+            "name": "after_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "이 번호보다 새 댓글부터",
+              "title": "After Id"
+            },
+            "description": "이 번호보다 새 댓글부터"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 30,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/posts/{post_id}/comments/{comment_id}": {
+      "delete": {
+        "tags": [
+          "커뮤니티"
+        ],
+        "summary": "댓글 지우기 (쓴 사람 또는 관리자)",
+        "operationId": "remove_comment_posts__post_id__comments__comment_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "post_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Post Id"
+            }
+          },
+          {
+            "name": "comment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Comment Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/posts/{post_id}/report": {
+      "post": {
+        "tags": [
+          "커뮤니티"
+        ],
+        "summary": "글 신고하기",
+        "operationId": "report_post_posts__post_id__report_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "post_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Post Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/posts/{post_id}/comments/{comment_id}/report": {
+      "post": {
+        "tags": [
+          "커뮤니티"
+        ],
+        "summary": "댓글 신고하기",
+        "operationId": "report_comment_posts__post_id__comments__comment_id__report_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "post_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Post Id"
+            }
+          },
+          {
+            "name": "comment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Comment Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/notifications/summary": {
+      "get": {
+        "tags": [
+          "알림"
+        ],
+        "summary": "아이콘에 붙일 숫자: 소비기한 임박 식품 수, 새 댓글 수",
+        "operationId": "summary_notifications_summary_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationSummary"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/notifications/comments": {
+      "get": {
+        "tags": [
+          "알림"
+        ],
+        "summary": "내 글에 달린 댓글 내용 (최신순). 다음 쪽은 before_id에 next_before_id를 넣어 부른다",
+        "operationId": "list_comment_notifications_notifications_comments_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "before_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "이 번호보다 오래된 댓글부터",
+              "title": "Before Id"
+            },
+            "description": "이 번호보다 오래된 댓글부터"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentNotificationList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/notifications/comments/read": {
+      "post": {
+        "tags": [
+          "알림"
+        ],
+        "summary": "댓글을 읽음으로 표시하고 새 숫자를 돌려준다 (up_to_id까지, 비우면 지금까지 모두)",
+        "operationId": "mark_comments_read_notifications_comments_read_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/CommentsRead"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/notifications/expiring": {
+      "get": {
+        "tags": [
+          "알림"
+        ],
+        "summary": "소비기한 임박 식품 (내가 멤버인 모든 냉장고에서 3일 이내로 남았거나 이미 지난 것, 빠른 순)",
+        "operationId": "list_expiring_items_notifications_expiring_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExpiringItemList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/reports": {
+      "get": {
+        "tags": [
+          "관리자"
+        ],
+        "summary": "신고 목록 (기본은 아직 처리하지 않은 것, 오래된 것부터)",
+        "operationId": "list_reports_admin_reports_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "open",
+                "resolved",
+                "dismissed",
+                "all"
+              ],
+              "type": "string",
+              "default": "open",
+              "title": "Status"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AdminReportOut"
+                  },
+                  "title": "Response List Reports Admin Reports Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/reports/{report_id}/resolve": {
+      "post": {
+        "tags": [
+          "관리자"
+        ],
+        "summary": "신고 처리: delete(대상을 지움) / dismiss(문제없음)",
+        "operationId": "resolve_report_admin_reports__report_id__resolve_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "report_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Report Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportResolve"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminReportOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "상태"
+        ],
+        "summary": "서버 상태 확인 (DB를 건드리지 않는다. 서버를 깨워 두려고 주기적으로 불러도 된다)",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": [
+          "상태"
+        ],
+        "summary": "DB와 OCR 준비 상태 확인",
+        "operationId": "ready_ready_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AdminReportOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "target_type": {
+            "type": "string",
+            "enum": [
+              "post",
+              "comment",
+              "review"
+            ],
+            "title": "Target Type"
+          },
+          "target_id": {
+            "type": "integer",
+            "title": "Target Id"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "spam",
+              "abuse",
+              "inappropriate",
+              "privacy",
+              "other"
+            ],
+            "title": "Reason"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "resolved",
+              "dismissed"
+            ],
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "reporter": {
+            "$ref": "#/components/schemas/PublicUser"
+          },
+          "open_reports_on_target": {
+            "type": "integer",
+            "title": "Open Reports On Target"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportTargetOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "target_type",
+          "target_id",
+          "reason",
+          "detail",
+          "status",
+          "created_at",
+          "reporter",
+          "open_reports_on_target",
+          "target"
+        ],
+        "title": "AdminReportOut"
+      },
+      "BarcodeLookupOut": {
+        "properties": {
+          "found": {
+            "type": "boolean",
+            "title": "Found"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "food_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Food Type"
+          },
+          "manufacturer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manufacturer"
+          },
+          "shelf_life_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shelf Life Text"
+          },
+          "shelf_life_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shelf Life Days"
+          },
+          "suggested_category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggested Category"
+          },
+          "suggested_expiry_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggested Expiry Date"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "cache",
+              "api",
+              "disabled",
+              "error"
+            ],
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "found",
+          "source"
+        ],
+        "title": "BarcodeLookupOut"
+      },
+      "BatchUploadResult": {
+        "properties": {
+          "index": {
+            "type": "integer",
+            "title": "Index",
+            "description": "보낸 순서 (0부터)"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "status_code": {
+            "type": "integer",
+            "title": "Status Code",
+            "description": "201이면 초안이 만들어졌다. 아니면 한 장 업로드가 돌려줬을 HTTP 상태 (409 중복, 503 바쁨 등)"
+          },
+          "receipt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReceiptDetail"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ok일 때 초안"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail",
+            "description": "ok가 아닐 때 한국어 사유"
+          },
+          "receipt_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Receipt Id",
+            "description": "409(이미 등록됨)일 때 기존 영수증 번호"
+          },
+          "retry_after": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry After",
+            "description": "503·429일 때 이 초 뒤에 다시 올리면 된다"
+          }
+        },
+        "type": "object",
+        "required": [
+          "index",
+          "filename",
+          "ok",
+          "status_code"
+        ],
+        "title": "BatchUploadResult"
+      },
+      "Body_add_photos_posts__post_id__photos_post": {
+        "properties": {
+          "files": {
+            "items": {
+              "type": "string",
+              "contentMediaType": "application/octet-stream"
+            },
+            "type": "array",
+            "title": "Files",
+            "description": "사진들 (jpg/png/webp, 장당 최대 10MB). 앱에서 긴 변 2000px 안팎으로 줄여서 올리는 것이 좋다"
+          }
+        },
+        "type": "object",
+        "required": [
+          "files"
+        ],
+        "title": "Body_add_photos_posts__post_id__photos_post"
+      },
+      "Body_upload_avatar_users_me_avatar_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_avatar_users_me_avatar_post"
+      },
+      "Body_upload_receipt_fridges__fridge_id__receipts_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "description": "영수증 사진 (jpg/png/webp, 최대 10MB)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_receipt_fridges__fridge_id__receipts_post"
+      },
+      "Body_upload_receipts_fridges__fridge_id__receipts_batch_post": {
+        "properties": {
+          "files": {
+            "items": {
+              "type": "string",
+              "contentMediaType": "application/octet-stream"
+            },
+            "type": "array",
+            "title": "Files",
+            "description": "영수증 사진들 (jpg/png/webp, 장당 최대 10MB, 최대 50장)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "files"
+        ],
+        "title": "Body_upload_receipts_fridges__fridge_id__receipts_batch_post"
+      },
+      "CategoryAmount": {
+        "properties": {
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "category_label": {
+            "type": "string",
+            "title": "Category Label"
+          },
+          "amount": {
+            "type": "integer",
+            "title": "Amount"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "category",
+          "category_label",
+          "amount",
+          "count"
+        ],
+        "title": "CategoryAmount"
+      },
+      "CategoryOut": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "storage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage"
+          },
+          "default_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "label",
+          "storage",
+          "default_days"
+        ],
+        "title": "CategoryOut"
+      },
+      "CommentCreate": {
+        "properties": {
+          "body": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Body"
+          }
+        },
+        "type": "object",
+        "required": [
+          "body"
+        ],
+        "title": "CommentCreate"
+      },
+      "CommentList": {
+        "properties": {
+          "comments": {
+            "items": {
+              "$ref": "#/components/schemas/CommentOut"
+            },
+            "type": "array",
+            "title": "Comments"
+          },
+          "next_after_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next After Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "comments",
+          "next_after_id"
+        ],
+        "title": "CommentList"
+      },
+      "CommentNotificationList": {
+        "properties": {
+          "comments": {
+            "items": {
+              "$ref": "#/components/schemas/CommentNotificationOut"
+            },
+            "type": "array",
+            "title": "Comments"
+          },
+          "next_before_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Before Id"
+          },
+          "unread_count": {
+            "type": "integer",
+            "title": "Unread Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "comments",
+          "next_before_id",
+          "unread_count"
+        ],
+        "title": "CommentNotificationList"
+      },
+      "CommentNotificationOut": {
+        "properties": {
+          "comment_id": {
+            "type": "integer",
+            "title": "Comment Id"
+          },
+          "post_id": {
+            "type": "integer",
+            "title": "Post Id"
+          },
+          "post_title": {
+            "type": "string",
+            "title": "Post Title"
+          },
+          "commenter": {
+            "$ref": "#/components/schemas/PublicUser"
+          },
+          "body": {
+            "type": "string",
+            "title": "Body"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "unread": {
+            "type": "boolean",
+            "title": "Unread"
+          }
+        },
+        "type": "object",
+        "required": [
+          "comment_id",
+          "post_id",
+          "post_title",
+          "commenter",
+          "body",
+          "created_at",
+          "unread"
+        ],
+        "title": "CommentNotificationOut"
+      },
+      "CommentOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "post_id": {
+            "type": "integer",
+            "title": "Post Id"
+          },
+          "author": {
+            "$ref": "#/components/schemas/PublicUser"
+          },
+          "body": {
+            "type": "string",
+            "title": "Body"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "mine": {
+            "type": "boolean",
+            "title": "Mine"
+          },
+          "can_delete": {
+            "type": "boolean",
+            "title": "Can Delete"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "post_id",
+          "author",
+          "body",
+          "created_at",
+          "mine",
+          "can_delete"
+        ],
+        "title": "CommentOut"
+      },
+      "CommentsRead": {
+        "properties": {
+          "up_to_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Up To Id",
+            "description": "화면에 보여 준 가장 새 댓글 번호. 비우면 지금까지 달린 것 모두"
+          }
+        },
+        "type": "object",
+        "title": "CommentsRead"
+      },
+      "ConfirmItem": {
+        "properties": {
+          "line_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line No",
+            "description": "초안의 line_no. 보내면 초안과 대조해 소비기한 출처를 유지한다"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "quantity": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Quantity"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Price"
+          },
+          "amount": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Amount"
+          },
+          "discount": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Discount",
+            "default": 0
+          },
+          "barcode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Barcode"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "storage": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "fridge",
+                  "freezer",
+                  "room"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage"
+          },
+          "expiry_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expiry Date"
+          },
+          "include": {
+            "type": "boolean",
+            "title": "Include"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "quantity",
+          "amount",
+          "include"
+        ],
+        "title": "ConfirmItem"
+      },
+      "ConsumeRequest": {
+        "properties": {
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity",
+            "description": "비우면 남은 양 전부"
+          }
+        },
+        "type": "object",
+        "title": "ConsumeRequest"
+      },
+      "DiscardedCategory": {
+        "properties": {
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "category_label": {
+            "type": "string",
+            "title": "Category Label"
+          },
+          "value": {
+            "type": "integer",
+            "title": "Value"
+          },
+          "quantity": {
+            "type": "number",
+            "title": "Quantity"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "category",
+          "category_label",
+          "value",
+          "quantity",
+          "count"
+        ],
+        "title": "DiscardedCategory"
+      },
+      "DraftItem": {
+        "properties": {
+          "line_no": {
+            "type": "integer",
+            "title": "Line No"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "quantity": {
+            "type": "number",
+            "title": "Quantity"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Price"
+          },
+          "amount": {
+            "type": "integer",
+            "title": "Amount"
+          },
+          "discount": {
+            "type": "integer",
+            "title": "Discount",
+            "default": 0
+          },
+          "barcode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Barcode"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "category_label": {
+            "type": "string",
+            "title": "Category Label"
+          },
+          "storage": {
+            "type": "string",
+            "title": "Storage"
+          },
+          "is_food": {
+            "type": "boolean",
+            "title": "Is Food"
+          },
+          "include": {
+            "type": "boolean",
+            "title": "Include"
+          },
+          "expiry_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expiry Date"
+          },
+          "expiry_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expiry Source"
+          },
+          "product_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Name"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence",
+            "default": 0.0
+          },
+          "name_cut": {
+            "type": "boolean",
+            "title": "Name Cut",
+            "description": "쇼핑몰 주문내역 화면에서 이름이 잘려 있다. 확정 전에 이름을 확인하게 한다",
+            "default": false
+          },
+          "size_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Text",
+            "description": "정리한 용량 표기. 예: \"1L\", \"200ml×6\", \"100매\"",
+            "readOnly": true
+          },
+          "size_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Amount",
+            "description": "총량. 부피는 ml, 무게는 g, 개수는 그 수 (묶음이면 곱한 값)",
+            "readOnly": true
+          },
+          "size_unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Unit",
+            "description": "size_amount의 단위. \"ml\", \"g\" 또는 세는 말(\"입\", \"매\", \"구\" …)",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "line_no",
+          "name",
+          "quantity",
+          "amount",
+          "category",
+          "category_label",
+          "storage",
+          "is_food",
+          "include",
+          "size_text",
+          "size_amount",
+          "size_unit"
+        ],
+        "title": "DraftItem"
+      },
+      "ExpiringItemList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ExpiringItemOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "alert_days": {
+            "type": "integer",
+            "title": "Alert Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "count",
+          "alert_days"
+        ],
+        "title": "ExpiringItemList"
+      },
+      "ExpiringItemOut": {
+        "properties": {
+          "item_id": {
+            "type": "integer",
+            "title": "Item Id"
+          },
+          "fridge_id": {
+            "type": "integer",
+            "title": "Fridge Id"
+          },
+          "fridge_name": {
+            "type": "string",
+            "title": "Fridge Name"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "category_label": {
+            "type": "string",
+            "title": "Category Label"
+          },
+          "storage": {
+            "type": "string",
+            "title": "Storage"
+          },
+          "remaining_quantity": {
+            "type": "number",
+            "title": "Remaining Quantity"
+          },
+          "expiry_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Expiry Date"
+          },
+          "days_left": {
+            "type": "integer",
+            "title": "Days Left",
+            "description": "오늘(Asia/Seoul) 기준 남은 일수. 지났으면 음수.",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "item_id",
+          "fridge_id",
+          "fridge_name",
+          "name",
+          "category",
+          "category_label",
+          "storage",
+          "remaining_quantity",
+          "expiry_date",
+          "days_left"
+        ],
+        "title": "ExpiringItemOut",
+        "description": "알림에 보이는 소비기한 임박 식품. 내가 멤버인 냉장고들의 것이다."
+      },
+      "FindIdRequest": {
+        "properties": {
+          "verification_token": {
+            "type": "string",
+            "title": "Verification Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "verification_token"
+        ],
+        "title": "FindIdRequest"
+      },
+      "FindIdResponse": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "created_at"
+        ],
+        "title": "FindIdResponse"
+      },
+      "FridgeCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "FridgeCreate"
+      },
+      "FridgeDetail": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "owner_id": {
+            "type": "integer",
+            "title": "Owner Id"
+          },
+          "my_role": {
+            "type": "string",
+            "title": "My Role"
+          },
+          "member_count": {
+            "type": "integer",
+            "title": "Member Count"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "public"
+            ],
+            "title": "Visibility"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/MemberOut"
+            },
+            "type": "array",
+            "title": "Members"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "owner_id",
+          "my_role",
+          "member_count",
+          "created_at",
+          "visibility",
+          "members"
+        ],
+        "title": "FridgeDetail"
+      },
+      "FridgeOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "owner_id": {
+            "type": "integer",
+            "title": "Owner Id"
+          },
+          "my_role": {
+            "type": "string",
+            "title": "My Role"
+          },
+          "member_count": {
+            "type": "integer",
+            "title": "Member Count"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "public"
+            ],
+            "title": "Visibility"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "owner_id",
+          "my_role",
+          "member_count",
+          "created_at",
+          "visibility"
+        ],
+        "title": "FridgeOut"
+      },
+      "FridgeUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 50,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "visibility": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "private",
+                  "public"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visibility"
+          }
+        },
+        "type": "object",
+        "title": "FridgeUpdate",
+        "description": "바꿀 것만 보낸다. name은 이름, visibility는 멤버가 아닌 사람에게 보일 범위(private 나만 / public 로그인한 모두가 읽기만)."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ItemCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "quantity": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Quantity",
+            "default": 1
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "storage": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "fridge",
+                  "freezer",
+                  "room"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage"
+          },
+          "barcode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Barcode"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Price"
+          },
+          "total_price": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Price"
+          },
+          "purchased_on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purchased On"
+          },
+          "expiry_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expiry Date"
+          },
+          "memo": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memo"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "ItemCreate"
+      },
+      "ItemOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "fridge_id": {
+            "type": "integer",
+            "title": "Fridge Id"
+          },
+          "receipt_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Receipt Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "storage": {
+            "type": "string",
+            "title": "Storage"
+          },
+          "barcode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Barcode"
+          },
+          "quantity": {
+            "type": "number",
+            "title": "Quantity"
+          },
+          "remaining_quantity": {
+            "type": "number",
+            "title": "Remaining Quantity"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Price"
+          },
+          "total_price": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Price"
+          },
+          "purchased_on": {
+            "type": "string",
+            "format": "date",
+            "title": "Purchased On"
+          },
+          "expiry_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expiry Date"
+          },
+          "expiry_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expiry Source"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "memo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memo"
+          },
+          "added_by": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Added By"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "size_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Text",
+            "description": "정리한 용량 표기. 예: \"1L\", \"200ml×6\", \"100매\"",
+            "readOnly": true
+          },
+          "size_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Amount",
+            "description": "총량. 부피는 ml, 무게는 g, 개수는 그 수 (묶음이면 곱한 값)",
+            "readOnly": true
+          },
+          "size_unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Unit",
+            "description": "size_amount의 단위. \"ml\", \"g\" 또는 세는 말(\"입\", \"매\", \"구\" …)",
+            "readOnly": true
+          },
+          "category_label": {
+            "type": "string",
+            "title": "Category Label",
+            "readOnly": true
+          },
+          "days_left": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Days Left",
+            "description": "오늘(Asia/Seoul) 기준 남은 일수. 지났으면 음수.",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "fridge_id",
+          "receipt_id",
+          "name",
+          "category",
+          "storage",
+          "barcode",
+          "quantity",
+          "remaining_quantity",
+          "unit_price",
+          "total_price",
+          "purchased_on",
+          "expiry_date",
+          "expiry_source",
+          "status",
+          "memo",
+          "added_by",
+          "created_at",
+          "updated_at",
+          "finished_at",
+          "size_text",
+          "size_amount",
+          "size_unit",
+          "category_label",
+          "days_left"
+        ],
+        "title": "ItemOut"
+      },
+      "ItemUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "storage": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "fridge",
+                  "freezer",
+                  "room"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity"
+          },
+          "remaining_quantity": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remaining Quantity"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Price"
+          },
+          "total_price": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Price"
+          },
+          "expiry_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expiry Date"
+          },
+          "memo": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memo"
+          }
+        },
+        "type": "object",
+        "title": "ItemUpdate",
+        "description": "보낸 필드만 수정한다. 가격·소비기한·메모는 null을 보내면 비운다."
+      },
+      "JoinResult": {
+        "properties": {
+          "fridge": {
+            "$ref": "#/components/schemas/FridgeOut"
+          },
+          "joined": {
+            "type": "boolean",
+            "title": "Joined"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fridge",
+          "joined"
+        ],
+        "title": "JoinResult"
+      },
+      "LikeOut": {
+        "properties": {
+          "like_count": {
+            "type": "integer",
+            "title": "Like Count"
+          },
+          "liked_by_me": {
+            "type": "boolean",
+            "title": "Liked By Me"
+          }
+        },
+        "type": "object",
+        "required": [
+          "like_count",
+          "liked_by_me"
+        ],
+        "title": "LikeOut"
+      },
+      "LoginRequest": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "LoginRequest"
+      },
+      "MemberOut": {
+        "properties": {
+          "user_id": {
+            "type": "integer",
+            "title": "User Id"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "nickname": {
+            "type": "string",
+            "title": "Nickname"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "joined_at": {
+            "type": "string",
+            "title": "Joined At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "username",
+          "nickname",
+          "role",
+          "joined_at"
+        ],
+        "title": "MemberOut"
+      },
+      "MessageResponse": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "MessageResponse"
+      },
+      "MonthlyStats": {
+        "properties": {
+          "year": {
+            "type": "integer",
+            "title": "Year"
+          },
+          "month": {
+            "type": "integer",
+            "title": "Month"
+          },
+          "food_spent": {
+            "type": "integer",
+            "title": "Food Spent"
+          },
+          "non_food_spent": {
+            "type": "integer",
+            "title": "Non Food Spent"
+          },
+          "receipt_count": {
+            "type": "integer",
+            "title": "Receipt Count"
+          },
+          "item_count": {
+            "type": "integer",
+            "title": "Item Count"
+          },
+          "spent_by_category": {
+            "items": {
+              "$ref": "#/components/schemas/CategoryAmount"
+            },
+            "type": "array",
+            "title": "Spent By Category"
+          },
+          "consumed_value": {
+            "type": "integer",
+            "title": "Consumed Value"
+          },
+          "discarded_value": {
+            "type": "integer",
+            "title": "Discarded Value"
+          },
+          "waste_rate": {
+            "type": "number",
+            "title": "Waste Rate",
+            "description": "버린 금액 / (먹은 금액 + 버린 금액)"
+          },
+          "top_discarded": {
+            "items": {
+              "$ref": "#/components/schemas/DiscardedCategory"
+            },
+            "type": "array",
+            "title": "Top Discarded"
+          }
+        },
+        "type": "object",
+        "required": [
+          "year",
+          "month",
+          "food_spent",
+          "non_food_spent",
+          "receipt_count",
+          "item_count",
+          "spent_by_category",
+          "consumed_value",
+          "discarded_value",
+          "waste_rate",
+          "top_discarded"
+        ],
+        "title": "MonthlyStats"
+      },
+      "MyReviewList": {
+        "properties": {
+          "reviews": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewOut"
+            },
+            "type": "array",
+            "title": "Reviews"
+          },
+          "next_before_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Before Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reviews",
+          "next_before_id"
+        ],
+        "title": "MyReviewList"
+      },
+      "NotificationSummary": {
+        "properties": {
+          "expiring_items": {
+            "type": "integer",
+            "title": "Expiring Items"
+          },
+          "unread_comments": {
+            "type": "integer",
+            "title": "Unread Comments"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expiring_items",
+          "unread_comments",
+          "total"
+        ],
+        "title": "NotificationSummary",
+        "description": "아이콘에 붙일 숫자. 앱을 열 때와 돌아올 때 이것만 부르면 된다."
+      },
+      "PasswordChangeRequest": {
+        "properties": {
+          "current_password": {
+            "type": "string",
+            "title": "Current Password"
+          },
+          "new_password": {
+            "type": "string",
+            "title": "New Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "current_password",
+          "new_password"
+        ],
+        "title": "PasswordChangeRequest"
+      },
+      "PasswordChangeResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token"
+          },
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh Token"
+          },
+          "token_type": {
+            "type": "string",
+            "title": "Token Type",
+            "default": "bearer"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "access_token",
+          "refresh_token",
+          "message"
+        ],
+        "title": "PasswordChangeResponse"
+      },
+      "PostCreate": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Body"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "body"
+        ],
+        "title": "PostCreate"
+      },
+      "PostList": {
+        "properties": {
+          "posts": {
+            "items": {
+              "$ref": "#/components/schemas/PostOut"
+            },
+            "type": "array",
+            "title": "Posts"
+          },
+          "next_before_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Before Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "posts",
+          "next_before_id"
+        ],
+        "title": "PostList"
+      },
+      "PostOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "author": {
+            "$ref": "#/components/schemas/PublicUser"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "body": {
+            "type": "string",
+            "title": "Body"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "mine": {
+            "type": "boolean",
+            "title": "Mine"
+          },
+          "can_delete": {
+            "type": "boolean",
+            "title": "Can Delete"
+          },
+          "like_count": {
+            "type": "integer",
+            "title": "Like Count"
+          },
+          "liked_by_me": {
+            "type": "boolean",
+            "title": "Liked By Me"
+          },
+          "comment_count": {
+            "type": "integer",
+            "title": "Comment Count"
+          },
+          "photos": {
+            "items": {
+              "$ref": "#/components/schemas/PostPhotoOut"
+            },
+            "type": "array",
+            "title": "Photos"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "author",
+          "title",
+          "body",
+          "created_at",
+          "mine",
+          "can_delete",
+          "like_count",
+          "liked_by_me",
+          "comment_count",
+          "photos"
+        ],
+        "title": "PostOut"
+      },
+      "PostPhotoOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "url"
+        ],
+        "title": "PostPhotoOut"
+      },
+      "PublicUser": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "nickname": {
+            "type": "string",
+            "title": "Nickname"
+          },
+          "avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "nickname"
+        ],
+        "title": "PublicUser",
+        "description": "다른 사람에게 보여도 되는 정보. 이메일·아이디는 넣지 않는다. 닉네임은 겹칠 수 있다."
+      },
+      "PurchaseGroup": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "산 횟수"
+          },
+          "quantity": {
+            "type": "number",
+            "title": "Quantity",
+            "description": "산 수량 합"
+          },
+          "total_spent": {
+            "type": "integer",
+            "title": "Total Spent"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "name",
+          "count",
+          "quantity",
+          "total_spent"
+        ],
+        "title": "PurchaseGroup"
+      },
+      "PurchaseOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "receipt_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Receipt Id"
+          },
+          "store_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Name"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "category_label": {
+            "type": "string",
+            "title": "Category Label"
+          },
+          "quantity": {
+            "type": "number",
+            "title": "Quantity"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Price"
+          },
+          "total_price": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Price"
+          },
+          "purchased_on": {
+            "type": "string",
+            "format": "date",
+            "title": "Purchased On"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "size_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Text",
+            "description": "정리한 용량 표기. 예: \"1L\", \"200ml×6\", \"100매\"",
+            "readOnly": true
+          },
+          "size_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Amount",
+            "description": "총량. 부피는 ml, 무게는 g, 개수는 그 수 (묶음이면 곱한 값)",
+            "readOnly": true
+          },
+          "size_unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Unit",
+            "description": "size_amount의 단위. \"ml\", \"g\" 또는 세는 말(\"입\", \"매\", \"구\" …)",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "receipt_id",
+          "store_name",
+          "name",
+          "category",
+          "category_label",
+          "quantity",
+          "unit_price",
+          "total_price",
+          "purchased_on",
+          "status",
+          "size_text",
+          "size_amount",
+          "size_unit"
+        ],
+        "title": "PurchaseOut"
+      },
+      "PurchaseSummary": {
+        "properties": {
+          "start": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "group_by": {
+            "type": "string",
+            "enum": [
+              "item",
+              "category"
+            ],
+            "title": "Group By"
+          },
+          "total_spent": {
+            "type": "integer",
+            "title": "Total Spent"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/PurchaseGroup"
+            },
+            "type": "array",
+            "title": "Groups"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start",
+          "end",
+          "group_by",
+          "total_spent",
+          "groups"
+        ],
+        "title": "PurchaseSummary"
+      },
+      "RatingSummary": {
+        "properties": {
+          "average": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Average"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "distribution": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Distribution"
+          }
+        },
+        "type": "object",
+        "required": [
+          "average",
+          "count",
+          "distribution"
+        ],
+        "title": "RatingSummary"
+      },
+      "ReceiptBatchResponse": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/BatchUploadResult"
+            },
+            "type": "array",
+            "title": "Results",
+            "description": "보낸 순서대로. 한 장이 실패해도 나머지는 처리된다"
+          },
+          "succeeded": {
+            "type": "integer",
+            "title": "Succeeded"
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "results",
+          "succeeded",
+          "failed"
+        ],
+        "title": "ReceiptBatchResponse"
+      },
+      "ReceiptConfirmRequest": {
+        "properties": {
+          "store_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Name"
+          },
+          "purchased_on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purchased On"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConfirmItem"
+            },
+            "type": "array",
+            "maxItems": 300,
+            "minItems": 1,
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ReceiptConfirmRequest"
+      },
+      "ReceiptConfirmResponse": {
+        "properties": {
+          "receipt_id": {
+            "type": "integer",
+            "title": "Receipt Id"
+          },
+          "created_items": {
+            "items": {
+              "$ref": "#/components/schemas/ItemOut"
+            },
+            "type": "array",
+            "title": "Created Items"
+          },
+          "skipped": {
+            "type": "integer",
+            "title": "Skipped",
+            "description": "냉장고에 넣지 않은 줄 수 (구매 기록에는 남는다)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "receipt_id",
+          "created_items",
+          "skipped"
+        ],
+        "title": "ReceiptConfirmResponse"
+      },
+      "ReceiptDetail": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "fridge_id": {
+            "type": "integer",
+            "title": "Fridge Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "store_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Name"
+          },
+          "purchased_on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purchased On"
+          },
+          "total_amount": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Amount"
+          },
+          "receipt_barcode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Receipt Barcode"
+          },
+          "uploaded_by": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uploaded By"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "confirmed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed At"
+          },
+          "draft_items": {
+            "items": {
+              "$ref": "#/components/schemas/DraftItem"
+            },
+            "type": "array",
+            "title": "Draft Items",
+            "description": "OCR로 읽은 초안. 확정 화면에서 수정해 confirm으로 보낸다"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptItemOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "확정된 줄 (pending이면 빈 목록)"
+          },
+          "items_sum": {
+            "type": "integer",
+            "title": "Items Sum",
+            "description": "품목 실결제 합 (금액 - 할인)"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "raw_lines": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Raw Lines",
+            "description": "OCR 원문 줄"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "fridge_id",
+          "status",
+          "store_name",
+          "purchased_on",
+          "total_amount",
+          "receipt_barcode",
+          "uploaded_by",
+          "created_at",
+          "confirmed_at",
+          "draft_items",
+          "items",
+          "items_sum",
+          "warnings",
+          "raw_lines"
+        ],
+        "title": "ReceiptDetail"
+      },
+      "ReceiptItemOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "line_no": {
+            "type": "integer",
+            "title": "Line No"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "barcode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Barcode"
+          },
+          "quantity": {
+            "type": "number",
+            "title": "Quantity"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Price"
+          },
+          "amount": {
+            "type": "integer",
+            "title": "Amount"
+          },
+          "discount": {
+            "type": "integer",
+            "title": "Discount"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "included": {
+            "type": "boolean",
+            "title": "Included"
+          },
+          "food_item_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Food Item Id"
+          },
+          "size_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Text",
+            "description": "정리한 용량 표기. 예: \"1L\", \"200ml×6\", \"100매\"",
+            "readOnly": true
+          },
+          "size_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Amount",
+            "description": "총량. 부피는 ml, 무게는 g, 개수는 그 수 (묶음이면 곱한 값)",
+            "readOnly": true
+          },
+          "size_unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Unit",
+            "description": "size_amount의 단위. \"ml\", \"g\" 또는 세는 말(\"입\", \"매\", \"구\" …)",
+            "readOnly": true
+          },
+          "category_label": {
+            "type": "string",
+            "title": "Category Label",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "line_no",
+          "name",
+          "barcode",
+          "quantity",
+          "unit_price",
+          "amount",
+          "discount",
+          "category",
+          "included",
+          "food_item_id",
+          "size_text",
+          "size_amount",
+          "size_unit",
+          "category_label"
+        ],
+        "title": "ReceiptItemOut"
+      },
+      "ReceiptSummary": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "store_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Name"
+          },
+          "purchased_on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purchased On"
+          },
+          "total_amount": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Amount"
+          },
+          "item_count": {
+            "type": "integer",
+            "title": "Item Count"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "confirmed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "store_name",
+          "purchased_on",
+          "total_amount",
+          "item_count",
+          "created_at",
+          "confirmed_at"
+        ],
+        "title": "ReceiptSummary"
+      },
+      "RefreshRequest": {
+        "properties": {
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "refresh_token"
+        ],
+        "title": "RefreshRequest"
+      },
+      "ReportCreate": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "enum": [
+              "spam",
+              "abuse",
+              "inappropriate",
+              "privacy",
+              "other"
+            ],
+            "title": "Reason"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 300,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "title": "ReportCreate"
+      },
+      "ReportResolve": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "delete",
+              "dismiss"
+            ],
+            "title": "Action"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "title": "ReportResolve"
+      },
+      "ReportTargetOut": {
+        "properties": {
+          "post_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Post Id"
+          },
+          "recipe_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Id"
+          },
+          "recipe_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Name"
+          },
+          "author": {
+            "$ref": "#/components/schemas/PublicUser"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "photo_count": {
+            "type": "integer",
+            "title": "Photo Count"
+          },
+          "deleted": {
+            "type": "boolean",
+            "title": "Deleted"
+          }
+        },
+        "type": "object",
+        "required": [
+          "author",
+          "text",
+          "photo_count",
+          "deleted"
+        ],
+        "title": "ReportTargetOut",
+        "description": "신고된 글, 댓글, 레시피 후기. 관리자가 지우기 전에 내용을 확인하는 용도."
+      },
+      "ResetPasswordRequest": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "verification_token": {
+            "type": "string",
+            "title": "Verification Token"
+          },
+          "new_password": {
+            "type": "string",
+            "title": "New Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "verification_token",
+          "new_password"
+        ],
+        "title": "ResetPasswordRequest"
+      },
+      "ReviewList": {
+        "properties": {
+          "summary": {
+            "$ref": "#/components/schemas/RatingSummary"
+          },
+          "my_review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reviews": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewOut"
+            },
+            "type": "array",
+            "title": "Reviews"
+          },
+          "next_before_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Before Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "summary",
+          "my_review",
+          "reviews",
+          "next_before_id"
+        ],
+        "title": "ReviewList"
+      },
+      "ReviewOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "recipe_id": {
+            "type": "string",
+            "title": "Recipe Id"
+          },
+          "recipe_name": {
+            "type": "string",
+            "title": "Recipe Name"
+          },
+          "author": {
+            "$ref": "#/components/schemas/PublicUser"
+          },
+          "rating": {
+            "type": "integer",
+            "title": "Rating"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "mine": {
+            "type": "boolean",
+            "title": "Mine"
+          },
+          "can_delete": {
+            "type": "boolean",
+            "title": "Can Delete"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "recipe_id",
+          "recipe_name",
+          "author",
+          "rating",
+          "body",
+          "created_at",
+          "updated_at",
+          "mine",
+          "can_delete"
+        ],
+        "title": "ReviewOut"
+      },
+      "ReviewWrite": {
+        "properties": {
+          "rating": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Rating",
+            "description": "별점 1~5"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body",
+            "description": "후기 글. 비우거나 공백이면 별점만 남긴다"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rating"
+        ],
+        "title": "ReviewWrite"
+      },
+      "Selection": {
+        "properties": {
+          "item_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "maxItems": 1000,
+            "title": "Item Ids"
+          },
+          "offset": {
+            "type": "integer",
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Offset",
+            "default": 0
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "item_ids"
+        ],
+        "title": "Selection"
+      },
+      "SendCodeRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "signup",
+              "find_id",
+              "reset_password"
+            ],
+            "title": "Purpose"
+          },
+          "username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "purpose"
+        ],
+        "title": "SendCodeRequest"
+      },
+      "ShareLinkOut": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "title": "Token"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token",
+          "url"
+        ],
+        "title": "ShareLinkOut",
+        "description": "냉장고의 공유 링크. 냉장고마다 하나이고, 주인이 바꾸기 전까지 같다."
+      },
+      "ShareLinkPreview": {
+        "properties": {
+          "fridge_id": {
+            "type": "integer",
+            "title": "Fridge Id"
+          },
+          "fridge_name": {
+            "type": "string",
+            "title": "Fridge Name"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/PublicUser"
+          },
+          "member_count": {
+            "type": "integer",
+            "title": "Member Count"
+          },
+          "already_member": {
+            "type": "boolean",
+            "title": "Already Member"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fridge_id",
+          "fridge_name",
+          "owner",
+          "member_count",
+          "already_member"
+        ],
+        "title": "ShareLinkPreview",
+        "description": "링크를 열었을 때 \"○○님의 냉장고 [이름]에 들어갈까요?\"를 보여 주는 용도."
+      },
+      "SharedFridgeOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "public"
+            ],
+            "title": "Visibility"
+          },
+          "item_count": {
+            "type": "integer",
+            "title": "Item Count"
+          },
+          "my_permission": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "editor",
+              "viewer"
+            ],
+            "title": "My Permission"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "visibility",
+          "item_count",
+          "my_permission"
+        ],
+        "title": "SharedFridgeOut",
+        "description": "남의 냉장고 목록 한 줄."
+      },
+      "SharedItemOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "storage": {
+            "type": "string",
+            "title": "Storage"
+          },
+          "quantity": {
+            "type": "number",
+            "title": "Quantity"
+          },
+          "remaining_quantity": {
+            "type": "number",
+            "title": "Remaining Quantity"
+          },
+          "purchased_on": {
+            "type": "string",
+            "format": "date",
+            "title": "Purchased On"
+          },
+          "expiry_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expiry Date"
+          },
+          "size_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Text",
+            "description": "정리한 용량 표기. 예: \"1L\", \"200ml×6\", \"100매\"",
+            "readOnly": true
+          },
+          "size_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Amount",
+            "description": "총량. 부피는 ml, 무게는 g, 개수는 그 수 (묶음이면 곱한 값)",
+            "readOnly": true
+          },
+          "size_unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Unit",
+            "description": "size_amount의 단위. \"ml\", \"g\" 또는 세는 말(\"입\", \"매\", \"구\" …)",
+            "readOnly": true
+          },
+          "category_label": {
+            "type": "string",
+            "title": "Category Label",
+            "readOnly": true
+          },
+          "days_left": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Days Left",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "category",
+          "storage",
+          "quantity",
+          "remaining_quantity",
+          "purchased_on",
+          "expiry_date",
+          "size_text",
+          "size_amount",
+          "size_unit",
+          "category_label",
+          "days_left"
+        ],
+        "title": "SharedItemOut",
+        "description": "남의 냉장고에서 보이는 품목. 가격·메모·바코드·영수증·누가 넣었는지는 숨긴다."
+      },
+      "SignupRequest": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          },
+          "nickname": {
+            "type": "string",
+            "maxLength": 20,
+            "minLength": 1,
+            "title": "Nickname"
+          },
+          "verification_token": {
+            "type": "string",
+            "title": "Verification Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "email",
+          "password",
+          "nickname",
+          "verification_token"
+        ],
+        "title": "SignupRequest"
+      },
+      "TokenPair": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token"
+          },
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh Token"
+          },
+          "token_type": {
+            "type": "string",
+            "title": "Token Type",
+            "default": "bearer"
+          }
+        },
+        "type": "object",
+        "required": [
+          "access_token",
+          "refresh_token"
+        ],
+        "title": "TokenPair"
+      },
+      "TokenResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token"
+          },
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh Token"
+          },
+          "token_type": {
+            "type": "string",
+            "title": "Token Type",
+            "default": "bearer"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "access_token",
+          "refresh_token",
+          "user"
+        ],
+        "title": "TokenResponse"
+      },
+      "UserOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "nickname": {
+            "type": "string",
+            "title": "Nickname"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "is_admin": {
+            "type": "boolean",
+            "title": "Is Admin"
+          },
+          "avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "username",
+          "email",
+          "nickname",
+          "created_at",
+          "is_admin"
+        ],
+        "title": "UserOut"
+      },
+      "UserUpdate": {
+        "properties": {
+          "nickname": {
+            "type": "string",
+            "maxLength": 20,
+            "minLength": 1,
+            "title": "Nickname"
+          }
+        },
+        "type": "object",
+        "required": [
+          "nickname"
+        ],
+        "title": "UserUpdate"
+      },
+      "UsernameCheck": {
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "available"
+        ],
+        "title": "UsernameCheck"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VerifyCodeRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "signup",
+              "find_id",
+              "reset_password"
+            ],
+            "title": "Purpose"
+          },
+          "code": {
+            "type": "string",
+            "maxLength": 12,
+            "minLength": 1,
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "purpose",
+          "code"
+        ],
+        "title": "VerifyCodeRequest"
+      },
+      "VerifyCodeResponse": {
+        "properties": {
+          "verification_token": {
+            "type": "string",
+            "title": "Verification Token"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In"
+          }
+        },
+        "type": "object",
+        "required": [
+          "verification_token",
+          "expires_in"
+        ],
+        "title": "VerifyCodeResponse"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "description": "로그인으로 받은 access_token",
+        "scheme": "bearer"
+      }
+    }
+  }
+}

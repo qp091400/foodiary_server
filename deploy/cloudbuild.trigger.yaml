@@ -1,0 +1,41 @@
+# GitHub 푸시(main)로 시작하는 빌드: Cloud Run 이미지를 만들어 Artifact Registry에 올린다. 배포(migrate, deploy, publish)는 하지 않는다.
+# 트리거 전용이다. $SHORT_SHA와 $COMMIT_SHA는 트리거 빌드에만 값이 있다.
+# 손으로 빌드할 때(cloudrun.py build)는 cloudbuild.cloudrun.yaml을 쓴다. 설정 방법은 AUTO_BUILD.md.
+substitutions:
+  _REGION: asia-northeast1
+  _REPOSITORY: foodiary
+  _SERVICE: foodiary
+steps:
+  # .dockerignore keeps the 800+ MB recipe database out of local builds. The Cloud Run image needs exactly that one folder.
+  - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args: [-c, "printf '\\n!recipe_data\\n!recipe_data/image-seed\\n!recipe_data/image-seed/**\\n' >> .dockerignore"]
+  # The database is not in the repository. cloudrun.py build keeps one copy per recipe version in the build bucket.
+  # The Docker build still checks its SHA-256 against recipe-package.json, so a wrong or damaged copy fails the build.
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        SHA=$$(grep -o '"sha256": *"[a-f0-9]\{64\}"' recipe-package.json | grep -o '[a-f0-9]\{64\}' || true)
+        test -n "$$SHA" || { echo "recipe-package.json에서 sha256을 찾지 못했습니다"; exit 1; }
+        mkdir -p recipe_data/image-seed
+        gcloud storage cp "gs://${PROJECT_ID}-${_SERVICE}-builds/recipe-seed/$$SHA/*" recipe_data/image-seed/
+  - name: gcr.io/cloud-builders/docker
+    env: ['DOCKER_BUILDKIT=1']  # builds only the stages the target needs (the development-only recipe stage is skipped)
+    args:
+      - build
+      - --target
+      - cloudrun
+      - --tag
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE}:${SHORT_SHA}'
+      - --tag
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE}:latest'
+      - .
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE}:${SHORT_SHA}'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE}:latest'
+timeout: 1800s
+options:
+  logging: CLOUD_LOGGING_ONLY

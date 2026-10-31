@@ -7,9 +7,7 @@ Google AI Pro의 월 $10 크레딧을 활용하는 Cloud Run 배포는 [deploy/C
 CPU OCR 모델을 이미지에 포함하고, Neon PostgreSQL과 비공개 사진 버킷을 연결하는 배포 도구가 준비되어 있습니다.
 비밀값·운영 이미지·마이그레이션을 분리하고, 비공개 HTTPS 검증 후 API를 공개합니다.
 
-Oracle Always Free ARM 서버 배포가 필요하면 [deploy/ORACLE.md](deploy/ORACLE.md)를 따릅니다.
-`compose.production.yml`은 HTTPS, 비root 실행, 영구 볼륨, 실제 OCR 시작 검사와 운영 설정 검증을 포함합니다.
-기존 `docker-compose.yml`은 로컬 개발용입니다.
+`docker-compose.yml`은 로컬 개발용입니다.
 
 ## 1. 기능
 
@@ -18,7 +16,7 @@ Oracle Always Free ARM 서버 배포가 필요하면 [deploy/ORACLE.md](deploy/O
 - **용량 정리**: 상품명에 적힌 용량·중량·개수(`1L`, `200ml×6`, `600g`, `100매`)를 뽑아 `size_text`, `size_amount`(ml·g·개수로 환산한 총량), `size_unit`으로 돌려줍니다. 초안, 식품, 구매 기록 응답에 모두 들어갑니다.
 - **냉장고 관리**: 목록, 임박 목록(지난 것 포함), 수동 추가·수정, 먹음/버림 처리(반 개도 가능).
 - **구매 기록·통계**: 무엇을 몇 번, 얼마치 샀는지와 월별 식품 지출, 먹은 금액, 버린 금액, 낭비율.
-- **냉장고 공유**: 초대코드(8자, 7일 유효)로 가족·룸메이트와 한 냉장고를 같이 씁니다.
+- **냉장고 공유**: 냉장고마다 있는 공유 링크(또는 QR)로 가족·룸메이트를 들여 한 냉장고를 같이 씁니다. 링크로 들어온 사람은 주인처럼 고칠 수 있고, 그 냉장고가 자기 냉장고 목록에 들어옵니다.
 - **계정**: 아이디 + 이메일 가입, 로그인(JWT), 이메일 인증코드로 아이디 찾기·비밀번호 재설정.
 
 영수증 하단 바코드는 거래번호만 담고 있어 품목을 알 수 없습니다. 그래서 **같은 영수증 중복 등록 방지**에만 씁니다.
@@ -277,10 +275,12 @@ curl "$API/fridges/$FRIDGE/purchases/summary?group_by=item" -H "Authorization: B
 ### 냉장고 공유
 
 ```bash
-curl -X POST $API/fridges/$FRIDGE/invites -H "Authorization: Bearer $TOKEN"     # {"code":"K7M2QX9P", ...}
-curl -X POST $API/fridges/join -H "Authorization: Bearer $다른사람토큰" \
-  -H 'Content-Type: application/json' -d '{"code":"K7M2QX9P"}'
+curl -X POST $API/fridges/$FRIDGE/share-link -H "Authorization: Bearer $TOKEN"   # {"token":"tbXJ...","url":...} 다시 눌러도 같은 링크
+curl "$API/fridges/$FRIDGE/share-link/qr" -H "Authorization: Bearer $TOKEN" -o share.png   # 같은 링크의 QR
+curl -X POST $API/share-links/tbXJ.../join -H "Authorization: Bearer $다른사람토큰"  # 멤버가 되어 주인처럼 고친다
 ```
+
+규칙(링크 바꾸기, 내보내기, QR 주소 설정)은 [docs/community.md](docs/community.md)에 있습니다.
 
 전체 엔드포인트는 `/docs`(Swagger)에서 볼 수 있습니다.
 
@@ -326,11 +326,13 @@ http://openapi.foodsafetykorea.go.kr/api/{KEY}/C005/json/1/5/BAR_CD=880123456789
 필드명이 다르면 [app/services/foodsafety.py](app/services/foodsafety.py)의 `parse_c005`만 고치면 됩니다.
 파싱은 키가 없으면 `None`이 되도록 방어적으로 짜여 있어, 필드명이 틀려도 서버가 죽지 않고 카테고리 추정으로 넘어갑니다.
 
-## 친구 · 남의 냉장고 보기 · 커뮤니티
+## 냉장고 공유 · 남의 냉장고 보기 · 커뮤니티
 
-친구 추가(친구 코드·링크, 닉네임), 냉장고마다 공개 범위(나만 / 친구들도 / 모두), 커뮤니티 글쓰기와 지우기(쓴 사람, 관리자)가 있습니다. 경로, 규칙, 관리자 만드는 법, 배포할 때 주의할 점은 [docs/community.md](docs/community.md)에 있습니다.
+냉장고 공유 링크와 QR, 냉장고마다 공개 범위(나만 / 모두), 커뮤니티 글쓰기와 지우기(쓴 사람, 관리자)가 있습니다. 친구 기능은 없습니다. 경로, 규칙, 관리자 만드는 법, 배포할 때 주의할 점은 [docs/community.md](docs/community.md)에 있습니다.
 
-레시피에 별점·후기를 남기는 기능과, 처리할 변경 요청·내 글에 달린 댓글을 알려 주는 알림 아이콘용 API는 [docs/recipe-reviews-notifications.md](docs/recipe-reviews-notifications.md)에 있습니다.
+레시피에 별점·후기를 남기는 기능과, 소비기한 임박 식품·내 글에 달린 댓글을 알려 주는 알림 아이콘용 API는 [docs/recipe-reviews-notifications.md](docs/recipe-reviews-notifications.md)에 있습니다.
+
+**API 전체 목록**은 [docs/api.html](docs/api.html)에 있습니다(경로, 요청·응답 칸, 로그인 필요 여부). 코드에서 자동으로 만든 문서라서 저장소를 받은 뒤 파일을 브라우저로 열어 보세요(GitHub 화면에서는 HTML이 그려지지 않습니다). 운영 서버의 `/docs`는 꺼 두었습니다. API를 고친 뒤에는 `python -m scripts.export_api_docs`로 다시 만듭니다. 원본 명세는 [docs/openapi.json](docs/openapi.json)입니다.
 
 ## 9. 향후 확장 (이번 범위 아님)
 
@@ -356,3 +358,9 @@ app/
     └── ocr/  base.py  paddle.py
 alembic/  tests/  Dockerfile  docker-compose.yml
 ```
+
+### 로컬에서 웹과 함께 쓰기
+
+서버 저장소에서 `docker compose up --build -d`를 실행하면 API가 `http://localhost:8000`에서 열린다.
+앱 저장소의 `EXPO_PUBLIC_API_URL`을 `http://localhost:8000`으로 두고 `npm run web`을 실행한다.
+실제 휴대폰에서는 `localhost` 대신 개발 PC의 IP를 API 주소에 설정한다.

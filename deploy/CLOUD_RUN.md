@@ -188,10 +188,95 @@ gcloud scheduler jobs delete foodiary-keepalive --location asia-northeast1
 - 요청 기반 과금에서는 요청을 처리하지 않는 인스턴스의 CPU·RAM은 과금되지 않는다([요금](https://cloud.google.com/run/pricing)). 5분마다 가벼운 요청 하나는 요청 수 무료 한도에 비해 아주 작지만 이 구성에서 실제로 측정하지는 않았으니 청구 콘솔에서 확인한다. Cloud Scheduler는 결제 계정마다 작업 3개까지 무료다([요금](https://cloud.google.com/scheduler/pricing)).
 - 최소 인스턴스를 1로 두는 방법(`--min-instances 1`)도 있지만 CPU 8개·RAM 8GiB 인스턴스가 항상 떠 있게 되어 유휴 비용이 크다. 이 구성에서는 쓰지 않는다.
 
+### 웹 앱에 도메인 연결 (foodiary.kr)
+
+도메인은 **웹 앱**(Firebase Hosting `foodiary-app-ef2b5`)에 붙인다. API 서버는 `run.app` 주소를 그대로 쓴다. 사용자에게 API 주소는 보이지 않고, 그래야 앱 설정(`EXPO_PUBLIC_API_URL`)도 바꾸지 않는다. 서버 응답에는 `X-Robots-Tag: noindex`가 붙어 검색에 나오지 않는다.
+
+1. **Firebase에 도메인 추가**: Firebase 콘솔 → Hosting → 사이트 `foodiary-app-ef2b5` → 맞춤 도메인 추가 → `foodiary.kr`. 콘솔이 보여 주는 레코드(소유 확인용 TXT, 연결용 A)를 등록업체(가비아)의 DNS 설정에 **콘솔에 나온 값 그대로** 입력한다. `www.foodiary.kr`도 쓰려면 같은 방식으로 추가하고 `foodiary.kr`로 리디렉션하게 한다. 인증서는 자동으로 발급되며 몇 분에서 몇 시간 걸릴 수 있다.
+2. **서버가 새 주소를 허용하게 하기**(브라우저 요청 허용, CORS). Cloud Shell에서 현재 허용 목록을 보고(비밀값은 출력하지 않는다) 추가한 뒤 배포한다.
+
+   ```sh
+   cd ~/foodiary-cloudrun
+   python3 -c "import json; print(json.load(open('.cloudrun/config.json'))['origins'])"
+   python3 scripts/cloudrun.py add-origin https://foodiary-app-ef2b5.web.app https://foodiary.kr https://www.foodiary.kr
+   python3 scripts/cloudrun.py release     # 새 소스와 함께 올릴 때. 설정만 바꿨다면 deploy 다음 publish
+   ```
+
+   `add-origin`은 있던 주소를 지우지 않고(중복과 끝의 `/`는 정리) 클라우드에는 아무것도 하지 않는다. 설정은 다음 `deploy`부터 적용된다.
+3. **웹 다시 빌드·배포**: 웹 앱을 평소 하던 방식으로 다시 내보내 Firebase Hosting에 올린다. 검색용 제목·설명, `robots.txt`, `sitemap.xml`이 이때 함께 올라간다.
+4. **검색 등록**(본인 계정으로 직접): Google Search Console과 네이버 서치어드바이저에 `https://foodiary.kr`을 등록해 소유를 확인하고 `https://foodiary.kr/sitemap.xml`을 제출한다. 소유 확인을 HTML 태그로 하면 받은 값을 `foodiary_app`의 `src/lib/seo.ts` 처음 화면 메타데이터에 `verification`(`google`, `other: { "naver-site-verification": "..." }`)으로 넣고 다시 배포한다. 파일로 하면 받은 파일을 `public/` 폴더에 넣는다.
+5. **(선택) 옛 주소 정리**: `foodiary.kr`이 정상으로 열린 뒤에 `firebase.json`의 `redirects`로 `foodiary-app-ef2b5.web.app`을 새 주소로 보낼 수 있다. 기존 공유 링크가 옛 주소로 만들어져 있으면 그대로 열리게 두거나 리디렉션이 경로(`/share/...`)를 유지하는지 확인한다.
+
+색인까지는 며칠에서 몇 주 걸리고 검색 순위는 보장되지 않는다.
+
+### API에 전용 주소 붙이기 (api.foodiary.kr)
+
+웹은 `foodiary.kr`(Firebase), API는 `api.foodiary.kr`(Cloud Run 도메인 매핑)로 나눠 붙이는 방법이다. 프록시가 필요 없고 `/api` 같은 접두어도 생기지 않는다. 아래 `gcloud` 명령은 [Cloud Run 도메인 매핑 문서](https://cloud.google.com/run/docs/mapping-custom-domains)를 따른 것이며, 이 저장소의 테스트는 `add-host`까지만 확인한다. 매핑 기능은 문서에서 **Preview(운영 사용 비권장)** 로 표시되어 있다. 문제가 생기면 `run.app` 주소는 그대로 동작하므로 매핑을 지우고 `run.app`을 계속 쓰면 된다.
+
+1. **Google에 도메인 소유 확인**(한 번만): Google Search Console에서 **도메인** 유형으로 `foodiary.kr`을 추가하면 TXT 값을 준다. 가비아 DNS에 **새 TXT 행으로 추가**한다(Firebase가 만든 TXT와 `A` 레코드는 지우지 않는다). 확인이 끝났는지는 Cloud Shell에서 `gcloud domains list-user-verified`로 본다. 같은 확인이 검색 등록에도 쓰인다.
+2. **도메인 매핑 만들기**(Cloud Shell):
+
+   ```sh
+   gcloud beta run domain-mappings create --service foodiary --domain api.foodiary.kr --region asia-northeast1
+   gcloud beta run domain-mappings describe --domain api.foodiary.kr --region asia-northeast1
+   ```
+
+   `describe` 결과의 `resourceRecords`에 나온 `CNAME` 값(보통 `ghs.googlehosted.com.`)을 가비아에 **호스트 `api`, 타입 CNAME**으로 입력한다. 값은 출력된 그대로 쓴다. 서비스 이름과 리전은 `.cloudrun/config.json`과 같게 한다.
+3. **서버가 새 주소를 받아 주게 하기**: 서버는 허용 목록에 없는 `Host`를 400으로 거절한다. 매핑만 만들고 이 단계를 빼면 인증서가 발급돼도 `https://api.foodiary.kr`이 400을 돌려준다. 코드를 받은 뒤:
+
+   ```sh
+   cd ~/foodiary-cloudrun
+   python3 scripts/cloudrun.py add-host api.foodiary.kr
+   python3 scripts/cloudrun.py deploy      # 설정만 바뀌었으므로 build 없이
+   python3 scripts/cloudrun.py publish
+   ```
+
+   `add-host`는 있던 주소를 지우지 않고(소문자로, 끝의 `.`과 중복은 정리) 클라우드에는 아무것도 하지 않는다. `https://`나 경로, `*`가 들어 있으면 아무것도 바꾸지 않고 거절한다. `deploy`는 직전 `release`가 남긴 이미지와 마이그레이션 기록(`.cloudrun/`)을 그대로 쓰므로 `build`와 `migrate`는 필요 없다. 그 기록이 없으면(폴더를 지웠다면) `release`로 한다. `deploy`는 서비스를 잠시 IAM 비공개로 되돌리므로 `publish`까지 끝나야 다시 열린다.
+4. **기다린 뒤 확인**: 인증서는 15분에서 24시간쯤 걸린다. `gcloud beta run domain-mappings describe ...`의 상태가 `Ready`가 되면 `curl -i https://api.foodiary.kr/health`가 200이어야 한다. 가비아에서 레코드를 넣기 전에 조회한 적이 있으면 이 PC나 통신사 DNS가 "없음"을 한동안 기억해 열리지 않을 수 있다(수 시간). 다른 네트워크나 브라우저의 보안 DNS로 확인한다.
+5. **웹이 새 API 주소를 쓰게 하기**: 웹을 다시 내보낼 때 `EXPO_PUBLIC_API_URL=https://api.foodiary.kr`로 빌드해 Firebase Hosting에 올린다. `foodiary.kr`은 CORS 허용 목록에 이미 있다. 이 값을 바꾸기 전까지 웹은 `run.app` 주소를 계속 쓰므로 3단계까지는 서비스에 영향이 없다.
+
+`cloudrun.py`의 `verify`와 `publish`는 계속 `run.app` 주소로 점검한다. 응답에는 `X-Robots-Tag: noindex`가 붙으므로 `api.foodiary.kr`도 검색에 나오지 않는다.
+
+### 냉장고 공유 링크와 QR이 여는 주소
+
+서버는 냉장고 공유 링크의 QR을 만든다. QR에는 휴대폰 카메라로 찍으면 바로 열리는 전체 주소(`https://웹주소/share/토큰`)가 들어가야 해서, 서버에 웹 앱의 `/share/` 주소를 알려 준다. 이 설정이 없으면 공유 링크 API는 토큰만 돌려주고(앱이 주소를 만든다) QR 요청은 503이다.
+
+```sh
+cd ~/foodiary-cloudrun
+python3 scripts/cloudrun.py set-share-link-base https://foodiary.kr/share/
+python3 scripts/cloudrun.py deploy      # 설정만 바뀌었으면 build 없이. 새 코드와 함께라면 release
+python3 scripts/cloudrun.py publish
+```
+
+- 끝의 `/`는 없으면 붙여 준다. HTTPS 주소만 받는다. 클라우드에는 아무것도 하지 않고 다음 `deploy`(또는 `release`)부터 적용된다.
+- QR은 요청할 때마다 그때의 주소로 만든다. 이미 인쇄하거나 보낸 QR의 주소는 바뀌지 않으니 오래 쓸 주소를 넣는다. `foodiary.kr` 인증서가 나오기 전이면 `https://foodiary-app-ef2b5.web.app/share/`로 시작해도 된다(같은 웹 앱이라 나중에 바꿔도 옛 QR이 계속 열린다).
+
+### 인증 메일을 보내는 계정 바꾸기
+
+회원가입·아이디 찾기·비밀번호 재설정 메일은 Gmail SMTP로 보낸다. 보내는 계정을 바꾸려면 그 계정의 **앱 비밀번호**가 필요하다(계정의 로그인 비밀번호가 아니다).
+
+1. 새 계정으로 Google 계정 → 보안에서 **2단계 인증**을 켠다. 그다음 같은 화면의 **앱 비밀번호**에서 16글자 비밀번호를 만든다(이름은 아무거나, 예: `foodiary-server`). 한 번만 보이니 바로 쓴다.
+2. Cloud Shell에서:
+
+   ```sh
+   cd ~/foodiary-cloudrun
+   python3 scripts/cloudrun.py set-mail-account foodiarynoreply@gmail.com   # 앱 비밀번호를 묻는다. 입력해도 화면에 보이지 않는다
+   python3 scripts/cloudrun.py secrets     # 비밀값을 Secret Manager에 새 버전으로 올린다
+   python3 scripts/cloudrun.py deploy
+   python3 scripts/cloudrun.py publish
+   ```
+
+- `set-mail-account`는 로그인 계정(`smtp_user`)과 보낸 사람 주소(`mail_from`)를 함께 바꾸고, 앱 비밀번호의 띄어쓰기는 빼고 저장한다. 클라우드에는 아무것도 하지 않는다.
+- `secrets`는 DB 주소, JWT 키도 같은 값으로 새 버전을 올린다. 값이 같으니 로그인한 사용자는 그대로다.
+- 받은편지함에는 보낸 사람이 `Foodiary`로 보인다. 보낸 사람 사진은 그 Google 계정의 프로필 사진이다(받는 메일 앱에 따라 보이지 않을 수 있다).
+- 바꾼 뒤 회원가입 화면에서 인증 메일을 한 번 받아 본다. 메일이 오지 않으면 Cloud Run 로그에서 `메일 발송 실패`를 찾는다(앱 비밀번호가 틀리면 `Username and Password not accepted`가 남는다).
+
 ## 5. 업데이트·복구
 
 소스 변경 후 `build → migrate → deploy → verify → publish`를 실행한다. `deploy`는 다시 IAM 비공개로 바꾸므로
 현재 공개 서비스는 점검 시간에 업데이트한다.
+
+압축본을 만들어 올리는 대신 **GitHub에 푸시하면 이미지가 자동으로 만들어지게** 할 수도 있다. 설정과 사용법은 [AUTO_BUILD.md](AUTO_BUILD.md)다(그 방식에서는 배포를 `release --image 커밋번호`로 한다).
 
 이 과정은 한 명령으로 실행할 수 있다. 새 압축본(`package_release.py`가 만든 것)을 Cloud Shell에 올린 뒤:
 
@@ -210,7 +295,6 @@ cd ~/foodiary-cloudrun && python3 scripts/cloudrun.py release
 이미지 교체만으로 DB가 되돌아가지는 않는다. 스키마 변경과 이전 이미지의 호환성도 확인한다.
 
 Neon 복원 기능과 별도로 DB 덤프와 사진을 외부에 보관하고 복원을 시험한다.
-Oracle용 `scripts/backup.sh`는 Compose 전용이므로 Cloud Run 백업에 사용하지 않는다.
 사진은 인증된 Cloud Shell에서 `gcloud storage cp --recursive gs://BUCKET_NAME ./private-receipt-backup`으로 복사할 수 있다.
 덤프는 DB 버전과 호환되는 `pg_dump`를 사용하고 DB 암호를 명령 인자·터미널 로그에 남기지 않는다.
 사진 버킷에는 보존 중인 영수증을 나이만으로 자동 삭제하는 규칙을 설정하지 않는다.

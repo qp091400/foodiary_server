@@ -101,6 +101,16 @@ def test_auth_request_limit_and_security_headers(client, monkeypatch):
     assert client.get("/health").status_code == 200
 
 
+def test_the_api_server_is_never_indexed_by_search_engines(client, monkeypatch):
+    monkeypatch.setattr(settings, "rate_limit_enabled", True)
+    monkeypatch.setattr(settings, "auth_requests_per_minute", 1)
+    body = {"username": "not-a-user", "password": "incorrect"}
+    responses = [client.get("/health"), client.head("/health"), client.get("/fridges"), client.get("/receipt-test"),
+                 client.post("/auth/login", json=body), client.post("/auth/login", json=body)]  # 200, 401, 404(테스트 페이지 꺼짐), 429까지
+    assert {r.status_code for r in responses} >= {200, 401, 429}
+    assert all(r.headers["X-Robots-Tag"] == "noindex, nofollow" for r in responses)
+
+
 def test_limit_expires_and_keys_are_bounded():
     limiter = RequestLimiter(max_keys=2)
     assert limiter.check(("one", "ocr"), 1, now=10) == 0

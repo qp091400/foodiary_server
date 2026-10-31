@@ -17,7 +17,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
 from PIL import Image, ImageOps
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -25,7 +25,7 @@ from app.config import settings
 from app.database import get_db
 from app.deps import FridgeAccess, get_fridge_access
 from app.middleware import extra_ocr_request
-from app.models import FoodItem, Receipt, ReceiptItem
+from app.models import ConsumptionLog, FoodItem, Receipt, ReceiptItem
 from app.schemas import (
     BatchUploadResult,
     ConfirmItem,
@@ -44,7 +44,7 @@ from app.services.foodsafety import ProductInfo, lookup_barcode
 from app.services.ocr import OcrEngine, get_ocr_engine
 from app.services.ocr.base import OcrBox, OcrBusyError, next_ticket
 from app.services.ocr.paddle import Verdict
-from app.services.receipt_parser import ParsedReceipt, parse_receipt
+from app.services.receipt_parser import ParsedReceipt, merge_same_name, parse_receipt
 from app.timeutil import today, utcnow
 
 logger = logging.getLogger(__name__)
@@ -118,7 +118,7 @@ def _remove_file(relative_path: str | None) -> None:
 def build_draft(db: Session, parsed: ParsedReceipt, purchased_on: date) -> list[dict]:
     lookup = _ProductLookup(db)
     draft = []
-    for item in parsed.items:
+    for item in merge_same_name(parsed.items):
         product = lookup.get(item.barcode)
         guess = estimate(item.name, purchased_on, product)
         # 쇼핑몰 주문에는 옷·생활용품이 많이 섞여 있다. 식품으로 알아본 것만 넣고 모르는 것은 제외로 둔다(사용자가 켠다).
@@ -686,12 +686,23 @@ def confirm_receipt(
     )
 
 
-@router.delete("/{receipt_id}", status_code=204, summary="초안(pending) 영수증 삭제")
+@router.delete(
+    "/{receipt_id}",
+    status_code=204,
+    summary="영수증 기록 삭제 (확정된 것은 그 영수증으로 넣은 식품·구매 기록·먹음/버림 기록까지). 같은 영수증을 다시 찍을 수 있게 된다",
+)
 def delete_receipt(receipt_id: int, access: FridgeAccess = Depends(get_fridge_access), db: Session = Depends(get_db)):
-    receipt = _get_receipt(db, access.fridge.id, receipt_id)
-    if receipt.status != "pending":
-        raise HTTPException(status_code=409, detail="확정된 영수증은 삭제할 수 없습니다.")
+    receipt = _get_receipt(db, access.fridge.id, receipt_id, lock=True)
     image_path = receipt.image_path
+    if receipt.status == "confirmed":
+        # 영수증을 찍기 전으로 되돌린다. 외래키 규칙(SET NULL·CASCADE)에 기대지 않고 직접 지워 DB 종류와 상관없이 같게 한다.
+        item_ids = list(db.scalars(select(FoodItem.id).where(FoodItem.receipt_id == receipt.id)))
+        if item_ids:
+            db.execute(delete(ConsumptionLog).where(ConsumptionLog.food_item_id.in_(item_ids)))
+        db.execute(delete(ReceiptItem).where(ReceiptItem.receipt_id == receipt.id))
+        if item_ids:
+            db.execute(delete(FoodItem).where(FoodItem.id.in_(item_ids)))
+    # 영수증 줄이 사라지면 바코드(중복 등록 방지 키)도 함께 사라져, 같은 영수증을 다시 올릴 수 있다.
     db.delete(receipt)
     db.commit()
     _remove_file(image_path)
