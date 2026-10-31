@@ -1,7 +1,10 @@
-"""알림 아이콘: 답하지 않은 변경 요청 수, 내가 보낸 요청의 결과, 내 글에 달린 댓글 내용과 새 댓글 수, 읽음 표시."""
+"""알림 아이콘: 답하지 않은 변경 요청 수, 소비기한 임박 식품, 내가 보낸 요청의 결과, 내 글에 달린 댓글 내용과 새 댓글 수, 읽음 표시."""
+
+from datetime import timedelta
 
 import pytest
 
+from app.timeutil import today
 from tests.helpers import auth, default_fridge_id, signup
 
 
@@ -61,12 +64,12 @@ def mark_read(client, who, **body):
 
 
 def test_nothing_new_at_first(client, world):
-    assert summary(client, world["alice"]) == {"pending_change_requests": 0, "unread_change_results": 0, "unread_comments": 0, "total": 0}
+    assert summary(client, world["alice"]) == {"pending_change_requests": 0, "expiring_items": 0, "unread_change_results": 0, "unread_comments": 0, "total": 0}
 
 
 def test_pending_change_requests_show_up_for_the_owner_only(client, world):
     first, second = ask(client, world), ask(client, world)
-    assert summary(client, world["alice"]) == {"pending_change_requests": 2, "unread_change_results": 0, "unread_comments": 0, "total": 2}
+    assert summary(client, world["alice"]) == {"pending_change_requests": 2, "expiring_items": 0, "unread_change_results": 0, "unread_comments": 0, "total": 2}
     assert summary(client, world["bob"])["pending_change_requests"] == 0  # 보낸 사람 쪽에는 뜨지 않는다
     assert summary(client, world["carol"])["total"] == 0
     client.post(f"/change-requests/{first}/approve", headers=world["alice"]["headers"])
@@ -88,7 +91,7 @@ def test_comments_on_my_post_are_unread_until_marked_read(client, world):
     post_id = write_post(client, world["alice"], "두부 요리 추천")
     first = comment(client, world["bob"], post_id, "두부조림 해 먹어요")
     second = comment(client, world["carol"], post_id, "저는 부침이요")
-    assert summary(client, world["alice"]) == {"pending_change_requests": 0, "unread_change_results": 0, "unread_comments": 2, "total": 2}
+    assert summary(client, world["alice"]) == {"pending_change_requests": 0, "expiring_items": 0, "unread_change_results": 0, "unread_comments": 2, "total": 2}
 
     feed = comments(client, world["alice"])
     assert [c["comment_id"] for c in feed["comments"]] == [second, first] and feed["unread_count"] == 2  # 최신순
@@ -98,7 +101,7 @@ def test_comments_on_my_post_are_unread_until_marked_read(client, world):
     assert newest["created_at"].endswith("Z")
 
     read = mark_read(client, world["alice"])
-    assert read.status_code == 200 and read.json() == {"pending_change_requests": 0, "unread_change_results": 0, "unread_comments": 0, "total": 0}
+    assert read.status_code == 200 and read.json() == {"pending_change_requests": 0, "expiring_items": 0, "unread_change_results": 0, "unread_comments": 0, "total": 0}
     feed = comments(client, world["alice"])
     assert [c["unread"] for c in feed["comments"]] == [False, False] and feed["unread_count"] == 0  # 읽어도 내용은 계속 볼 수 있다
     third = comment(client, world["bob"], post_id, "하나 더요")
@@ -176,7 +179,7 @@ def test_comment_feed_pages(client, world):
 def test_total_adds_both_and_login_is_required(client, world):
     ask(client, world)
     comment(client, world["bob"], write_post(client, world["alice"]))
-    assert summary(client, world["alice"]) == {"pending_change_requests": 1, "unread_change_results": 0, "unread_comments": 1, "total": 2}
+    assert summary(client, world["alice"]) == {"pending_change_requests": 1, "expiring_items": 0, "unread_change_results": 0, "unread_comments": 1, "total": 2}
     for method, path in (("get", "/notifications/summary"), ("get", "/notifications/comments"), ("post", "/notifications/comments/read")):
         assert getattr(client, method)(path).status_code == 401
 
@@ -204,7 +207,7 @@ def test_the_sender_is_told_when_a_request_is_approved_or_declined(client, world
     assert summary(client, world["bob"])["unread_change_results"] == 0  # 답이 오기 전에는 없다
     handle(client, world, approved, "approve")
     handle(client, world, declined, "decline")
-    assert summary(client, world["bob"]) == {"pending_change_requests": 0, "unread_change_results": 2, "unread_comments": 0, "total": 2}
+    assert summary(client, world["bob"]) == {"pending_change_requests": 0, "expiring_items": 0, "unread_change_results": 2, "unread_comments": 0, "total": 2}
     assert summary(client, world["alice"])["unread_change_results"] == 0  # 결과는 보낸 사람에게만 간다
     assert summary(client, world["alice"])["pending_change_requests"] == 1  # 아직 답하지 않은 것 (waiting)
 
@@ -264,7 +267,100 @@ def test_all_three_kinds_add_up_in_the_total(client, world):
     handle(client, world, request_id, "approve")
     comment(client, world["alice"], write_post(client, world["bob"]), "bob 글에 단 댓글")
     ask(client, world)  # 이건 alice가 답할 차례
-    assert summary(client, world["bob"]) == {"pending_change_requests": 0, "unread_change_results": 1, "unread_comments": 1, "total": 2}
-    assert summary(client, world["alice"]) == {"pending_change_requests": 1, "unread_change_results": 0, "unread_comments": 0, "total": 1}
+    assert summary(client, world["bob"]) == {"pending_change_requests": 0, "expiring_items": 0, "unread_change_results": 1, "unread_comments": 1, "total": 2}
+    assert summary(client, world["alice"]) == {"pending_change_requests": 1, "expiring_items": 0, "unread_change_results": 0, "unread_comments": 0, "total": 1}
     for method, path in (("get", "/notifications/change-results"), ("post", "/notifications/change-results/read")):
         assert getattr(client, method)(path).status_code == 401
+
+
+# ── 소비기한 임박 ────────────────────────────────────────────────────────
+
+
+def iso(days):
+    return (today() + timedelta(days=days)).isoformat()
+
+
+def add_item(client, who, fridge_id, name, days=None, **extra):
+    body = {"name": name, "quantity": 2, **extra}
+    if days is not None:
+        body["expiry_date"] = iso(days)
+    response = client.post(f"/fridges/{fridge_id}/items", headers=who["headers"], json=body)
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
+
+
+def expiring(client, who, **params):
+    response = client.get("/notifications/expiring", params=params, headers=who["headers"])
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_items_with_three_days_or_less_left_are_alerts_and_overdue_ones_stay(client, world):
+    fridge = world["fridge_id"]
+    for name, days in (("지난 우유", -2), ("오늘까지 햄", 0), ("사흘 남은 치즈", 3), ("나흘 남은 요거트", 4), ("기한 모르는 물티슈", None)):
+        add_item(client, world["alice"], fridge, name, days)
+    gone = add_item(client, world["alice"], fridge, "이미 버린 것", -5)
+    client.post(f"/fridges/{fridge}/items/{gone}/discard", headers=world["alice"]["headers"])
+
+    assert summary(client, world["alice"]) == {
+        "pending_change_requests": 0, "expiring_items": 3, "unread_change_results": 0, "unread_comments": 0, "total": 3,
+    }
+    feed = expiring(client, world["alice"])
+    assert [(i["name"], i["days_left"]) for i in feed["items"]] == [("지난 우유", -2), ("오늘까지 햄", 0), ("사흘 남은 치즈", 3)]  # 빠른 순
+    assert feed["count"] == 3 and feed["alert_days"] == 3
+    first = feed["items"][0]
+    assert (first["fridge_id"], first["fridge_name"], first["storage"], first["remaining_quantity"]) == (fridge, first["fridge_name"], first["storage"], 2.0)
+    assert first["expiry_date"] == iso(-2) and first["category_label"] and first["item_id"]
+
+
+def test_an_item_leaves_the_alerts_when_it_is_eaten_discarded_or_given_a_later_date(client, world):
+    fridge = world["fridge_id"]
+    eaten, thrown, moved = (add_item(client, world["alice"], fridge, name, 1) for name in ("먹을 것", "버릴 것", "날짜 바꿀 것"))
+    assert summary(client, world["alice"])["expiring_items"] == 3
+    client.post(f"/fridges/{fridge}/items/{eaten}/consume", headers=world["alice"]["headers"], json={})
+    client.post(f"/fridges/{fridge}/items/{thrown}/discard", headers=world["alice"]["headers"])
+    assert [i["name"] for i in expiring(client, world["alice"])["items"]] == ["날짜 바꿀 것"]
+    client.patch(f"/fridges/{fridge}/items/{moved}", headers=world["alice"]["headers"], json={"expiry_date": iso(10)})
+    assert summary(client, world["alice"])["expiring_items"] == 0 and expiring(client, world["alice"])["items"] == []
+
+
+def test_every_fridge_i_am_a_member_of_counts_but_view_only_friends_and_strangers_see_nothing(client, world):
+    second = client.post("/fridges", headers=world["alice"]["headers"], json={"name": "김치냉장고"}).json()["id"]
+    add_item(client, world["alice"], world["fridge_id"], "본냉장고 우유", 1)
+    add_item(client, world["alice"], second, "김치냉장고 김치", 2)
+    names = {i["name"]: i["fridge_name"] for i in expiring(client, world["alice"])["items"]}
+    assert names["김치냉장고 김치"] == "김치냉장고" and set(names) == {"본냉장고 우유", "김치냉장고 김치"}
+    for viewer in ("bob", "carol"):  # bob은 보기만 하는 친구, carol은 아무 관계가 없다
+        assert summary(client, world[viewer])["expiring_items"] == 0
+        assert expiring(client, world[viewer])["items"] == []
+
+    link = client.post(f"/fridges/{world['fridge_id']}/share-links", headers=world["alice"]["headers"], json={"permission": "editor"}).json()["token"]
+    assert client.post(f"/share-links/{link}/join", headers=world["carol"]["headers"]).status_code == 200  # 고치기 권한을 받으면 멤버다
+    shared = expiring(client, world["carol"])["items"]
+    assert [(i["name"], i["fridge_id"]) for i in shared] == [("본냉장고 우유", world["fridge_id"])]  # 공유받은 냉장고의 것만 (김치냉장고는 아니다)
+
+
+def test_my_own_other_fridge_items_do_not_leak_to_anyone_else(client, world):
+    carol_fridge = default_fridge_id(client, world["carol"]["tokens"])
+    add_item(client, world["carol"], carol_fridge, "carol의 우유", 0)
+    assert [i["name"] for i in expiring(client, world["carol"])["items"]] == ["carol의 우유"]
+    assert expiring(client, world["alice"])["items"] == [] and summary(client, world["alice"])["expiring_items"] == 0
+
+
+def test_the_expiring_list_can_be_cut_but_still_reports_the_full_count(client, world):
+    for days in (-1, 0, 1):
+        add_item(client, world["alice"], world["fridge_id"], f"{days}일", days)
+    cut = expiring(client, world["alice"], limit=2)
+    assert [i["days_left"] for i in cut["items"]] == [-1, 0] and cut["count"] == 3
+    for bad in (0, 201):
+        assert client.get("/notifications/expiring", params={"limit": bad}, headers=world["alice"]["headers"]).status_code == 422
+
+
+def test_expiring_items_add_to_the_total_and_need_a_login(client, world):
+    add_item(client, world["alice"], world["fridge_id"], "임박한 것", 1)
+    ask(client, world)
+    comment(client, world["bob"], write_post(client, world["alice"]), "alice 글에 단 댓글")
+    assert summary(client, world["alice"]) == {
+        "pending_change_requests": 1, "expiring_items": 1, "unread_change_results": 0, "unread_comments": 1, "total": 3,
+    }
+    assert client.get("/notifications/expiring").status_code == 401
