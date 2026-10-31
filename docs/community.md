@@ -46,7 +46,7 @@
 | 경로 | 설명 |
 |---|---|
 | `POST /posts` | 글쓰기. 제목 1~100자, 본문 1~2000자(앞뒤 공백은 지운다). `board`는 `general`(자유게시판, 기본) 또는 `recipe`(레시피게시판). 직접 쓰는 글은 한 시간에 10개까지(`POSTS_PER_HOUR`, 지운 글도 센다) |
-| `GET /posts?board=&limit=&before_id=` | 최신순 목록(기본 20, 최대 50). `board` 생략 시 전체, 지정 시 해당 게시판만 조회. 다음 쪽도 같은 `board`와 `next_before_id`를 보낸다 |
+| `GET /posts?q=&board=&limit=&before_id=` | 제목·본문 검색 및 최신순 목록(기본 20, 최대 50). `q`는 100자까지, 비우면 기존 목록. `board` 생략 시 전체, 지정 시 해당 게시판만 조회. 다음 쪽도 같은 `q`, `board`와 `next_before_id`를 보낸다 |
 | `GET /posts/{id}` | 글 하나 |
 | `PATCH /posts/{id}` | 본인이 쓴 일반 글의 `title`, `body`, `board` 중 수정할 필드만 전송. 관리자도 타인의 글은 수정할 수 없다. 빈 값·null은 422. 자동 후기 글은 409이며 레시피 후기 API로 수정한다 |
 | `DELETE /posts/{id}` | 쓴 사람이나 관리자만. 남의 글이면 403. 붙인 사진 파일도 함께 지워진다 |

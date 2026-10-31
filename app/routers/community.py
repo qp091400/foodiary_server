@@ -32,6 +32,7 @@ from app.schemas import (
     ReportCreate,
 )
 from app.services.community import delete_comment, delete_post, file_report, remove_photo_file
+from app.services.post_search import find_posts
 from app.timeutil import utcnow
 
 router = APIRouter(prefix="/posts", tags=["커뮤니티"])
@@ -130,20 +131,16 @@ def create_post(payload: PostCreate, me: User = Depends(get_current_user), db: S
     return _decorate(db, [(post, me)], me)[0]
 
 
-@router.get("", response_model=PostList, summary="글 목록 (최신순). 다음 쪽은 before_id에 next_before_id를 넣어 부른다")
+@router.get("", response_model=PostList, summary="글 목록·제목/본문 검색 (최신순). 다음 쪽도 같은 q·board를 보낸다")
 def list_posts(
+    q: str = Query("", max_length=100, description="제목·본문에 포함된 검색어. 빈 값·공백이면 전체 목록"),
     board: PostBoard | None = Query(None, description="general: 자유게시판, recipe: 레시피게시판. 생략하면 전체"),
     before_id: int | None = Query(None, ge=1, description="이 번호보다 오래된 글부터"),
     limit: int = Query(20, ge=1, le=50),
     me: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    query = select(Post, User).join(User, User.id == Post.author_id).where(Post.deleted_at.is_(None))
-    if board is not None:
-        query = query.where(Post.board == board)
-    if before_id is not None:
-        query = query.where(Post.id < before_id)
-    rows = db.execute(query.order_by(Post.id.desc()).limit(limit + 1)).all()
+    rows = find_posts(db, query=q, board=board, before_id=before_id, limit=limit)
     page = rows[:limit]
     return PostList(posts=_decorate(db, page, me), next_before_id=page[-1][0].id if len(rows) > limit else None)
 

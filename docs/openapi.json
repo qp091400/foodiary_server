@@ -3004,7 +3004,7 @@
         "tags": [
           "커뮤니티"
         ],
-        "summary": "글 목록 (최신순). 다음 쪽은 before_id에 next_before_id를 넣어 부른다",
+        "summary": "글 목록·제목/본문 검색 (최신순). 다음 쪽도 같은 q·board를 보낸다",
         "operationId": "list_posts_posts_get",
         "security": [
           {
@@ -3012,6 +3012,19 @@
           }
         ],
         "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "제목·본문에 포함된 검색어. 빈 값·공백이면 전체 목록",
+              "default": "",
+              "title": "Q"
+            },
+            "description": "제목·본문에 포함된 검색어. 빈 값·공백이면 전체 목록"
+          },
           {
             "name": "board",
             "in": "query",

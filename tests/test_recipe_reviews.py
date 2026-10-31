@@ -90,6 +90,18 @@ def test_review_is_automatically_published_once_and_updates_in_place(client, use
     assert len(client.get("/posts?board=recipe", headers=me["headers"]).json()["posts"]) == 1
 
 
+def test_automatic_review_posts_are_searchable_after_edits(client, users):
+    me = users["minsu"]
+    rate(client, me, rating=4, body="고소해요")
+    def search(q):
+        return client.get("/posts", headers=me["headers"], params={"q": q, "board": "recipe"}).json()["posts"]
+    assert len(search("달걀양파볶음")) == 1
+    assert len(search("고소")) == 1
+    rate(client, me, rating=3, body="간단해요")
+    assert search("고소") == []
+    assert len(search("간단")) == 1
+
+
 @pytest.mark.parametrize("delete_from", ["review", "post", "admin_review_report", "admin_post_report"])
 def test_deleting_review_or_its_post_keeps_both_hidden(client, users, delete_from):
     me = users["minsu"]

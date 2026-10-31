@@ -150,3 +150,49 @@ def test_board_filter_pagination_and_validation(client, users):
     assert next_page["next_before_id"] is None
     assert client.get("/posts?board=unknown", headers=headers).status_code == 422
     assert client.patch("/posts/1", json={"title": "제목"}).status_code in (401, 403)
+
+
+def test_search_matches_title_or_body_and_ignores_case(client, users):
+    me = users["minsu"]
+    title_match = write(client, me, title="달걀 요리", body="간단한 저녁").json()["id"]
+    body_match = write(client, me, title="아침 메뉴", body="달걀을 익혀요").json()["id"]
+    english = write(client, me, title="TOFU Soup", body="두부국").json()["id"]
+    result = client.get("/posts", headers=me["headers"], params={"q": "  달걀  "}).json()
+    assert [p["id"] for p in result["posts"]] == [body_match, title_match]
+    assert result["next_before_id"] is None
+    result = client.get("/posts", headers=me["headers"], params={"q": "tofu"}).json()
+    assert [p["id"] for p in result["posts"]] == [english]
+    assert client.get("/posts", headers=me["headers"], params={"q": "없는 단어"}).json()["posts"] == []
+
+
+@pytest.mark.parametrize("keyword", ["%", "_", "/", "' OR 1=1 --"])
+def test_search_treats_special_characters_as_literal_text(client, users, keyword):
+    me = users["minsu"]
+    match = write(client, me, title="특수문자", body=f"문자 {keyword} 검색").json()["id"]
+    write(client, me, title="다른 글", body="일반 내용")
+    result = client.get("/posts", headers=me["headers"], params={"q": keyword}).json()
+    assert [p["id"] for p in result["posts"]] == [match]
+
+
+def test_search_keeps_board_and_cursor_filters_and_excludes_deleted_posts(client, users):
+    headers = users["minsu"]["headers"]
+    rows = []
+    for board, body in [("recipe", "요리 팁"), ("general", "요리 이야기"), ("recipe", "다른 내용"), ("recipe", "요리 후기"), ("recipe", "요리 삭제")]:
+        rows.append(client.post("/posts", headers=headers, json={"title": "제목", "body": body, "board": board}).json()["id"])
+    client.delete(f"/posts/{rows[-1]}", headers=headers)
+    first = client.get("/posts", headers=headers, params={"q": "요리", "board": "recipe", "limit": 1}).json()
+    assert [p["id"] for p in first["posts"]] == [rows[3]]
+    assert first["next_before_id"] == rows[3]
+    last = client.get("/posts", headers=headers, params={"q": "요리", "board": "recipe", "limit": 1, "before_id": first["next_before_id"]}).json()
+    assert [p["id"] for p in last["posts"]] == [rows[0]]
+    assert last["next_before_id"] is None
+
+
+def test_search_blank_query_limits_and_authentication(client, users):
+    headers = users["minsu"]["headers"]
+    post = write(client, users["minsu"]).json()
+    for q in ("", "   "):
+        assert client.get("/posts", headers=headers, params={"q": q}).json()["posts"][0]["id"] == post["id"]
+    assert client.get("/posts", headers=headers, params={"q": "가" * 101}).status_code == 422
+    assert client.get("/posts", headers=headers, params={"q": "가" * 100}).status_code == 200
+    assert client.get("/posts?q=검색").status_code in (401, 403)
