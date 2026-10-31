@@ -875,6 +875,7 @@ class NotificationSummary(BaseModel):
     """아이콘에 붙일 숫자. 앱을 열 때와 돌아올 때 이것만 부르면 된다."""
 
     pending_change_requests: int  # 내 냉장고에 들어와 아직 답하지 않은 변경 요청
+    expiring_items: int  # 내가 멤버인 냉장고들에서 소비기한이 3일 이내로 남았거나 이미 지난 식품
     unread_change_results: int  # 내가 보낸 변경 요청 중 승인·거절된 것 가운데 아직 확인하지 않은 것
     unread_comments: int  # 내 글에 달린 새 댓글
     total: int
@@ -915,3 +916,29 @@ class ChangeResultList(BaseModel):
 
 class ChangeResultsRead(BaseModel):
     ids: list[int] | None = Field(None, max_length=200, description="확인한 요청 번호들. 비우면 지금까지 처리된 결과 모두")
+
+
+class ExpiringItemOut(BaseModel):
+    """알림에 보이는 소비기한 임박 식품. 내가 멤버인 냉장고들의 것이다."""
+
+    item_id: int
+    fridge_id: int
+    fridge_name: str
+    name: str
+    category: str
+    category_label: str
+    storage: str
+    remaining_quantity: float
+    expiry_date: date
+
+    @computed_field
+    @property
+    def days_left(self) -> int:
+        """오늘(Asia/Seoul) 기준 남은 일수. 지났으면 음수."""
+        return (self.expiry_date - today()).days
+
+
+class ExpiringItemList(BaseModel):
+    items: list[ExpiringItemOut]  # 소비기한이 빠른 순 (이미 지난 것이 맨 앞)
+    count: int  # limit에 잘리기 전의 전체 수
+    alert_days: int  # 소비기한이 며칠 이내로 남으면 임박으로 보는지
