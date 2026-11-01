@@ -43,6 +43,7 @@ from app.security import (
 )
 from app.services import verification
 from app.services.email import send_verification_email
+from app.services.test_data import seed_sample_fridge
 from app.timeutil import utcnow
 
 router = APIRouter(prefix="/auth", tags=["인증"])
@@ -170,13 +171,14 @@ def test_account_status():
     "/test-account",
     response_model=TestAccountResponse,
     status_code=201,
-    summary="테스트용 계정 만들기: 이메일 인증 없이 바로 쓸 수 있는 계정 (기본 냉장고 포함, 응답에 로그인 토큰과 비밀번호)",
+    summary="테스트용 계정 만들기: 이메일 인증 없이 바로 쓸 수 있는 계정 (샘플 식품이 채워진 기본 냉장고 포함, 응답에 로그인 토큰과 비밀번호)",
 )
 def create_test_account(db: Session = Depends(get_db)):
     """서버가 TEST_ACCOUNTS_ENABLED=true일 때만 된다(꺼져 있으면 404). 누구나 부를 수 있으므로 하루 전체 한도와 분당 한도가 있다.
 
     아이디는 test_ + 무작위 8자, 이메일은 그 아이디@example.com(실제로는 받을 수 없는 주소), 닉네임은 "테스트" + 무작위 4자다.
     비밀번호는 무작위로 만들어 이 응답에만 담고, 서버에는 해시만 남긴다.
+    기본 냉장고는 카테고리마다 1~2개의 샘플 식품(app/services/test_data.py)으로 채워지고, 기록 화면용 먹음·버림 기록도 같이 들어간다.
     """
     if not settings.test_accounts_enabled:
         raise HTTPException(status_code=404, detail=TEST_ACCOUNT_OFF)
@@ -201,6 +203,7 @@ def create_test_account(db: Session = Depends(get_db)):
             db.add(fridge)
             db.flush()
             db.add(FridgeMember(fridge_id=fridge.id, user_id=user.id, role="owner"))
+            seed_sample_fridge(db, fridge.id, user.id)  # 바로 둘러볼 수 있게 냉장고를 샘플 식품으로 채운다
             db.commit()
         except IntegrityError:
             db.rollback()
