@@ -116,6 +116,7 @@ SQLite 인메모리 DB, console 메일, `OCR_ENGINE=none`으로 돌기 때문에
 | `OCR_ORIENTATION_MODEL` | `PP-LCNet_x1_0_doc_ori` | 사진 방향(0·90·180·270°) 판별 모델. 가로로 찍거나 뒤집어 찍은 사진을 바로 세워 읽습니다. 판별이 틀린 것 같으면(가로 사진이거나 품목을 거의 못 읽었는데 합계도 안 맞으면) 사진을 직접 돌려 다시 읽습니다. 비우면 끕니다 |
 | `NAME_LEARNING_ENABLED` / `NAME_LEARNING_MIN_USERS` | `true` / 2 | 사용자가 영수증 초안의 이름을 고친 기록을 모아 다음 영수증에 적용한다. 고친 본인에게는 바로, 다른 사람에게는 서로 다른 사용자가 이 수 이상 같게 고쳤을 때만 적용한다. 아래 "상품 이름 보정" 참고 |
 | `NAME_UNSURE_BELOW` | 0.85 | 줄의 OCR 신뢰도가 이 값보다 낮으면 이름 보정을 넓게 하고, 아는 낱말이 하나도 없으면 초안에 "이름이 흐릿하게 읽힌 품목이 있어요" 안내(`warnings`)와 품목의 `name_unsure`가 붙는다. 처음 정한 값이라 실제 영수증으로 다듬어야 한다 |
+| `TEST_ACCOUNTS_ENABLED` / `TEST_ACCOUNTS_PER_DAY` / `TEST_ACCOUNT_REQUESTS_PER_MINUTE` | `false` / 50 / 5 | **테스트용 계정 만들기**(`POST /auth/test-account`)를 켠다. 기본은 꺼짐(404). 켜면 누구나 이메일 인증 없이 계정을 만들 수 있으니 시험이 필요한 동안만 켠다. 하루(24시간) 전체 한도와 분당 한도(로그인·가입과 따로 센다). 아래 "테스트용 계정" 참고 |
 | `FOODSAFETY_API_KEY` | (빈 값) | 비우면 바코드 조회를 끄고 카테고리 추정만 합니다 |
 | `CORS_ORIGINS` | `*` | 쉼표로 여러 개 |
 | `AUTO_CREATE_TABLES` | `true` | 시작할 때 `create_all` |
@@ -190,6 +191,21 @@ FRIDGE=1
 
 아이디 찾기는 `purpose=find_id`, 비밀번호 재설정은 `purpose=reset_password`(+`username`)로 같은 1→2단계를 거친 뒤
 `POST /auth/find-id` 또는 `POST /auth/reset-password`를 호출합니다.
+
+### 테스트용 계정 (이메일 인증 없이)
+
+앱 로그인 화면의 "테스트용 계정 생성" 버튼이 쓰는 경로입니다. 이메일 인증코드 없이 계정이 바로 만들어집니다.
+
+```bash
+curl $API/auth/test-account                       # {"enabled": true|false}: 이 서버에서 쓸 수 있는지
+curl -X POST $API/auth/test-account               # 요청 내용 없음 → 201, 로그인 응답 + "password"
+```
+
+- **기본은 꺼져 있습니다**(`TEST_ACCOUNTS_ENABLED=false`면 POST는 404, GET은 `enabled: false`). 켜면 **누구나** 인증 없이 계정을 만들 수 있으니 운영에서는 시험이 필요한 동안만 켜고, 끝나면 `TEST_ACCOUNTS_ENABLED=false`로 다시 시작하세요. 이미 만든 계정은 계속 쓸 수 있고, 새로 만드는 것만 막힙니다.
+- 만들어지는 계정: 아이디 `test_` + 무작위 8자, 닉네임 `테스트` + 무작위 4자, 이메일 `아이디@example.com`(받을 수 없는 주소), 무작위 비밀번호(헷갈리는 글자 `0 O 1 l I` 제외), 기본 냉장고 하나. 응답의 `password`는 **이때만** 알 수 있고(서버에는 해시만 남음) 로그인 토큰도 같이 옵니다. 일반 가입과 똑같이 로그인·글쓰기·영수증 등록이 됩니다.
+- **남용을 막는 장치**: 하루(24시간) 전체 `TEST_ACCOUNTS_PER_DAY`개(기본 50)까지, 분당 `TEST_ACCOUNT_REQUESTS_PER_MINUTE`번(기본 5). 분당 한도는 로그인·가입의 한도(`AUTH_REQUESTS_PER_MINUTE`)와 **따로** 세므로, 이 경로를 마구 불러도 진짜 사용자의 로그인이 막히지 않습니다. 한도를 넘으면 429입니다. Cloud Run처럼 `RATE_LIMIT_SCOPE=global`이면 분당 한도는 서버 전체에 걸립니다.
+- 테스트 계정은 `users.is_test = true`로 표시됩니다(마이그레이션 `0020`, 칸 하나만 더함). 닉네임이 "테스트…"로 시작해서 커뮤니티에서도 알아볼 수 있고, 남용되면 관리자가 일반 계정처럼 임시 정지할 수 있습니다. 계정을 지우는 기능은 아직 없습니다. 정리하려면 `is_test`가 true인 계정을 SQL로 골라서 처리하세요.
+- 이 계정으로는 이메일을 받을 수 없으므로(비밀번호 찾기 등) 비밀번호를 잃으면 되찾을 수 없습니다. 새로 만들면 됩니다.
 
 ### 영수증 업로드 → 확정
 

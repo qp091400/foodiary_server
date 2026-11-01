@@ -66,9 +66,10 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         retry_after = 0
         if settings.rate_limit_enabled and request.method == "POST":
             path = request.scope["path"]
-            group = "auth" if path.startswith("/auth/") else "ocr" if _OCR_PATH.fullmatch(path) else None
+            # 테스트 계정 만들기는 따로 센다: 이 경로를 마구 불러도 진짜 로그인·가입의 한도를 쓰지 않게
+            group = "test" if path == "/auth/test-account" else "auth" if path.startswith("/auth/") else "ocr" if _OCR_PATH.fullmatch(path) else None
             if group:
-                limit = settings.auth_requests_per_minute if group == "auth" else settings.ocr_requests_per_minute
+                limit = {"auth": settings.auth_requests_per_minute, "test": settings.test_account_requests_per_minute}.get(group, settings.ocr_requests_per_minute)
                 retry_after = request_limiter.check((_identity(request), group), limit)
         if retry_after:
             response = JSONResponse(

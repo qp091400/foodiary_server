@@ -53,6 +53,12 @@ class Settings(BaseSettings):
     rate_limit_scope: Literal["ip", "global"] = "ip"
     auth_requests_per_minute: int = Field(30, ge=1, le=1000)
     ocr_requests_per_minute: int = Field(10, ge=1, le=100)
+    # 테스트용 계정 만들기(POST /auth/test-account): 이메일 인증 없이 바로 쓸 계정을 만든다. 누구나 부를 수 있어서 기본은 꺼 둔다.
+    # 운영에서는 시험이 필요한 동안만 TEST_ACCOUNTS_ENABLED=true로 켠다. 하루(24시간) 전체 한도와 분당 한도는 따로 둔다
+    # (분당 한도를 로그인과 나눠야, 이 경로를 마구 불러도 진짜 로그인·가입이 막히지 않는다).
+    test_accounts_enabled: bool = False
+    test_accounts_per_day: int = Field(50, ge=1, le=1000)
+    test_account_requests_per_minute: int = Field(5, ge=1, le=100)
     # OCR는 한 번에 한 장이라 여러 사람이 동시에 올리면 줄을 선다. 줄에서 기다리는 한도와 기다리는 사진 수의 한도
     ocr_queue_wait_seconds: int = Field(100, ge=0, le=600)  # TODO: balance
     ocr_queue_max: int = Field(40, ge=0, le=200)  # TODO: balance

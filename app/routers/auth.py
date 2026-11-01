@@ -1,10 +1,14 @@
 """회원가입, 로그인, 아이디·비밀번호 찾기 (이메일 인증코드 방식)."""
 
+import secrets
+from datetime import timedelta
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.deps import unauthorized
 from app.models import Fridge, FridgeMember, User
@@ -19,6 +23,8 @@ from app.schemas import (
     ResetPasswordRequest,
     SendCodeRequest,
     SignupRequest,
+    TestAccountResponse,
+    TestAccountStatus,
     TokenPair,
     TokenResponse,
     UsernameCheck,
@@ -37,6 +43,7 @@ from app.security import (
 )
 from app.services import verification
 from app.services.email import send_verification_email
+from app.timeutil import utcnow
 
 router = APIRouter(prefix="/auth", tags=["인증"])
 
@@ -140,6 +147,66 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=409, detail="이미 사용 중인 아이디 또는 이메일입니다.") from None
     return {**_token_pair(user), "user": user}
+
+
+# 테스트 계정 비밀번호에 쓰는 글자: 0·O·1·l·I처럼 헷갈리는 것은 뺀다 (적어 두고 다시 입력할 수 있게)
+_TEST_PASSWORD_CHARS = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+TEST_ACCOUNT_OFF = "테스트 계정 만들기를 쓸 수 없어요."
+TEST_ACCOUNT_LIMIT = "오늘 만들 수 있는 테스트 계정을 모두 만들었어요. 내일 다시 시도해 주세요."
+
+
+def _test_password() -> str:
+    # 영문과 숫자가 모두 들어가야 한다(_password 규칙). 무작위 10자 + 앞에 글자·숫자 하나씩 보장
+    body = "".join(secrets.choice(_TEST_PASSWORD_CHARS) for _ in range(10))
+    return secrets.choice("abcdefghjkmnpqrstuvwxyz") + secrets.choice("23456789") + body
+
+
+@router.get("/test-account", response_model=TestAccountStatus, summary="테스트 계정 만들기를 쓸 수 있나 (앱이 버튼을 보여 줄지 정한다)")
+def test_account_status():
+    return {"enabled": settings.test_accounts_enabled}
+
+
+@router.post(
+    "/test-account",
+    response_model=TestAccountResponse,
+    status_code=201,
+    summary="테스트용 계정 만들기: 이메일 인증 없이 바로 쓸 수 있는 계정 (기본 냉장고 포함, 응답에 로그인 토큰과 비밀번호)",
+)
+def create_test_account(db: Session = Depends(get_db)):
+    """서버가 TEST_ACCOUNTS_ENABLED=true일 때만 된다(꺼져 있으면 404). 누구나 부를 수 있으므로 하루 전체 한도와 분당 한도가 있다.
+
+    아이디는 test_ + 무작위 8자, 이메일은 그 아이디@example.com(실제로는 받을 수 없는 주소), 닉네임은 "테스트" + 무작위 4자다.
+    비밀번호는 무작위로 만들어 이 응답에만 담고, 서버에는 해시만 남긴다.
+    """
+    if not settings.test_accounts_enabled:
+        raise HTTPException(status_code=404, detail=TEST_ACCOUNT_OFF)
+    made_today = db.scalar(select(func.count()).select_from(User).where(User.is_test.is_(True), User.created_at >= utcnow() - timedelta(hours=24)))
+    if made_today >= settings.test_accounts_per_day:
+        raise HTTPException(status_code=429, detail=TEST_ACCOUNT_LIMIT, headers={"Retry-After": "3600"})
+    password = _test_password()
+    password_hash = hash_password(password)
+    for _ in range(5):  # 무작위 아이디가 겹치면 다시 뽑는다
+        token = secrets.token_hex(4)
+        user = User(
+            username=f"test_{token}",
+            email=f"test_{token}@example.com",
+            password_hash=password_hash,
+            nickname=f"테스트{token[:4]}",
+            is_test=True,
+        )
+        db.add(user)
+        try:
+            db.flush()
+            fridge = Fridge(name=f"{user.nickname}의 냉장고", owner_id=user.id)
+            db.add(fridge)
+            db.flush()
+            db.add(FridgeMember(fridge_id=fridge.id, user_id=user.id, role="owner"))
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            continue
+        return {**_token_pair(user), "user": user, "password": password}
+    raise HTTPException(status_code=503, detail="테스트 계정을 만들지 못했어요. 잠시 후 다시 시도해 주세요.")
 
 
 @router.post("/login", response_model=TokenResponse, summary="로그인")

@@ -6,6 +6,74 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/recommendation-ai/events": {
+      "post": {
+        "tags": [
+          "개인화 추천"
+        ],
+        "summary": "Event",
+        "operationId": "event_recommendation_ai_events_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/recommendation-ai/model": {
+      "get": {
+        "tags": [
+          "개인화 추천"
+        ],
+        "summary": "Get Model",
+        "operationId": "get_model_recommendation_ai_model_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/auth/check-username": {
       "get": {
         "tags": [
@@ -165,6 +233,47 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/test-account": {
+      "get": {
+        "tags": [
+          "인증"
+        ],
+        "summary": "테스트 계정 만들기를 쓸 수 있나 (앱이 버튼을 보여 줄지 정한다)",
+        "operationId": "test_account_status_auth_test_account_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestAccountStatus"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "인증"
+        ],
+        "summary": "테스트용 계정 만들기: 이메일 인증 없이 바로 쓸 수 있는 계정 (기본 냉장고 포함, 응답에 로그인 토큰과 비밀번호)",
+        "description": "서버가 TEST_ACCOUNTS_ENABLED=true일 때만 된다(꺼져 있으면 404). 누구나 부를 수 있으므로 하루 전체 한도와 분당 한도가 있다.\n\n아이디는 test_ + 무작위 8자, 이메일은 그 아이디@example.com(실제로는 받을 수 없는 주소), 닉네임은 \"테스트\" + 무작위 4자다.\n비밀번호는 무작위로 만들어 이 응답에만 담고, 서버에는 해시만 남긴다.",
+        "operationId": "create_test_account_auth_test_account_post",
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestAccountResponse"
                 }
               }
             }
@@ -1913,6 +2022,62 @@
         ],
         "summary": "Recommendations",
         "operationId": "recommendations_fridges__fridge_id__recipes_recommendations_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "fridge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Fridge Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Selection"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fridges/{fridge_id}/recipes/personalized": {
+      "post": {
+        "tags": [
+          "레시피"
+        ],
+        "summary": "Personalized",
+        "description": "One stable retrieval pool; the device ranks it before local pagination.",
+        "operationId": "personalized_fridges__fridge_id__recipes_personalized_post",
         "security": [
           {
             "HTTPBearer": []
@@ -5444,6 +5609,45 @@
         ],
         "title": "DraftItem"
       },
+      "EventIn": {
+        "properties": {
+          "recipe_id": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Recipe Id"
+          },
+          "event_key": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Event Key"
+          },
+          "event_type": {
+            "type": "string",
+            "enum": [
+              "view",
+              "select"
+            ],
+            "title": "Event Type"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "fridge",
+              "recipe_detail"
+            ],
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recipe_id",
+          "event_key",
+          "event_type",
+          "source"
+        ],
+        "title": "EventIn"
+      },
       "ExpiringItemList": {
         "properties": {
           "items": {
@@ -8354,6 +8558,53 @@
           "lifted_at"
         ],
         "title": "SuspensionOut"
+      },
+      "TestAccountResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token"
+          },
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh Token"
+          },
+          "token_type": {
+            "type": "string",
+            "title": "Token Type",
+            "default": "bearer"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserOut"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password",
+            "description": "만든 계정의 비밀번호. 이 응답에서만 알 수 있다(서버에는 해시만 남는다). 다시 로그인하려면 user.username과 함께 적어 둬야 한다"
+          }
+        },
+        "type": "object",
+        "required": [
+          "access_token",
+          "refresh_token",
+          "user",
+          "password"
+        ],
+        "title": "TestAccountResponse"
+      },
+      "TestAccountStatus": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "테스트 계정 만들기를 쓸 수 있는 서버인가. 앱이 버튼을 보여 줄지 정하는 데 쓴다"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "TestAccountStatus"
       },
       "TokenPair": {
         "properties": {

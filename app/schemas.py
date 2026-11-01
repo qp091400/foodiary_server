@@ -214,6 +214,14 @@ class TokenResponse(TokenPair):
     user: UserOut
 
 
+class TestAccountStatus(BaseModel):
+    enabled: bool = Field(description="테스트 계정 만들기를 쓸 수 있는 서버인가. 앱이 버튼을 보여 줄지 정하는 데 쓴다")
+
+
+class TestAccountResponse(TokenResponse):
+    password: str = Field(description="만든 계정의 비밀번호. 이 응답에서만 알 수 있다(서버에는 해시만 남는다). 다시 로그인하려면 user.username과 함께 적어 둬야 한다")
+
+
 class UserUpdate(BaseModel):
     nickname: Nickname
 

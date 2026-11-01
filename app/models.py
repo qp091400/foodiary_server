@@ -23,6 +23,8 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     # 관리자: 남의 글도 지울 수 있다. scripts/set_admin.py로만 바꾼다
     is_admin: Mapped[bool] = mapped_column(default=False)
+    # 테스트용 계정 만들기(POST /auth/test-account)로 만든 계정. 하루 한도를 세고, 나중에 골라서 정리하려고 표시해 둔다
+    is_test: Mapped[bool] = mapped_column(default=False)
     avatar_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # 알림 아이콘: 내 글에 달린 댓글 중 이 번호까지는 봤다 (댓글 번호는 쓴 순서대로 커진다)
     comments_seen_id: Mapped[int] = mapped_column(default=0)
