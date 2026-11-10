@@ -16,6 +16,7 @@ from app.services.ocr.base import OcrBox, OcrBusyError
 
 METADATA_TOKEN_URL = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity"
 TOKEN_SECONDS = 45 * 60  # Google ID tokens live one hour
+READY_SECONDS = 30  # a good readiness answer is reused this long; /ready is public and must not hammer the OCR service
 
 
 class RemoteOcrEngine:
@@ -29,6 +30,9 @@ class RemoteOcrEngine:
         self._client = client or httpx.Client()
         self._token: tuple[str, float] | None = None
         self._token_lock = threading.Lock()
+        self._probe_lock = threading.Lock()
+        self._ready_until = 0.0
+        self._last_ready = False
 
     def _headers(self) -> dict[str, str]:
         if self.auth != "google":
@@ -60,10 +64,22 @@ class RemoteOcrEngine:
         return [OcrBox(**box) for box in response.json()["boxes"]]
 
     def ready(self) -> bool:
+        """Is the OCR service up? One probe at a time (it may wait ~40 s for a cold start); callers meanwhile get the last answer."""
+        if time.monotonic() < self._ready_until:
+            return True
+        if not self._probe_lock.acquire(blocking=False):
+            return self._last_ready
         try:
-            return self._client.get(f"{self.base_url}/ready", headers=self._headers(), timeout=60).status_code == 200
-        except httpx.HTTPError:
-            return False
+            try:
+                ok = self._client.get(f"{self.base_url}/ready", headers=self._headers(), timeout=60).status_code == 200
+            except httpx.HTTPError:
+                ok = False
+            self._last_ready = ok
+            if ok:
+                self._ready_until = time.monotonic() + READY_SECONDS
+            return ok
+        finally:
+            self._probe_lock.release()
 
 
 _engine: RemoteOcrEngine | None = None

@@ -72,12 +72,12 @@ git fetch -q origin main && git checkout -f -B main origin/main
 ```
 
 ### 5. 자동 배포 권한 (한 번)
-빌드 계정이 Cloud Run 서비스·잡의 이미지를 바꾸고 마이그레이션 잡을 실행할 수 있게 한다. 실행 계정(`-run`, `-migrate`)으로 돌게 하려면 그 계정을 "대신 쓸" 권한도 필요하다.
+빌드 계정이 Cloud Run 서비스·잡의 이미지를 바꾸고 마이그레이션 잡을 실행할 수 있게 한다. 실행 계정(`-run`, `-migrate`, `-ocr`)으로 돌게 하려면 그 계정을 "대신 쓸" 권한도 필요하다. `foodiary-ocr` 계정은 처음 `release`(또는 `deploy`)가 만들므로, 이 단계는 그 뒤에 한다.
 ```sh
 PROJECT=$(gcloud config get-value project)
 BUILD=foodiary-build@$PROJECT.iam.gserviceaccount.com
 gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:$BUILD --role=roles/run.developer --condition=None
-for ACCOUNT in foodiary-run foodiary-migrate; do
+for ACCOUNT in foodiary-run foodiary-migrate foodiary-ocr; do
   gcloud iam service-accounts add-iam-policy-binding $ACCOUNT@$PROJECT.iam.gserviceaccount.com     --member=serviceAccount:$BUILD --role=roles/iam.serviceAccountUser
 done
 ```

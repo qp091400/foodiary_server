@@ -221,10 +221,8 @@ class Deployment:
         if number != self.config["project_number"]:
             raise RuntimeError("Configured project number does not match the authenticated project")
         self.gcloud("services", "enable", *APIS)
-        for suffix in ("run", "migrate", "build"):
-            account = self.account(suffix)
-            if self.gcloud("iam", "service-accounts", "describe", account, capture=True, missing_ok=True) is None:
-                self.gcloud("iam", "service-accounts", "create", f"{self.service}-{suffix}")
+        for suffix in ("run", "migrate", "build", "ocr"):
+            self.ensure_account(suffix)
         repository = self.config["repository"]
         if self.gcloud("artifacts", "repositories", "describe", repository, f"--location={self.region}",
                        capture=True, missing_ok=True) is None:
@@ -258,6 +256,12 @@ class Deployment:
             for suffix in (("run", "migrate") if key == "DATABASE_URL" else ("run",)):
                 self.gcloud("secrets", "add-iam-policy-binding", name,
                             f"--member=serviceAccount:{self.account(suffix)}", "--role=roles/secretmanager.secretAccessor")
+
+    def ensure_account(self, suffix: str) -> str:
+        account = self.account(suffix)
+        if self.gcloud("iam", "service-accounts", "describe", account, capture=True, missing_ok=True) is None:
+            self.gcloud("iam", "service-accounts", "create", f"{self.service}-{suffix}")
+        return account
 
     @property
     def build_bucket(self) -> str:
@@ -419,9 +423,10 @@ class Deployment:
         name = ocr_service(self.config)
         env_file = self.folder / "ocr-env.json"
         save_private(env_file, json.dumps(ocr_environment(self.config)))
-        # shortcut: shares the API's service account (it can read the API's secrets); give it its own account if that matters
+        # Its own account with no roles: it reads only the baked models, never the API's secrets or the photo bucket.
+        account = self.ensure_account("ocr")
         self.gcloud("run", "deploy", name, f"--region={self.region}", f"--image={self.image()}",
-                    f"--service-account={self.account('run')}", "--execution-environment=gen2", "--port=8080",
+                    f"--service-account={account}", "--execution-environment=gen2", "--port=8080",
                     "--cpu=8", "--memory=8Gi", "--cpu-throttling", "--cpu-boost", "--concurrency=20",
                     "--min=0", "--max=1", "--min-instances=0", "--max-instances=1", "--timeout=180s",
                     "--no-allow-unauthenticated", f"--env-vars-file={env_file.resolve()}",

@@ -91,12 +91,13 @@ def test_migrate_and_deploy_use_pinned_secrets_and_separate_identities(tmp_path,
     assert calls[1][:4] == ("run", "jobs", "execute", "foodiary-migrate")
     assert json.loads((tmp_path / "migration.json").read_text())["image"] == image
     deployment.deploy()
-    ocr, invoker, command = calls[-3:]
+    ocr, invoker, command = [call for call in calls if call[:2] in (("run", "deploy"), ("run", "services"))][-3:]
     # OCR service first: same image, own entrypoint, the big machine, private, no secrets and no uploads volume
     assert ocr[:3] == ("run", "deploy", "foodiary-ocr") and "--image=" + image in ocr
     assert "--cpu=8" in ocr and "--memory=8Gi" in ocr and "--cpu-boost" in ocr and "--concurrency=20" in ocr
     assert "--args=/app/scripts/cloudrun_ocr_entrypoint.py" in ocr and "--no-allow-unauthenticated" in ocr
     assert not any(argument.startswith(("--set-secrets", "--add-volume")) for argument in ocr)
+    assert "--service-account=foodiary-ocr@example-project.iam.gserviceaccount.com" in ocr  # its own account, no roles
     assert invoker[:4] == ("run", "services", "add-iam-policy-binding", "foodiary-ocr")
     assert "--member=serviceAccount:foodiary-run@example-project.iam.gserviceaccount.com" in invoker
     assert "--role=roles/run.invoker" in invoker

@@ -86,7 +86,26 @@ def test_the_api_calls_the_ocr_server_with_a_google_id_token(ocr):
             return type("Token", (), {"text": "id-token\n", "raise_for_status": lambda self: None})()
 
     engine = RemoteOcrEngine("https://ocr.example", auth="google", client=Recorder())
-    assert engine.ready() and engine.ready()
+    assert engine.ready()
     token_calls = [call for call in seen if "metadata" in call[0]]
-    assert len(token_calls) == 1 and token_calls[0][1] == {"Metadata-Flavor": "Google"}  # cached for the next call
+    assert len(token_calls) == 1 and token_calls[0][1] == {"Metadata-Flavor": "Google"}
     assert seen[-1][1] == {"Authorization": "Bearer id-token"}
+    assert engine._headers() == {"Authorization": "Bearer id-token"}
+    assert len([call for call in seen if "metadata" in call[0]]) == 1  # token reused
+
+
+def test_the_public_ready_check_does_not_hammer_the_ocr_service(ocr, monkeypatch):
+    calls = []
+
+    class Counter:
+        def get(self, url, **kwargs):
+            calls.append(url)
+            return ocr["client"].get("/ready")
+
+    engine = RemoteOcrEngine("http://ocr", client=Counter())
+    assert all(engine.ready() for _ in range(20))
+    assert len(calls) == 1  # a good answer is reused for READY_SECONDS
+    engine._ready_until = 0
+    engine._probe_lock.acquire()  # another request is probing a cold OCR service right now
+    assert engine.ready() is True and len(calls) == 1  # answered from the last result, no second probe
+    engine._probe_lock.release()
