@@ -5,7 +5,7 @@
 # Order: migrate -> OCR service -> API service -> /ready check. A failed check puts both services back on the previous revision
 # (a migration is not undone: migrations must keep working with the previous code).
 set -euo pipefail
-: "${IMAGE:?}" "${REGION:?}" "${SERVICE:?}" "${TEST_ACCOUNTS:?}"
+: "${IMAGE:?}" "${REGION:?}" "${SERVICE:?}" "${TEST_ACCOUNTS:?}" "${PROJECT_NUMBER:?}"
 
 if [ "${AUTO_DEPLOY:-true}" != "true" ]; then
     echo "Automatic deploy is off (_AUTO_DEPLOY=${AUTO_DEPLOY}). The image was built only."
@@ -14,7 +14,8 @@ fi
 
 OCR="$SERVICE-ocr"
 run() { gcloud "$@" --region="$REGION" --quiet; }
-revision() { run run services describe "$1" --format='value(status.latestReadyRevisionName)'; }
+# The revision serving traffic now (after a rollback that is not the latest one), to go back to on failure
+revision() { run run services describe "$1" --format='value(status.traffic[0].revisionName)'; }
 
 if ! run run services describe "$OCR" --format='value(metadata.name)' >/dev/null 2>&1; then
     echo "The $OCR service does not exist yet. Create both services once from Cloud Shell" >&2
@@ -38,14 +39,16 @@ if run run jobs describe "$SERVICE-push" --format='value(metadata.name)' >/dev/n
     run run jobs update "$SERVICE-push" --image="$IMAGE"
 fi
 
-url=$(run run services describe "$SERVICE" --format='value(status.url)')
+# The address the API trusts (TRUSTED_HOSTS); status.url can be the older *.a.run.app form, which the API answers with 400
+url="https://$SERVICE-$PROJECT_NUMBER.$REGION.run.app"
 for attempt in 1 2 3; do
     # /ready checks the database and wakes the OCR service (cold start ~40 s)
-    if curl -fsS --max-time 180 "$url/ready" >/dev/null; then
+    status=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 180 "$url/ready" || true)
+    if [ "$status" = 200 ]; then
         echo "Deployed $IMAGE: $url"
         exit 0
     fi
-    echo "/ready failed (attempt $attempt)" >&2
+    echo "$url/ready answered HTTP ${status:-none} (attempt $attempt)" >&2
     sleep 10
 done
 echo "Going back to $SERVICE=$previous_api and $OCR=$previous_ocr" >&2

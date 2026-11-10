@@ -691,7 +691,7 @@ def test_trigger_build_tags_the_image_with_the_commit_and_latest_then_deploys_it
     assert "run deploy" not in str(build["steps"])  # settings stay with cloudrun.py deploy; the trigger swaps images only
     assert build["substitutions"] == {"_REGION": "asia-northeast1", "_REPOSITORY": "foodiary", "_SERVICE": "foodiary", "_AUTO_DEPLOY": "true",
                                       "_TEST_ACCOUNTS": "true"}
-    assert "TEST_ACCOUNTS=${_TEST_ACCOUNTS}" in deploy["env"]
+    assert "TEST_ACCOUNTS=${_TEST_ACCOUNTS}" in deploy["env"] and "PROJECT_NUMBER=${PROJECT_NUMBER}" in deploy["env"]
 
 
 def test_manual_deploys_follow_the_same_test_account_switch_as_the_trigger():

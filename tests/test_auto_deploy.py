@@ -15,16 +15,15 @@ FAKE_GCLOUD = """#!/bin/bash
 echo "gcloud $*" >> "$LOG"
 case "$*" in
   *"services describe foodiary-ocr --format=value(metadata.name)"*) [ "$OCR_EXISTS" = yes ] || exit 1; echo foodiary-ocr ;;
-  *"services describe foodiary-ocr --format=value(status.latestReadyRevisionName)"*) echo foodiary-ocr-00003 ;;
-  *"services describe foodiary --format=value(status.latestReadyRevisionName)"*) echo foodiary-00012 ;;
-  *"services describe foodiary --format=value(status.url)"*) echo https://api.example ;;
+  *"services describe foodiary-ocr --format=value(status.traffic[0].revisionName)"*) echo foodiary-ocr-00003 ;;
+  *"services describe foodiary --format=value(status.traffic[0].revisionName)"*) echo foodiary-00012 ;;
   *"jobs describe foodiary-push"*) exit 1 ;;
   *"jobs execute"*) [ "$MIGRATION" = ok ] || exit 1 ;;
 esac
 """
 FAKE_CURL = """#!/bin/bash
 echo "curl $*" >> "$LOG"
-[ "$READY" = ok ]
+if [ "$READY" = ok ]; then echo -n 200; else echo -n 400; fi
 """
 FAKE_SLEEP = "#!/bin/bash\n"
 
@@ -40,6 +39,7 @@ def deploy(tmp_path, *, ocr_exists="yes", migration="ok", ready="ok", auto="true
     env = {
         **os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "LOG": str(log),
         "IMAGE": "registry/foodiary:abc1234", "REGION": "asia-northeast1", "SERVICE": "foodiary", "AUTO_DEPLOY": auto, "TEST_ACCOUNTS": "true",
+        "PROJECT_NUMBER": "123456789012",
         "OCR_EXISTS": ocr_exists, "MIGRATION": migration, "READY": ready,
     }
     # bash needs a POSIX path to the script on Windows too
@@ -60,7 +60,7 @@ def test_a_push_migrates_then_swaps_the_image_of_ocr_then_api(tmp_path):
         "gcloud run services update foodiary --image=registry/foodiary:abc1234 --update-env-vars=TEST_ACCOUNTS_ENABLED=true",
         "gcloud run services update-traffic foodiary-ocr --to-latest",
         "gcloud run services update-traffic foodiary --to-latest",
-        "curl -fsS --max-time 180 https://api.example/ready",
+        "curl -sS -o /dev/null -w %{http_code} --max-time 180 https://foodiary-123456789012.asia-northeast1.run.app/ready",
     ]
 
 
@@ -68,6 +68,7 @@ def test_a_failed_ready_check_goes_back_to_the_previous_revisions(tmp_path):
     code, lines, output = deploy(tmp_path, ready="down")
     assert code == 1
     assert sum(line.startswith("curl") for line in lines) == 3
+    assert "answered HTTP 400" in output  # the log says why
     assert lines[-2:] == [
         "gcloud run services update-traffic foodiary --to-revisions=foodiary-00012=100",
         "gcloud run services update-traffic foodiary-ocr --to-revisions=foodiary-ocr-00003=100",

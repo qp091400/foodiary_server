@@ -57,6 +57,7 @@ steps:
       - 'IMAGE=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE}:${SHORT_SHA}'
       - 'REGION=${_REGION}'
       - 'SERVICE=${_SERVICE}'
+      - 'PROJECT_NUMBER=${PROJECT_NUMBER}'
       - 'AUTO_DEPLOY=${_AUTO_DEPLOY}'
       - 'TEST_ACCOUNTS=${_TEST_ACCOUNTS}'
 images:
