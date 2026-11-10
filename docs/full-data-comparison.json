@@ -1,0 +1,204 @@
+{
+  "selected_candidate": "title65_ko25",
+  "common_test": {
+    "v1_sample": {
+      "roc_auc": 0.6435034000127253,
+      "pr_auc": 0.9730989250538223,
+      "samples": 206171,
+      "positive_fraction": 0.9525830745697021,
+      "eligible_users": 264,
+      "minimum_candidates": 20,
+      "candidate_count_median": 44.0,
+      "ndcg_at_10": 0.9540987662771192,
+      "recall_at_10": 0.2395803232096106,
+      "protocol": "only observed rated candidates, >=20 unique items and both labels; no sampled unknown negatives",
+      "warm_history_at_least_5": {
+        "roc_auc": 0.5234192682603075,
+        "pr_auc": 0.9891114794203864,
+        "samples": 84513,
+        "positive_fraction": 0.9880610108375549,
+        "eligible_users": 186,
+        "minimum_candidates": 20,
+        "candidate_count_median": 50.5,
+        "ndcg_at_10": 0.9572219725664379,
+        "recall_at_10": 0.2217659289197819,
+        "protocol": "only observed rated candidates, >=20 unique items and both labels; no sampled unknown negatives"
+      },
+      "version": "8312a5248522ac948137e9798a4077acd5b7e5974053e7411e2a3c46f9798f05",
+      "ranking_sha256": "0ee682d82d32ce7bd821e3f2878854e24538669545eab5180ba31d615057576b",
+      "korean_test": {
+        "queries": 467,
+        "candidates_per_query": 466,
+        "families": 222,
+        "recall_at_10": 0.4668094218415418,
+        "ndcg_at_10": 0.3257766685537656,
+        "top1_accuracy": 0.20770877944325483,
+        "relevance": "existing dish_family equality with distinct encoded titles; weak semantic proxy, not human food similarity or personal preference labels"
+      }
+    },
+    "v1_full": {
+      "roc_auc": 0.6783040353413652,
+      "pr_auc": 0.9764355477788329,
+      "samples": 206171,
+      "positive_fraction": 0.9525830745697021,
+      "eligible_users": 264,
+      "minimum_candidates": 20,
+      "candidate_count_median": 44.0,
+      "ndcg_at_10": 0.9462124254689629,
+      "recall_at_10": 0.23870268082943402,
+      "protocol": "only observed rated candidates, >=20 unique items and both labels; no sampled unknown negatives",
+      "feature_baselines": {
+        "quality": {
+          "roc_auc": 0.4762804470798917,
+          "pr_auc": 0.9530445061207854,
+          "samples": 206171,
+          "positive_fraction": 0.9525830745697021,
+          "eligible_users": 264,
+          "minimum_candidates": 20,
+          "candidate_count_median": 44.0,
+          "ndcg_at_10": 0.9593153990611393,
+          "recall_at_10": 0.24028363918743156,
+          "protocol": "only observed rated candidates, >=20 unique items and both labels; no sampled unknown negatives"
+        },
+        "cosine": {
+          "roc_auc": 0.5608257778015838,
+          "pr_auc": 0.9607468243590029,
+          "samples": 206171,
+          "positive_fraction": 0.9525830745697021,
+          "eligible_users": 264,
+          "minimum_candidates": 20,
+          "candidate_count_median": 44.0,
+          "ndcg_at_10": 0.9425094304140439,
+          "recall_at_10": 0.2372918315001151,
+          "protocol": "only observed rated candidates, >=20 unique items and both labels; no sampled unknown negatives"
+        },
+        "deterministic_random": {
+          "roc_auc": 0.5,
+          "pr_auc": 0.952583049992482,
+          "samples": 206171,
+          "positive_fraction": 0.9525830745697021,
+          "eligible_users": 264,
+          "minimum_candidates": 20,
+          "candidate_count_median": 44.0,
+          "ndcg_at_10": 0.9413998776009319,
+          "recall_at_10": 0.2360355309417661,
+          "protocol": "only observed rated candidates, >=20 unique items and both labels; no sampled unknown negatives"
+        }
+      },
+      "warm_history_at_least_5": {
+        "roc_auc": 0.54630147982205,
+        "pr_auc": 0.9898258192761603,
+        "samples": 84513,
+        "positive_fraction": 0.9880610108375549,
+        "eligible_users": 186,
+        "minimum_candidates": 20,
+        "candidate_count_median": 50.5,
+        "ndcg_at_10": 0.9473253107947184,
+        "recall_at_10": 0.22051929283253702,
+        "protocol": "only observed rated candidates, >=20 unique items and both labels; no sampled unknown negatives"
+      },
+      "version": "b1d5e17243e3355fe77c5e2fdf3d49ca38e7a4bb2e60d610acd60adf0a2798ab",
+      "ranking_sha256": "24c75bed3fde5b7a4eec4a37248af1b04278c4be0884cf654e8cd33bdaf141d2",
+      "korean_test": {
+        "queries": 467,
+        "candidates_per_query": 466,
+        "families": 222,
+        "recall_at_10": 0.46395431834403994,
+        "ndcg_at_10": 0.32455724686418347,
+        "top1_accuracy": 0.20556745182012848,
+        "relevance": "existing dish_family equality with distinct encoded titles; weak semantic proxy, not human food similarity or personal preference labels"
+      }
+    },
+    "title65_ko25": {
+      "roc_auc": 0.586321782265266,
+      "pr_auc": 0.9634920650890135,
+      "samples": 206171,
+      "positive_fraction": 0.9525830745697021,
+      "eligible_users": 264,
+      "minimum_candidates": 20,
+      "candidate_count_median": 44.0,
+      "ndcg_at_10": 0.9600239108739941,
+      "recall_at_10": 0.24041164430866696,
+      "protocol": "only observed rated candidates, >=20 unique items and both labels; no sampled unknown negatives",
+      "warm_history_at_least_5": {
+        "roc_auc": 0.4605634162721367,
+        "pr_auc": 0.9866335944259033,
+        "samples": 84513,
+        "positive_fraction": 0.9880610108375549,
+        "eligible_users": 186,
+        "minimum_candidates": 20,
+        "candidate_count_median": 50.5,
+        "ndcg_at_10": 0.964577242421598,
+        "recall_at_10": 0.2225277084486696,
+        "protocol": "only observed rated candidates, >=20 unique items and both labels; no sampled unknown negatives"
+      },
+      "version": "16498301425cbef78805dc3645469390faee97e6ef9ce495a42dfa448c179a0a",
+      "ranking_sha256": "ef134033b7b0490aef1995372ca6c0689ee60c286c07545caf619fe870ea8d25",
+      "korean_test": {
+        "queries": 467,
+        "candidates_per_query": 466,
+        "families": 222,
+        "recall_at_10": 0.6306209850107066,
+        "ndcg_at_10": 0.4677064424714117,
+        "top1_accuracy": 0.34475374732334046,
+        "relevance": "existing dish_family equality with distinct encoded titles; weak semantic proxy, not human food similarity or personal preference labels"
+      }
+    }
+  },
+  "paired_user_ndcg_bootstrap": {
+    "v1_sample": {
+      "users": 264,
+      "mean_difference": 0.005925144596874868,
+      "ci95": [
+        -0.0022134060966474984,
+        0.013842650735669244
+      ]
+    },
+    "v1_full": {
+      "users": 264,
+      "mean_difference": 0.013811485405031156,
+      "ci95": [
+        0.0045169678769690896,
+        0.02284551322015737
+      ]
+    }
+  },
+  "untouched_incumbent_window": {
+    "start": "2017-02-22",
+    "incumbent": {
+      "roc_auc": 0.6138200324035159,
+      "pr_auc": 0.9496354807415606,
+      "samples": 31811,
+      "positive_fraction": 0.9221023917198181,
+      "eligible_users": 5,
+      "minimum_candidates": 20,
+      "candidate_count_median": 69.0,
+      "ndcg_at_10": 0.956547857429554,
+      "recall_at_10": 0.2060361633251659,
+      "protocol": "only observed rated candidates, >=20 unique items and both labels; no sampled unknown negatives"
+    },
+    "candidate": {
+      "roc_auc": 0.5975975073676685,
+      "pr_auc": 0.9442532304044168,
+      "samples": 31811,
+      "positive_fraction": 0.9221023917198181,
+      "eligible_users": 5,
+      "minimum_candidates": 20,
+      "candidate_count_median": 69.0,
+      "ndcg_at_10": 0.9704341018169096,
+      "recall_at_10": 0.2060361633251659,
+      "protocol": "only observed rated candidates, >=20 unique items and both labels; no sampled unknown negatives"
+    },
+    "warning": "only five mixed-label users have >=20 candidates; ranking differences here are descriptive only"
+  },
+  "gates": {
+    "enough_ranking_users": true,
+    "beats_sample_v1_with_paired_95pct_ci": false,
+    "beats_full_v1_with_paired_95pct_ci": true,
+    "auc_not_lower_than_full_v1": false,
+    "korean_test_retrieval_improved": true,
+    "latest_incumbent_auc_not_decreased": false
+  },
+  "promote": false,
+  "protocol_sha256": "ca8591be75a587f3ef286bb545bdd2bfee2a32e9791ff298800b34c4a62d6c62"
+}

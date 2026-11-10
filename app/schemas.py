@@ -87,6 +87,7 @@ ItemName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1,
 Barcode = Annotated[str | None, BeforeValidator(_blank_to_none), AfterValidator(_barcode)]
 CategoryKey = Annotated[str | None, BeforeValidator(_blank_to_none), AfterValidator(_category)]
 Storage = Literal["fridge", "freezer", "room"]
+Unit = Literal["개", "g", "kg", "ml", "L"]
 Purpose = Literal["signup", "find_id", "reset_password"]
 # DB의 naive UTC 시각을 "2026-10-13T05:21:09Z" 형태로 내보낸다.
 UtcDatetime = Annotated[datetime, PlainSerializer(_utc_iso, return_type=str, when_used="json")]
@@ -181,6 +182,15 @@ class ResetPasswordRequest(BaseModel):
     new_password: Password
 
 
+class SuspensionInfo(BaseModel):
+    """내가 지금 받고 있는 커뮤니티 임시 정지. 이 기간에는 글·댓글·후기를 쓸 수 없다(읽기, 좋아요, 신고는 된다)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    ends_at: UtcDatetime
+    reason: str
+
+
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -189,8 +199,9 @@ class UserOut(BaseModel):
     email: str
     nickname: str
     created_at: UtcDatetime
-    friend_code: str
     is_admin: bool
+    avatar_url: str | None = None
+    community_suspension: SuspensionInfo | None = None  # 정지 중이 아니면 없다
 
 
 class TokenPair(BaseModel):
@@ -201,6 +212,14 @@ class TokenPair(BaseModel):
 
 class TokenResponse(TokenPair):
     user: UserOut
+
+
+class TestAccountStatus(BaseModel):
+    enabled: bool = Field(description="테스트 계정 만들기를 쓸 수 있는 서버인가. 앱이 버튼을 보여 줄지 정하는 데 쓴다")
+
+
+class TestAccountResponse(TokenResponse):
+    password: str = Field(description="만든 계정의 비밀번호. 이 응답에서만 알 수 있다(서버에는 해시만 남는다). 다시 로그인하려면 user.username과 함께 적어 둬야 한다")
 
 
 class UserUpdate(BaseModel):
@@ -225,11 +244,11 @@ class FridgeCreate(BaseModel):
     name: FridgeName
 
 
-Visibility = Literal["private", "friends", "public"]
+Visibility = Literal["private", "public"]
 
 
 class FridgeUpdate(BaseModel):
-    """바꿀 것만 보낸다. name은 이름, visibility는 멤버가 아닌 사람에게 보일 범위(private 나만 / friends 친구들도 / public 모두)."""
+    """바꿀 것만 보낸다. name은 이름, visibility는 멤버가 아닌 사람에게 보일 범위(private 나만 / public 로그인한 모두가 읽기만)."""
 
     name: FridgeName | None = None
     visibility: Visibility | None = None
@@ -249,7 +268,7 @@ class FridgeOut(BaseModel):
     member_count: int
     created_at: UtcDatetime
     visibility: Visibility
-    group_ids: list[int] = Field(default_factory=list, description="이 냉장고가 들어 있는 묶음 중 내가 볼 수 있는 것 (목록에서만 채워진다)")
+    group_ids: list[int] = Field(default_factory=list, description="내 묶음 중 이 냉장고가 들어 있는 것 (목록에서만 채워진다)")
 
 
 class MemberOut(BaseModel):
@@ -264,15 +283,6 @@ class FridgeDetail(FridgeOut):
     members: list[MemberOut]
 
 
-class InviteOut(BaseModel):
-    code: str
-    expires_at: UtcDatetime
-
-
-class JoinRequest(BaseModel):
-    code: Annotated[str, StringConstraints(strip_whitespace=True, to_upper=True, min_length=1, max_length=16)]
-
-
 # ── 식품 ─────────────────────────────────────────────────────────────────
 
 
@@ -281,6 +291,7 @@ class ItemCreate(BaseModel):
 
     name: ItemName
     quantity: float = Field(1, gt=0)
+    unit: Unit = "개"
     category: CategoryKey = None
     storage: Storage | None = None
     barcode: Barcode = None
@@ -301,6 +312,7 @@ class ItemUpdate(BaseModel):
     storage: Storage | None = None
     quantity: float | None = Field(None, gt=0)
     remaining_quantity: float | None = Field(None, gt=0)
+    unit: Unit | None = None
     unit_price: int | None = Field(None, ge=0)
     total_price: int | None = Field(None, ge=0)
     expiry_date: date | None = None
@@ -308,7 +320,7 @@ class ItemUpdate(BaseModel):
 
     @model_validator(mode="after")
     def _required_fields_not_null(self) -> "ItemUpdate":
-        for name in ("name", "category", "storage", "quantity", "remaining_quantity"):
+        for name in ("name", "category", "storage", "quantity", "remaining_quantity", "unit"):
             if name in self.model_fields_set and getattr(self, name) is None:
                 raise ValueError(f"{name} 값은 비울 수 없습니다.")
         return self
@@ -332,6 +344,7 @@ class ItemOut(SizeFields):
     barcode: str | None
     quantity: float
     remaining_quantity: float
+    unit: str = "개"
     unit_price: int | None
     total_price: int | None
     purchased_on: date
@@ -377,6 +390,9 @@ class DraftItem(SizeFields):
     product_name: str | None = None
     confidence: float = 0.0
     name_cut: bool = Field(False, description="쇼핑몰 주문내역 화면에서 이름이 잘려 있다. 확정 전에 이름을 확인하게 한다")
+    discount_estimated: bool = Field(False, description="전체 할인을 품목별 금액에 비례해 나누었다. 확정 전에 확인한다")
+    name_unsure: bool = Field(False, description="줄을 흐리게 읽었고 아는 낱말이 하나도 없어서 이름이 틀렸을 수 있다. warnings에도 안내가 붙는다")
+    read_name: str | None = Field(None, description="사용자들이 고친 기록으로 이름을 바꿨다면, 바꾸기 전에 OCR이 읽은 이름. 바꾸지 않았으면 비어 있다")
 
 
 class ReceiptItemOut(SizeFields):
@@ -387,6 +403,7 @@ class ReceiptItemOut(SizeFields):
     name: str
     barcode: str | None
     quantity: float
+    unit: str = "개"
     unit_price: int | None
     amount: int
     discount: int
@@ -452,6 +469,7 @@ class ConfirmItem(BaseModel):
     line_no: int | None = Field(None, description="초안의 line_no. 보내면 초안과 대조해 소비기한 출처를 유지한다")
     name: ItemName
     quantity: float = Field(gt=0)
+    unit: Unit = "개"
     unit_price: int | None = Field(None, ge=0)
     amount: int = Field(ge=0)
     discount: int = Field(0, ge=0)
@@ -514,6 +532,7 @@ class PurchaseOut(SizeFields):
     category: str
     category_label: str
     quantity: float
+    unit: str = "개"
     unit_price: int | None
     total_price: int | None
     purchased_on: date
@@ -565,71 +584,41 @@ class MonthlyStats(BaseModel):
     top_discarded: list[DiscardedCategory]
 
 
-# ── 친구 · 공유 링크 · 변경 요청 · 남의 냉장고 · 커뮤니티 ────────────────
-
-Permission = Literal["viewer", "editor"]  # viewer: 보기 + 변경 요청만 / editor: 주인처럼 고치기
+# ── 공유 링크 · 남의 냉장고 · 커뮤니티 ──────────────────────────────────
 
 
 class PublicUser(BaseModel):
-    """다른 사람에게 보여도 되는 정보. 닉네임은 겹칠 수 있어서 바뀌지 않는 친구 코드로 구별한다. 이메일·아이디는 넣지 않는다."""
+    """다른 사람에게 보여도 되는 정보. 이메일·아이디는 넣지 않는다. 닉네임은 겹칠 수 있다."""
 
     id: int
     nickname: str
-    friend_code: str
+    avatar_url: str | None = None
 
     @classmethod
     def of(cls, user) -> "PublicUser":
-        return cls(id=user.id, nickname=user.nickname, friend_code=user.friend_code)
-
-
-class FriendOut(BaseModel):
-    user: PublicUser
-    since: UtcDatetime
-
-
-class ShareLinkCreate(BaseModel):
-    permission: Permission = "viewer"
-    expires_in_days: int = Field(7, ge=1, le=90, description="링크가 살아 있는 날 수")
-    max_uses: int | None = Field(None, ge=1, le=100, description="이 링크로 들어올 수 있는 사람 수. 비우면 제한 없음")
+        return cls(id=user.id, nickname=user.nickname, avatar_url=user.avatar_url)
 
 
 class ShareLinkOut(BaseModel):
-    id: int
+    """냉장고의 공유 링크. 냉장고마다 하나이고, 주인이 바꾸기 전까지 같다."""
+
     token: str
-    url: str | None  # 서버에 SHARE_LINK_BASE가 설정되어 있을 때만. 아니면 앱이 token으로 링크를 만든다
-    permission: Permission
-    created_at: UtcDatetime
-    expires_at: UtcDatetime
-    max_uses: int | None
-    use_count: int
+    url: str | None  # 서버에 SHARE_LINK_BASE가 설정되어 있을 때만. 아니면 앱이 token으로 링크를 만든다(QR은 이 주소가 있어야 만든다)
 
 
 class ShareLinkPreview(BaseModel):
-    """링크를 눌렀을 때 "○○님의 냉장고를 볼까요?"를 보여 주는 용도."""
+    """링크를 열었을 때 "○○님의 냉장고 [이름]에 들어갈까요?"를 보여 주는 용도."""
 
-    owner: PublicUser
+    fridge_id: int
     fridge_name: str
-    permission: Permission
-    my_permission: Literal["none", "viewer", "editor"]  # 이미 가진 권한
+    owner: PublicUser
+    member_count: int
+    already_member: bool  # 이미 멤버(주인 포함)면 들어오기 대신 바로 그 냉장고를 열면 된다
 
 
 class JoinResult(BaseModel):
-    owner: PublicUser
-    fridge_id: int
-    fridge_name: str
-    permission: Permission  # 지금 내가 가진 권한 (이미 더 높은 권한이 있으면 그대로)
-    newly_friends: bool
-
-
-class AccessOut(BaseModel):
-    user: PublicUser
-    permission: Literal["viewer", "editor", "none"]  # none: 주인이 이 냉장고에 한해 '없음'으로 정해 둔 사람
-    inherited: bool  # 냉장고 묶음 공유에서 따라온 권한이면 True (이 냉장고에 따로 정하면 그것이 우선한다)
-    since: UtcDatetime
-
-
-class AccessUpdate(BaseModel):
-    permission: Literal["viewer", "editor", "none"]
+    fridge: FridgeOut  # 내 냉장고 목록(GET /fridges)의 한 줄과 같은 모양
+    joined: bool  # 이번에 새로 들어왔으면 True, 이미 멤버였으면 False
 
 
 class SharedFridgeOut(BaseModel):
@@ -639,61 +628,7 @@ class SharedFridgeOut(BaseModel):
     name: str
     visibility: Visibility
     item_count: int
-    my_permission: Literal["owner", "editor", "viewer"]
-    can_request_changes: bool  # 친구인 viewer만 주인에게 변경 요청을 보낼 수 있다
-
-
-ChangeKind = Literal["add", "consume", "discard"]  # 추가 / 먹음 / 버림
-ChangeStatus = Literal["pending", "approved", "declined", "cancelled"]
-ChangeNote = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
-
-
-class ChangeRequestCreate(BaseModel):
-    """주인에게 보내는 변경 요청. add는 name(과 선택으로 quantity, category, storage, expiry_date), consume·discard는 item_id(와 선택으로 quantity)."""
-
-    model_config = ConfigDict(allow_inf_nan=False)
-
-    fridge_id: int
-    kind: ChangeKind
-    item_id: int | None = None
-    quantity: float | None = Field(None, gt=0, description="추가할 수량(기본 1) / 먹거나 버린 수량(비우면 남은 양 전부)")
-    name: ItemName | None = None
-    category: CategoryKey = None
-    storage: Storage | None = None
-    expiry_date: date | None = None
-    note: ChangeNote | None = None
-
-    @model_validator(mode="after")
-    def _fits_the_kind(self):
-        if self.kind == "add":
-            if self.name is None:
-                raise ValueError("추가 요청에는 name이 필요합니다.")
-            if self.item_id is not None:
-                raise ValueError("추가 요청에는 item_id를 보내지 않습니다.")
-        else:
-            if self.item_id is None:
-                raise ValueError(f"{self.kind} 요청에는 item_id가 필요합니다.")
-            if any(value is not None for value in (self.name, self.category, self.storage, self.expiry_date)):
-                raise ValueError("먹음·버림 요청에는 item_id와 quantity만 보냅니다.")
-        return self
-
-
-class ChangeRequestOut(BaseModel):
-    id: int
-    fridge_id: int
-    fridge_name: str
-    requester: PublicUser
-    kind: ChangeKind
-    item_id: int | None
-    item_name: str | None  # 요청할 때의 품목 이름 (add면 만들 품목 이름)
-    quantity: float | None
-    category: str | None
-    storage: str | None
-    expiry_date: date | None
-    note: str | None
-    status: ChangeStatus
-    created_at: UtcDatetime
-    handled_at: UtcDatetime | None
+    my_permission: Literal["owner", "editor", "viewer"]  # viewer: 멤버가 아니라 '모두에게' 공개된 것을 구경만 한다
 
 
 class SharedItemOut(SizeFields):
@@ -723,11 +658,32 @@ class SharedItemOut(SizeFields):
 
 PostTitle = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 PostBody = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+PostBoard = Literal["general", "recipe"]
 
 
 class PostCreate(BaseModel):
     title: PostTitle
     body: PostBody
+    board: PostBoard = "general"
+
+
+class PostUpdate(BaseModel):
+    title: PostTitle | None = None
+    body: PostBody | None = None
+    board: PostBoard | None = None
+
+    @model_validator(mode="after")
+    def supplied_fields_are_not_null(self):
+        if not self.model_fields_set or any(getattr(self, key) is None for key in self.model_fields_set):
+            raise ValueError("수정할 제목, 본문 또는 게시판을 입력해 주세요.")
+        return self
+
+
+class PostReviewOut(BaseModel):
+    id: int
+    recipe_id: str
+    recipe_name: str
+    rating: int
 
 
 class PostPhotoOut(BaseModel):
@@ -735,11 +691,28 @@ class PostPhotoOut(BaseModel):
     url: str  # 로그인 토큰을 붙여 GET으로 받으면 사진이 온다
 
 
+class LinkPreviewOut(BaseModel):
+    """글 속 링크 하나의 미리보기. 글을 쓰거나 고칠 때 서버가 만들어 저장한다. url은 본문에 적힌 주소 그대로이고, 누르면 그것을 연다."""
+
+    url: str
+    kind: Literal["link", "youtube"]  # youtube면 영상 썸네일이다 (앱이 재생 표시를 얹는다)
+    title: str | None = None
+    description: str | None = None  # youtube면 채널 이름
+    image: str | None = None  # https 주소만 온다
+    site: str | None = None  # 사이트 이름 (없으면 도메인)
+
+
 class PostOut(BaseModel):
     id: int
     author: PublicUser
     title: str
     body: str
+    board: PostBoard
+    link_previews: list[LinkPreviewOut] = []  # 본문·제목에 나온 링크마다(최대 5개, 나온 순서). 앱은 본문의 그 링크 바로 아래에 카드를 놓는다
+    link_preview: LinkPreviewOut | None = None  # link_previews의 첫 번째. 목록을 모르는 옛 앱용이다
+    review: PostReviewOut | None
+    updated_at: UtcDatetime | None
+    can_edit: bool
     created_at: UtcDatetime
     mine: bool  # 내가 쓴 글
     can_delete: bool  # 내가 쓴 글이거나 내가 관리자
@@ -790,18 +763,22 @@ class ReportCreate(BaseModel):
 
 
 class ReportTargetOut(BaseModel):
-    """신고된 글이나 댓글. 관리자가 지우기 전에 내용을 확인하는 용도."""
+    """신고된 글, 댓글, 레시피 후기. 관리자가 지우기 전에 내용을 확인하는 용도."""
 
-    post_id: int
+    post_id: int | None = None  # 글과 댓글이면 그 글 번호. 후기면 없다
+    recipe_id: str | None = None  # 후기면 그 레시피 번호
+    recipe_name: str | None = None
     author: PublicUser
-    text: str  # 글이면 제목과 본문, 댓글이면 본문 (앞부분)
+    author_is_admin: bool = False  # 관리자는 정지할 수 없다
+    author_suspended_until: UtcDatetime | None = None  # 작성자가 지금 임시 정지 중이면 그 끝나는 때
+    text: str  # 글이면 제목과 본문, 댓글이면 본문, 후기면 별점과 본문 (앞부분)
     photo_count: int
     deleted: bool
 
 
 class AdminReportOut(BaseModel):
     id: int
-    target_type: Literal["post", "comment"]
+    target_type: Literal["post", "comment", "review"]
     target_id: int
     reason: ReportReason
     detail: str | None
@@ -816,12 +793,135 @@ class ReportResolve(BaseModel):
     action: Literal["delete", "dismiss"]  # 대상을 지운다 / 문제없음으로 닫는다
 
 
+class SuspendCreate(BaseModel):
+    """커뮤니티 임시 정지. 지금부터 days일 동안 글·댓글·후기를 쓸 수 없다."""
 
-# ── 여러 냉장고를 합친 통계 ──────────────────────────────────────────────
+    days: int = Field(ge=1, le=365, description="정지할 일수 (지금부터)")
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)] = Field(
+        description="사유. 정지된 사람에게도 그대로 보인다"
+    )
+
+
+class SuspensionOut(BaseModel):
+    id: int
+    user: PublicUser
+    reason: str
+    created_at: UtcDatetime
+    ends_at: UtcDatetime
+    created_by: PublicUser | None  # 정지한 관리자 (계정이 없어졌으면 없다)
+    status: Literal["active", "ended", "lifted"]  # 정지 중 / 기간이 끝남 / 관리자가 풂
+    lifted_at: UtcDatetime | None
+
+
+
+# ── 레시피 별점·후기 ─────────────────────────────────────────────────────
+
+
+def _blank_to_none(value: object) -> object:
+    return None if isinstance(value, str) and not value.strip() else value
+
+
+ReviewBody = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+
+
+class ReviewWrite(BaseModel):
+    rating: int = Field(ge=1, le=5, description="별점 1~5")
+    body: Annotated[ReviewBody | None, BeforeValidator(_blank_to_none)] = Field(None, description="후기 글. 비우거나 공백이면 별점만 남긴다")
+
+
+class RatingSummary(BaseModel):
+    average: float | None  # 소수 첫째 자리까지. 별점이 하나도 없으면 None
+    count: int
+    distribution: dict[str, int]  # "1"~"5"별로 몇 명이 줬는지 (별점 막대그래프용)
+
+
+class ReviewOut(BaseModel):
+    id: int
+    recipe_id: str
+    recipe_name: str
+    author: PublicUser
+    rating: int
+    body: str | None
+    created_at: UtcDatetime
+    updated_at: UtcDatetime | None  # 고친 적이 없으면 None
+    mine: bool
+    can_delete: bool  # 내가 쓴 후기이거나 내가 관리자
+
+
+class ReviewList(BaseModel):
+    summary: RatingSummary
+    my_review: ReviewOut | None  # 내가 이 레시피에 쓴 후기 (없으면 None). 목록에도 들어 있다
+    reviews: list[ReviewOut]  # 최신순
+    next_before_id: int | None  # 다음 쪽은 before_id=이 값으로 부른다. 없으면 마지막이다
+
+
+class MyReviewList(BaseModel):
+    reviews: list[ReviewOut]  # 최신순
+    next_before_id: int | None
+
+
+# ── 알림 아이콘 ──────────────────────────────────────────────────────────
+
+
+class NotificationSummary(BaseModel):
+    """아이콘에 붙일 숫자. 앱을 열 때와 돌아올 때 이것만 부르면 된다."""
+
+    expiring_items: int  # 내가 멤버인 냉장고들에서 소비기한이 3일 이내로 남았거나 이미 지난 식품
+    unread_comments: int  # 내 글에 달린 새 댓글
+    total: int
+
+
+class CommentNotificationOut(BaseModel):
+    comment_id: int
+    post_id: int
+    post_title: str
+    commenter: PublicUser
+    body: str
+    created_at: UtcDatetime
+    unread: bool
+
+
+class CommentNotificationList(BaseModel):
+    comments: list[CommentNotificationOut]  # 최신순
+    next_before_id: int | None  # 다음 쪽은 before_id=이 값으로 부른다. 없으면 마지막이다
+    unread_count: int
+
+
+class CommentsRead(BaseModel):
+    up_to_id: int | None = Field(None, ge=1, description="화면에 보여 준 가장 새 댓글 번호. 비우면 지금까지 달린 것 모두")
+
+
+class ExpiringItemOut(BaseModel):
+    """알림에 보이는 소비기한 임박 식품. 내가 멤버인 냉장고들의 것이다."""
+
+    item_id: int
+    fridge_id: int
+    fridge_name: str
+    name: str
+    category: str
+    category_label: str
+    storage: str
+    remaining_quantity: float
+    expiry_date: date
+
+    @computed_field
+    @property
+    def days_left(self) -> int:
+        """오늘(Asia/Seoul) 기준 남은 일수. 지났으면 음수."""
+        return (self.expiry_date - today()).days
+
+
+class ExpiringItemList(BaseModel):
+    items: list[ExpiringItemOut]  # 소비기한이 빠른 순 (이미 지난 것이 맨 앞)
+    count: int  # limit에 잘리기 전의 전체 수
+    alert_days: int  # 소비기한이 며칠 이내로 남으면 임박으로 보는지
+
+
+# ── Multi-fridge statistics ──────────────────────────────────────────────
 
 
 class FridgeLabel(BaseModel):
-    """통계 화면에서 냉장고를 알아보는 정보. 이름이 같은 냉장고가 있어서 주인도 같이 준다."""
+    """Identifies a fridge in statistics. Names can repeat, so the owner comes along."""
 
     fridge_id: int
     fridge_name: str
@@ -837,7 +937,7 @@ class ExcludedFridge(FridgeLabel):
 
 
 class OverviewMonthlyStats(MonthlyStats):
-    """합계는 MonthlyStats 그대로, 냉장고별 내역은 fridges."""
+    """Totals as MonthlyStats, per-fridge breakdown in fridges."""
 
     fridges: list[FridgeMonthlyStats]
     excluded: list[ExcludedFridge]
@@ -853,7 +953,7 @@ class OverviewPurchaseSummary(PurchaseSummary):
     excluded: list[ExcludedFridge]
 
 
-# ── 냉장고 묶음 ──────────────────────────────────────────────────────────
+# ── Fridge groups ────────────────────────────────────────────────────────
 
 
 class FridgeGroupCreate(BaseModel):
@@ -865,7 +965,7 @@ class FridgeGroupUpdate(BaseModel):
 
 
 class GroupFridgeOut(BaseModel):
-    """묶음 안의 냉장고 한 줄. 내가 볼 수 있는 냉장고만 나온다."""
+    """One fridge in a group. Only fridges I can still see are listed."""
 
     id: int
     name: str
@@ -873,40 +973,8 @@ class GroupFridgeOut(BaseModel):
     my_permission: Literal["owner", "editor", "viewer"]
 
 
-class GroupShareOut(BaseModel):
-    user: PublicUser
-    permission: Permission
-    since: UtcDatetime
-
-
-class GroupShareUpdate(BaseModel):
-    permission: Permission
-
-
 class FridgeGroupOut(BaseModel):
     id: int
     name: str
-    owner: PublicUser
-    mine: bool
-    my_share: Permission | None = Field(None, description="친구가 나에게 공유한 묶음이면 내가 받은 권한. 내 묶음이면 비어 있다")
     fridges: list[GroupFridgeOut]
-    shares: list[GroupShareOut] = Field(description="이 묶음을 공유받은 친구들. 내 묶음일 때만 채워진다")
     created_at: UtcDatetime
-
-
-class GroupLinkPreview(BaseModel):
-    """묶음 링크를 눌렀을 때 "○○님의 '집' 묶음을 받을까요?"를 보여 주는 용도."""
-
-    owner: PublicUser
-    group_name: str
-    permission: Permission
-    my_share: Literal["none", "viewer", "editor"]  # 이미 받은 묶음 권한
-    fridge_count: int = Field(description="이 링크로 권한을 받게 되는 냉장고 수 (묶음 주인이 주인인 냉장고)")
-
-
-class GroupJoinResult(BaseModel):
-    owner: PublicUser
-    group_id: int
-    group_name: str
-    permission: Permission  # 지금 내가 가진 묶음 권한 (이미 더 높은 권한이 있으면 그대로)
-    newly_friends: bool

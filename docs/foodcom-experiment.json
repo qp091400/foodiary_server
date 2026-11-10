@@ -1,0 +1,70 @@
+{
+  "version": "9851f3cb303e5dc1f00c2290d74c976b72dfda2afc849847d7ac2e81c305edd9",
+  "original_counts": [
+    231637,
+    1071520
+  ],
+  "sample_recipe_count": 12000,
+  "max_recipes": 12000,
+  "seed": 42,
+  "sources": {
+    "RAW_recipes.csv": "6a8136d1da9e03396a9f52d72200b3fddb8fe103f11e1496effca30ac4e0539f",
+    "RAW_interactions.csv": "4e278d2f687b1020f5694e51003a7d6174344b51aebbdf4530de88b5c6a78ee4"
+  },
+  "encoder": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  "revision": "e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
+  "epochs": 11,
+  "best_validation_loss": 0.05677011236548424,
+  "split_counts": [
+    52194,
+    1595,
+    1621
+  ],
+  "evaluation": "chronological frozen training history; held-out labels never used in inputs",
+  "quality_prior": {
+    "mean": 3,
+    "strength": 10,
+    "status": "initial configurable experiment default"
+  },
+  "metrics": {
+    "rating": {
+      "roc_auc": 0.49177468523842566,
+      "pr_auc": 0.9294221236596747,
+      "ndcg_at_10": 0.9999395541488214,
+      "recall_at_10": 0.9995385621831264,
+      "ranking_protocol": "observed rated candidates only; not catalogue retrieval",
+      "samples": 1553,
+      "positive_fraction": 0.9278815388679504,
+      "users": 1407,
+      "users_with_10_candidates_and_both_classes": 1,
+      "eligible_ndcg_at_10": 0.9216017310213247,
+      "eligible_recall_at_10": 0.75
+    },
+    "cosine": {
+      "roc_auc": 0.5189848319619311,
+      "pr_auc": 0.93149467866494,
+      "ndcg_at_10": 0.9999395541488214,
+      "recall_at_10": 0.9995385621831264,
+      "ranking_protocol": "observed rated candidates only; not catalogue retrieval",
+      "samples": 1553,
+      "positive_fraction": 0.9278815388679504,
+      "users": 1407,
+      "users_with_10_candidates_and_both_classes": 1,
+      "eligible_ndcg_at_10": 0.9216017310213247,
+      "eligible_recall_at_10": 0.75
+    },
+    "mlp": {
+      "roc_auc": 0.5437413254684248,
+      "pr_auc": 0.9432778553588743,
+      "ndcg_at_10": 1.0,
+      "recall_at_10": 0.9996028130183874,
+      "ranking_protocol": "observed rated candidates only; not catalogue retrieval",
+      "samples": 1553,
+      "positive_fraction": 0.9278815388679504,
+      "users": 1407,
+      "users_with_10_candidates_and_both_classes": 1,
+      "eligible_ndcg_at_10": 1.0,
+      "eligible_recall_at_10": 0.8333333333333334
+    }
+  }
+}

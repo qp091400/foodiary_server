@@ -32,3 +32,8 @@ fridge-receipt-backend-prompt.md
 *.sqlite3-*
 
 *.sqlite3.backup-*
+
+# Offline training inputs/checkpoints are never API image contents.
+ml/data
+ml/runs
+.venv-ml

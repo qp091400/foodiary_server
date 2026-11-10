@@ -71,7 +71,7 @@ def test_the_limit_counts_only_fridges_you_own(client, me):
     other_headers = auth(other)
     for number in range(9):
         new_fridge(client, {"headers": other_headers}, f"지연 {number}")
-    token = client.post(f"/fridges/{default_fridge_id(client, other)}/share-links", headers=other_headers, json={"permission": "editor"}).json()["token"]
+    token = client.post(f"/fridges/{default_fridge_id(client, other)}/share-link", headers=other_headers).json()["token"]
     assert client.post(f"/share-links/{token}/join", headers=me["headers"]).status_code == 200  # 남의 냉장고에 고치기로 들어가도
     for number in range(9):
         new_fridge(client, me, f"내 냉장고 {number}")  # 내 몫 10개를 다 만들 수 있다
@@ -110,7 +110,7 @@ def test_naming_the_upload_fridge_itself_is_fine(client, me):
 def test_an_editable_friend_fridge_can_be_a_target(client, me):
     friend = signup(client, "jiyeon")
     friend_fridge = default_fridge_id(client, friend)
-    token = client.post(f"/fridges/{friend_fridge}/share-links", headers=auth(friend), json={"permission": "editor"}).json()["token"]
+    token = client.post(f"/fridges/{friend_fridge}/share-link", headers=auth(friend)).json()["token"]
     client.post(f"/share-links/{token}/join", headers=me["headers"])
     draft = draft_of(client, me)
     assert confirm(client, me, draft, **{"풀무원 두부": friend_fridge}).status_code == 200
@@ -121,8 +121,7 @@ def test_an_editable_friend_fridge_can_be_a_target(client, me):
 def test_a_view_only_fridge_refuses_and_nothing_is_created(client, me):
     friend = signup(client, "jiyeon")
     friend_fridge = default_fridge_id(client, friend)
-    token = client.post(f"/fridges/{friend_fridge}/share-links", headers=auth(friend), json={"permission": "viewer"}).json()["token"]
-    client.post(f"/share-links/{token}/join", headers=me["headers"])
+    client.patch(f"/fridges/{friend_fridge}", headers=auth(friend), json={"visibility": "public"})  # public = view only
     draft = draft_of(client, me)
     refused = confirm(client, me, draft, **{"서울우유 1L": me["fridge_id"], "풀무원 두부": friend_fridge})
     assert refused.status_code == 403

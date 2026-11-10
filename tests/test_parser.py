@@ -8,7 +8,10 @@ import pytest
 from app.services.expiry import classify
 from app.services.ocr.base import OcrBox
 from app.services.receipt_parser import (
+    ParsedItem,
     estimate_skew,
+    merge_same_name,
+    find_item_section,
     find_purchase_date,
     find_store_name,
     find_total,
@@ -481,3 +484,78 @@ def test_store_name_fallback():
     assert parse_receipt([]).items == []
     # 주문번호 줄은 매장명이 아니고, "가게/사업자번호/대표자" 줄에서는 가게 이름만 쓴다
     assert parse_receipt(make_boxes([["[주문번호]0011"], ["행복식당/1234567890/홍길동"]])).store_name == "행복식당"
+
+
+def test_merge_same_name_adds_up_identical_lines_only():
+    lines = [
+        ParsedItem(line_no=1, name="홍합살", quantity=1, unit_price=3000, amount=3000, confidence=0.9),
+        ParsedItem(line_no=2, name="서울우유 1L", quantity=1, unit_price=2980, amount=2980),
+        ParsedItem(line_no=3, name="홍합살", quantity=1, unit_price=3000, amount=3000, discount=500, confidence=0.8),
+        ParsedItem(line_no=4, name="홍합살 200g", quantity=1, unit_price=4000, amount=4000),
+    ]
+    merged = merge_same_name(lines)
+    # 이름이 완전히 같은 줄만 합치고, 처음 나온 줄의 번호와 자리를 쓴다
+    assert [(item.line_no, item.name, item.quantity) for item in merged] == [
+        (1, "홍합살", 2), (2, "서울우유 1L", 1), (4, "홍합살 200g", 1),
+    ]
+    mussel = merged[0]
+    assert (mussel.amount, mussel.discount, mussel.unit_price, mussel.confidence) == (6000, 500, 3000, 0.8)
+    # 금액 합계는 그대로라 총액 검사에 영향이 없다
+    assert sum(i.amount - i.discount for i in merged) == sum(i.amount - i.discount for i in lines)
+    # 원래 줄은 바뀌지 않는다
+    assert (lines[0].quantity, lines[0].amount) == (1, 3000)
+
+
+def test_merge_same_name_drops_unit_price_when_lines_differ():
+    merged = merge_same_name([
+        ParsedItem(line_no=1, name="두부", quantity=1, unit_price=1500, amount=1500),
+        ParsedItem(line_no=2, name="두부", quantity=1, unit_price=1200, amount=1200),
+    ])
+    assert [(i.quantity, i.amount, i.unit_price) for i in merged] == [(2, 2700, None)]
+
+
+# ── 과세물품가액·부가세액 줄을 OCR이 잘못 읽어도 품목이 되지 않는다 ─────────
+
+
+def _tax_receipt(tax_line, vat_line):
+    return make_boxes(
+        [
+            ["이마트24 가천대3기숙사점"],
+            ["2026-10-31 12:48 POS-0003"],
+            ["상품", "단가", "수량", "금액"],
+            ["덴마크초코초코우유300ml"],
+            ["8801155731625", "2,200", "2", "4,400"],
+            ["-행사:1+1", "-2,200"],
+            tax_line,
+            vat_line,
+            ["합 계", "2,200"],
+            ["신용카드", "2,200"],
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    "tax_line, vat_line",
+    [
+        (["과세물품가액", "2,000"], ["부 가 세 액", "200"]),  # 바르게 읽음
+        (["관세물품가액", "2,000"], ["부색가세액", "200"]),  # 같은 영수증을 갤럭시로 찍었을 때: "과세"→"관세", "부가세액"→"부색가세액"
+        (["과세 물품 가액", "2,000"], ["부가세", "200"]),
+        (["면세물품가액", "2,000"], ["투가세액", "200"]),  # "부"를 "투"로 읽음
+        (["과셰물품가액", "2,000"], ["부 가 세 앤", "200"]),
+        (["과세물품", "2,000"], ["부가세액", "200"]),
+    ],
+)
+def test_tax_lines_end_the_item_section_even_when_ocr_misreads_them(tax_line, vat_line):
+    receipt = parse_receipt(_tax_receipt(tax_line, vat_line))
+    assert [_summary(item) for item in receipt.items] == [("덴마크초코초코우유300ml", 2.0, 2200, 4400, 2200)]
+    assert receipt.total_amount == 2200
+    assert sum(item.amount - item.discount for item in receipt.items) == receipt.total_amount
+
+
+def test_misread_tax_lines_are_not_taken_as_the_total():
+    assert find_total(["관세물품 합계 4,000", "부색가세액 400", "합 계 4,400"]) == 4400
+
+
+def test_similar_looking_product_names_do_not_end_the_item_section():
+    lines = ["부추 1,500 1 1,500", "치킨 추가세트 5,000 1 5,000", "세제 3,000 1 3,000"]
+    assert find_item_section(lines) == (0, len(lines))

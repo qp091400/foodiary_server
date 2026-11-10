@@ -1,0 +1,603 @@
+{
+  "protocol": {
+    "seed": 42,
+    "chronological_split": {
+      "train_event_fraction": 0.7,
+      "validation_event_fraction": 0.1,
+      "test_event_fraction": 0.2,
+      "same_day_never_split": true
+    },
+    "candidate_representation": {
+      "title_weight": 0.65,
+      "projection": "balanced PCA",
+      "dimension": 32,
+      "pca_per_domain_limit": 30000,
+      "korean_fit_split": "SHA256(dish_family) mod 10 < 6"
+    },
+    "korean_evaluation": {
+      "development_split": "family hash mod 10 6..7",
+      "test_split": "family hash mod 10 8..9",
+      "relevance": "same existing canonical dish_family; weak proxy, not human semantic labels",
+      "max_variants_per_family": 4,
+      "minimum_candidate_count": 100,
+      "duplicate_policy": "one recipe per distinct encoded title per family; exact title duplicates excluded"
+    },
+    "ranking_evaluation": {
+      "minimum_observed_candidates": 20,
+      "require_positive_and_negative": true,
+      "minimum_eligible_users_for_promotion": 30,
+      "unknown_items_are_not_negatives": true,
+      "tie_break": "SHA256(user_id,recipe_id)",
+      "bootstrap_unit": "user",
+      "bootstrap_replicates": 2000
+    },
+    "model_selection": "Choose one candidate from the predeclared grid using validation NDCG only, requiring Korean development Recall@10 above full V1 baseline; test remains sealed until candidate identity is recorded.",
+    "promotion_gate": {
+      "candidate_vs_retrained_v1_full_ndcg_bootstrap_lower_gt": 0,
+      "candidate_vs_retrained_v1_sample_ndcg_bootstrap_lower_gt": 0,
+      "test_auc_must_not_decrease_vs_full_baseline": true,
+      "korean_test_recall_at_10_must_increase": true,
+      "latest_incumbent_auc_must_not_decrease": true
+    },
+    "incumbent_note": "Exact deployed V1 was trained through 2015-04-19 and early-stopped using data through 2017-02-21; its unbiased comparison window starts 2017-02-22 and has only five users with >=20 mixed-class candidates. Controlled V1 replications use the new shared chronological split.",
+    "candidate_grid": [
+      {
+        "name": "title65_ko25",
+        "title_weight": 0.65,
+        "korean_ratio": 0.25
+      },
+      {
+        "name": "title65_ko50",
+        "title_weight": 0.65,
+        "korean_ratio": 0.5
+      },
+      {
+        "name": "title30_ko25",
+        "title_weight": 0.3,
+        "korean_ratio": 0.25
+      },
+      {
+        "name": "body_ko25",
+        "title_weight": 0.0,
+        "korean_ratio": 0.25
+      },
+      {
+        "name": "title65_ko25_bce",
+        "title_weight": 0.65,
+        "korean_ratio": 0.25,
+        "pair_weight": 0.0,
+        "auc_constraint": true
+      },
+      {
+        "name": "title30_ko25_bce",
+        "title_weight": 0.3,
+        "korean_ratio": 0.25,
+        "pair_weight": 0.0,
+        "auc_constraint": true
+      },
+      {
+        "name": "title65_ko25_pair005",
+        "title_weight": 0.65,
+        "korean_ratio": 0.25,
+        "pair_weight": 0.005,
+        "auc_constraint": true
+      },
+      {
+        "name": "title30_ko25_pair005",
+        "title_weight": 0.3,
+        "korean_ratio": 0.25,
+        "pair_weight": 0.005,
+        "auc_constraint": true
+      }
+    ],
+    "validation_amendment": {
+      "stage": "after V1 validation baselines, before candidate training and any final test evaluation",
+      "observation": "full V1 validation AUC rose while user-macro NDCG fell",
+      "candidate_loss": "class-weighted BCE + 0.05 * softplus(negative_logit-positive_logit) on actual same-user ratings",
+      "pair_sampling": "five observed positive/negative pairs per training user, seed 42; no unknown negatives",
+      "candidate_checkpoint": "highest validation NDCG@10, patience 5; V1 replications retain original BCE-based checkpoint selection",
+      "promotion_gates": "unchanged"
+    },
+    "validation_extension": {
+      "stage": "after four candidate validation reports, before opening any final test",
+      "observation": "0.05 pairwise weight improved user NDCG but substantially reduced global validation AUC",
+      "additional_grid": "title weights .65/.30, Korean share .25, pairwise weights 0/.005",
+      "checkpoint_and_selection_constraint": "validation AUC must meet full V1 baseline; then maximize validation user NDCG",
+      "promotion_gates": "unchanged",
+      "prior_artifacts": "protocol.round1.json and selection.round1.json retained"
+    }
+  },
+  "validation_results": {
+    "v1_sample": {
+      "version": "8312a5248522ac948137e9798a4077acd5b7e5974053e7411e2a3c46f9798f05",
+      "encoder": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+      "revision": "e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
+      "representation": {
+        "name": "v1_sample",
+        "title_weight": 0.0,
+        "korean_ratio": 0.0
+      },
+      "seed": 42,
+      "sources": {
+        "RAW_recipes.csv": "6a8136d1da9e03396a9f52d72200b3fddb8fe103f11e1496effca30ac4e0539f",
+        "RAW_interactions.csv": "4e278d2f687b1020f5694e51003a7d6174344b51aebbdf4530de88b5c6a78ee4"
+      },
+      "all_recipe_count": 231637,
+      "training_events": 38912,
+      "training_binary_samples": 37477,
+      "validation_samples": 103733,
+      "train_cutoff": "2010-04-24",
+      "test_cutoff": "2011-09-19",
+      "epochs": 11,
+      "best_validation_loss": 0.02896353229880333,
+      "validation": {
+        "roc_auc": 0.6450275684745655,
+        "pr_auc": 0.9867599851569805,
+        "samples": 103733,
+        "positive_fraction": 0.9785988926887512,
+        "eligible_users": 180,
+        "minimum_candidates": 20,
+        "candidate_count_median": 40.0,
+        "ndcg_at_10": 0.9506778585528148,
+        "recall_at_10": 0.2647881270437514,
+        "protocol": "only observed rated candidates, >=20 unique items and both labels; no sampled unknown negatives"
+      },
+      "korean_development": {
+        "queries": 479,
+        "candidates_per_query": 478,
+        "families": 230,
+        "recall_at_10": 0.4387613082811413,
+        "ndcg_at_10": 0.28416963887866586,
+        "top1_accuracy": 0.16910229645093947,
+        "relevance": "existing dish_family equality with distinct encoded titles; weak semantic proxy, not human food similarity or personal preference labels"
+      },
+      "cache_identity": {
+        "english": "9f7053c8ee22c5273a1ed2d53255119d1eeff442f02d9f5536db234a79575b89",
+        "korean": "95f73c7a3a4631340e66c4986386f8f1d81ad8d08e6986220e5d30982fe90505"
+      }
+    },
+    "v1_full": {
+      "version": "b1d5e17243e3355fe77c5e2fdf3d49ca38e7a4bb2e60d610acd60adf0a2798ab",
+      "encoder": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+      "revision": "e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
+      "representation": {
+        "name": "v1_full",
+        "title_weight": 0.0,
+        "korean_ratio": 0.0
+      },
+      "seed": 42,
+      "sources": {
+        "RAW_recipes.csv": "6a8136d1da9e03396a9f52d72200b3fddb8fe103f11e1496effca30ac4e0539f",
+        "RAW_interactions.csv": "4e278d2f687b1020f5694e51003a7d6174344b51aebbdf4530de88b5c6a78ee4"
+      },
+      "all_recipe_count": 231637,
+      "training_events": 749730,
+      "training_binary_samples": 720761,
+      "validation_samples": 103733,
+      "train_cutoff": "2010-04-24",
+      "test_cutoff": "2011-09-19",
+      "epochs": 29,
+      "best_validation_loss": 0.027228161692619324,
+      "validation": {
+        "roc_auc": 0.6731101586154633,
+        "pr_auc": 0.9879851268643208,
+        "samples": 103733,
+        "positive_fraction": 0.9785988926887512,
+        "eligible_users": 180,
+        "minimum_candidates": 20,
+        "candidate_count_median": 40.0,
+        "ndcg_at_10": 0.9452076217495864,
+        "recall_at_10": 0.26267550446003435,
+        "protocol": "only observed rated candidates, >=20 unique items and both labels; no sampled unknown negatives"
+      },
+      "korean_development": {
+        "queries": 479,
+        "candidates_per_query": 478,
+        "families": 230,
+        "recall_at_10": 0.4394572025052192,
+        "ndcg_at_10": 0.2836012897460381,
+        "top1_accuracy": 0.16701461377870563,
+        "relevance": "existing dish_family equality with distinct encoded titles; weak semantic proxy, not human food similarity or personal preference labels"
+      },
+      "cache_identity": {
+        "english": "9f7053c8ee22c5273a1ed2d53255119d1eeff442f02d9f5536db234a79575b89",
+        "korean": "95f73c7a3a4631340e66c4986386f8f1d81ad8d08e6986220e5d30982fe90505"
+      }
+    },
+    "title65_ko25": {
+      "version": "16498301425cbef78805dc3645469390faee97e6ef9ce495a42dfa448c179a0a",
+      "encoder": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+      "revision": "e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
+      "representation": {
+        "name": "title65_ko25",
+        "title_weight": 0.65,
+        "korean_ratio": 0.25
+      },
+      "seed": 42,
+      "sources": {
+        "RAW_recipes.csv": "6a8136d1da9e03396a9f52d72200b3fddb8fe103f11e1496effca30ac4e0539f",
+        "RAW_interactions.csv": "4e278d2f687b1020f5694e51003a7d6174344b51aebbdf4530de88b5c6a78ee4"
+      },
+      "all_recipe_count": 231637,
+      "training_events": 749730,
+      "training_binary_samples": 720761,
+      "validation_samples": 103733,
+      "train_cutoff": "2010-04-24",
+      "test_cutoff": "2011-09-19",
+      "epochs": 22,
+      "best_validation_loss": 0.028684090822935104,
+      "validation": {
+        "roc_auc": 0.593586440311244,
+        "pr_auc": 0.983520729018433,
+        "samples": 103733,
+        "positive_fraction": 0.9785988926887512,
+        "eligible_users": 180,
+        "minimum_candidates": 20,
+        "candidate_count_median": 40.0,
+        "ndcg_at_10": 0.9664601534374818,
+        "recall_at_10": 0.26928042344229275,
+        "protocol": "only observed rated candidates, >=20 unique items and both labels; no sampled unknown negatives"
+      },
+      "korean_development": {
+        "queries": 479,
+        "candidates_per_query": 478,
+        "families": 230,
+        "recall_at_10": 0.6443980514961725,
+        "ndcg_at_10": 0.502913952538832,
+        "top1_accuracy": 0.38204592901878914,
+        "relevance": "existing dish_family equality with distinct encoded titles; weak semantic proxy, not human food similarity or personal preference labels"
+      },
+      "cache_identity": {
+        "english": "9f7053c8ee22c5273a1ed2d53255119d1eeff442f02d9f5536db234a79575b89",
+        "korean": "95f73c7a3a4631340e66c4986386f8f1d81ad8d08e6986220e5d30982fe90505"
+      }
+    },
+    "title65_ko50": {
+      "version": "d54e7bf353942dd9f255ef9bda35ffbde9adbc25bd95acdb321099d165465d5b",
+      "encoder": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+      "revision": "e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
+      "representation": {
+        "name": "title65_ko50",
+        "title_weight": 0.65,
+        "korean_ratio": 0.5
+      },
+      "seed": 42,
+      "sources": {
+        "RAW_recipes.csv": "6a8136d1da9e03396a9f52d72200b3fddb8fe103f11e1496effca30ac4e0539f",
+        "RAW_interactions.csv": "4e278d2f687b1020f5694e51003a7d6174344b51aebbdf4530de88b5c6a78ee4"
+      },
+      "all_recipe_count": 231637,
+      "training_events": 749730,
+      "training_binary_samples": 720761,
+      "validation_samples": 103733,
+      "train_cutoff": "2010-04-24",
+      "test_cutoff": "2011-09-19",
+      "epochs": 6,
+      "best_validation_loss": 0.02847939170897007,
+      "validation": {
+        "roc_auc": 0.6072550486810238,
+        "pr_auc": 0.9840175903053618,
+        "samples": 103733,
+        "positive_fraction": 0.9785988926887512,
+        "eligible_users": 180,
+        "minimum_candidates": 20,
+        "candidate_count_median": 40.0,
+        "ndcg_at_10": 0.9533064789047064,
+        "recall_at_10": 0.2647061831148779,
+        "protocol": "only observed rated candidates, >=20 unique items and both labels; no sampled unknown negatives"
+      },
+      "korean_development": {
+        "queries": 479,
+        "candidates_per_query": 478,
+        "families": 230,
+        "recall_at_10": 0.651009046624913,
+        "ndcg_at_10": 0.5116545867434865,
+        "top1_accuracy": 0.3945720250521921,
+        "relevance": "existing dish_family equality with distinct encoded titles; weak semantic proxy, not human food similarity or personal preference labels"
+      },
+      "cache_identity": {
+        "english": "9f7053c8ee22c5273a1ed2d53255119d1eeff442f02d9f5536db234a79575b89",
+        "korean": "95f73c7a3a4631340e66c4986386f8f1d81ad8d08e6986220e5d30982fe90505"
+      }
+    },
+    "title30_ko25": {
+      "version": "90114807f121c1d10ce2dfbb525c46069e2524cd0cd4f0dd6ade635b7d0a01c5",
+      "encoder": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+      "revision": "e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
+      "representation": {
+        "name": "title30_ko25",
+        "title_weight": 0.3,
+        "korean_ratio": 0.25
+      },
+      "seed": 42,
+      "sources": {
+        "RAW_recipes.csv": "6a8136d1da9e03396a9f52d72200b3fddb8fe103f11e1496effca30ac4e0539f",
+        "RAW_interactions.csv": "4e278d2f687b1020f5694e51003a7d6174344b51aebbdf4530de88b5c6a78ee4"
+      },
+      "all_recipe_count": 231637,
+      "training_events": 749730,
+      "training_binary_samples": 720761,
+      "validation_samples": 103733,
+      "train_cutoff": "2010-04-24",
+      "test_cutoff": "2011-09-19",
+      "epochs": 14,
+      "best_validation_loss": 0.028951920568943024,
+      "validation": {
+        "roc_auc": 0.5722121220350511,
+        "pr_auc": 0.9826752852295388,
+        "samples": 103733,
+        "positive_fraction": 0.9785988926887512,
+        "eligible_users": 180,
+        "minimum_candidates": 20,
+        "candidate_count_median": 40.0,
+        "ndcg_at_10": 0.9635323233072108,
+        "recall_at_10": 0.2683488298943154,
+        "protocol": "only observed rated candidates, >=20 unique items and both labels; no sampled unknown negatives"
+      },
+      "korean_development": {
+        "queries": 479,
+        "candidates_per_query": 478,
+        "families": 230,
+        "recall_at_10": 0.5751565762004175,
+        "ndcg_at_10": 0.4160486779177771,
+        "top1_accuracy": 0.27348643006263046,
+        "relevance": "existing dish_family equality with distinct encoded titles; weak semantic proxy, not human food similarity or personal preference labels"
+      },
+      "cache_identity": {
+        "english": "9f7053c8ee22c5273a1ed2d53255119d1eeff442f02d9f5536db234a79575b89",
+        "korean": "95f73c7a3a4631340e66c4986386f8f1d81ad8d08e6986220e5d30982fe90505"
+      }
+    },
+    "body_ko25": {
+      "version": "eb072261172b438fa5843613a6053dbcabb969a9873ff221b79df39b96b57da5",
+      "encoder": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+      "revision": "e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
+      "representation": {
+        "name": "body_ko25",
+        "title_weight": 0.0,
+        "korean_ratio": 0.25
+      },
+      "seed": 42,
+      "sources": {
+        "RAW_recipes.csv": "6a8136d1da9e03396a9f52d72200b3fddb8fe103f11e1496effca30ac4e0539f",
+        "RAW_interactions.csv": "4e278d2f687b1020f5694e51003a7d6174344b51aebbdf4530de88b5c6a78ee4"
+      },
+      "all_recipe_count": 231637,
+      "training_events": 749730,
+      "training_binary_samples": 720761,
+      "validation_samples": 103733,
+      "train_cutoff": "2010-04-24",
+      "test_cutoff": "2011-09-19",
+      "epochs": 14,
+      "best_validation_loss": 0.028620731085538864,
+      "validation": {
+        "roc_auc": 0.5918762057990531,
+        "pr_auc": 0.9835328287788159,
+        "samples": 103733,
+        "positive_fraction": 0.9785988926887512,
+        "eligible_users": 180,
+        "minimum_candidates": 20,
+        "candidate_count_median": 40.0,
+        "ndcg_at_10": 0.9624148982858085,
+        "recall_at_10": 0.26876152592249086,
+        "protocol": "only observed rated candidates, >=20 unique items and both labels; no sampled unknown negatives"
+      },
+      "korean_development": {
+        "queries": 479,
+        "candidates_per_query": 478,
+        "families": 230,
+        "recall_at_10": 0.4224077940153097,
+        "ndcg_at_10": 0.28233383097067705,
+        "top1_accuracy": 0.1732776617954071,
+        "relevance": "existing dish_family equality with distinct encoded titles; weak semantic proxy, not human food similarity or personal preference labels"
+      },
+      "cache_identity": {
+        "english": "9f7053c8ee22c5273a1ed2d53255119d1eeff442f02d9f5536db234a79575b89",
+        "korean": "95f73c7a3a4631340e66c4986386f8f1d81ad8d08e6986220e5d30982fe90505"
+      }
+    },
+    "title65_ko25_bce": {
+      "version": "d5a5b99b9706abd5db05315940b5ecd4bea860e707f38d86dd3d79f5b8c1e9bf",
+      "encoder": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+      "revision": "e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
+      "representation": {
+        "name": "title65_ko25_bce",
+        "title_weight": 0.65,
+        "korean_ratio": 0.25,
+        "pair_weight": 0.0,
+        "auc_constraint": true
+      },
+      "seed": 42,
+      "sources": {
+        "RAW_recipes.csv": "6a8136d1da9e03396a9f52d72200b3fddb8fe103f11e1496effca30ac4e0539f",
+        "RAW_interactions.csv": "4e278d2f687b1020f5694e51003a7d6174344b51aebbdf4530de88b5c6a78ee4"
+      },
+      "all_recipe_count": 231637,
+      "training_events": 749730,
+      "training_binary_samples": 720761,
+      "validation_samples": 103733,
+      "train_cutoff": "2010-04-24",
+      "test_cutoff": "2011-09-19",
+      "epochs": 30,
+      "best_validation_loss": 0.027386674657464027,
+      "validation": {
+        "roc_auc": 0.6652543392347654,
+        "pr_auc": 0.9872619504557715,
+        "samples": 103733,
+        "positive_fraction": 0.9785988926887512,
+        "eligible_users": 180,
+        "minimum_candidates": 20,
+        "candidate_count_median": 40.0,
+        "ndcg_at_10": 0.9409097023799231,
+        "recall_at_10": 0.25957367743774223,
+        "protocol": "only observed rated candidates, >=20 unique items and both labels; no sampled unknown negatives"
+      },
+      "korean_development": {
+        "queries": 479,
+        "candidates_per_query": 478,
+        "families": 230,
+        "recall_at_10": 0.6443980514961725,
+        "ndcg_at_10": 0.502913952538832,
+        "top1_accuracy": 0.38204592901878914,
+        "relevance": "existing dish_family equality with distinct encoded titles; weak semantic proxy, not human food similarity or personal preference labels"
+      },
+      "cache_identity": {
+        "english": "9f7053c8ee22c5273a1ed2d53255119d1eeff442f02d9f5536db234a79575b89",
+        "korean": "95f73c7a3a4631340e66c4986386f8f1d81ad8d08e6986220e5d30982fe90505"
+      }
+    },
+    "title30_ko25_bce": {
+      "version": "39b5f7bed515ec68d81ce275efc5d20a56fffeb6d7cc819b4415a15b99541394",
+      "encoder": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+      "revision": "e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
+      "representation": {
+        "name": "title30_ko25_bce",
+        "title_weight": 0.3,
+        "korean_ratio": 0.25,
+        "pair_weight": 0.0,
+        "auc_constraint": true
+      },
+      "seed": 42,
+      "sources": {
+        "RAW_recipes.csv": "6a8136d1da9e03396a9f52d72200b3fddb8fe103f11e1496effca30ac4e0539f",
+        "RAW_interactions.csv": "4e278d2f687b1020f5694e51003a7d6174344b51aebbdf4530de88b5c6a78ee4"
+      },
+      "all_recipe_count": 231637,
+      "training_events": 749730,
+      "training_binary_samples": 720761,
+      "validation_samples": 103733,
+      "train_cutoff": "2010-04-24",
+      "test_cutoff": "2011-09-19",
+      "epochs": 30,
+      "best_validation_loss": 0.027406636625528336,
+      "validation": {
+        "roc_auc": 0.6642482372337168,
+        "pr_auc": 0.9871028325793836,
+        "samples": 103733,
+        "positive_fraction": 0.9785988926887512,
+        "eligible_users": 180,
+        "minimum_candidates": 20,
+        "candidate_count_median": 40.0,
+        "ndcg_at_10": 0.943548928558822,
+        "recall_at_10": 0.2620465392909735,
+        "protocol": "only observed rated candidates, >=20 unique items and both labels; no sampled unknown negatives"
+      },
+      "korean_development": {
+        "queries": 479,
+        "candidates_per_query": 478,
+        "families": 230,
+        "recall_at_10": 0.5751565762004175,
+        "ndcg_at_10": 0.4160486779177771,
+        "top1_accuracy": 0.27348643006263046,
+        "relevance": "existing dish_family equality with distinct encoded titles; weak semantic proxy, not human food similarity or personal preference labels"
+      },
+      "cache_identity": {
+        "english": "9f7053c8ee22c5273a1ed2d53255119d1eeff442f02d9f5536db234a79575b89",
+        "korean": "95f73c7a3a4631340e66c4986386f8f1d81ad8d08e6986220e5d30982fe90505"
+      }
+    },
+    "title65_ko25_pair005": {
+      "version": "6cceca24a2326ce25748073f76911dc847fa9e51f5b99b845919f4812a90ae2b",
+      "encoder": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+      "revision": "e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
+      "representation": {
+        "name": "title65_ko25_pair005",
+        "title_weight": 0.65,
+        "korean_ratio": 0.25,
+        "pair_weight": 0.005,
+        "auc_constraint": true
+      },
+      "seed": 42,
+      "sources": {
+        "RAW_recipes.csv": "6a8136d1da9e03396a9f52d72200b3fddb8fe103f11e1496effca30ac4e0539f",
+        "RAW_interactions.csv": "4e278d2f687b1020f5694e51003a7d6174344b51aebbdf4530de88b5c6a78ee4"
+      },
+      "all_recipe_count": 231637,
+      "training_events": 749730,
+      "training_binary_samples": 720761,
+      "validation_samples": 103733,
+      "train_cutoff": "2010-04-24",
+      "test_cutoff": "2011-09-19",
+      "epochs": 30,
+      "best_validation_loss": 0.027539722621440887,
+      "validation": {
+        "roc_auc": 0.6605516330709162,
+        "pr_auc": 0.9869532922083695,
+        "samples": 103733,
+        "positive_fraction": 0.9785988926887512,
+        "eligible_users": 180,
+        "minimum_candidates": 20,
+        "candidate_count_median": 40.0,
+        "ndcg_at_10": 0.9437335941123567,
+        "recall_at_10": 0.26051937163625727,
+        "protocol": "only observed rated candidates, >=20 unique items and both labels; no sampled unknown negatives"
+      },
+      "korean_development": {
+        "queries": 479,
+        "candidates_per_query": 478,
+        "families": 230,
+        "recall_at_10": 0.6443980514961725,
+        "ndcg_at_10": 0.502913952538832,
+        "top1_accuracy": 0.38204592901878914,
+        "relevance": "existing dish_family equality with distinct encoded titles; weak semantic proxy, not human food similarity or personal preference labels"
+      },
+      "cache_identity": {
+        "english": "9f7053c8ee22c5273a1ed2d53255119d1eeff442f02d9f5536db234a79575b89",
+        "korean": "95f73c7a3a4631340e66c4986386f8f1d81ad8d08e6986220e5d30982fe90505"
+      }
+    },
+    "title30_ko25_pair005": {
+      "version": "2e5306090e8bb8c517ff7c6467d2f78822f00e2a3236a2b3346822f194e5a867",
+      "encoder": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+      "revision": "e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
+      "representation": {
+        "name": "title30_ko25_pair005",
+        "title_weight": 0.3,
+        "korean_ratio": 0.25,
+        "pair_weight": 0.005,
+        "auc_constraint": true
+      },
+      "seed": 42,
+      "sources": {
+        "RAW_recipes.csv": "6a8136d1da9e03396a9f52d72200b3fddb8fe103f11e1496effca30ac4e0539f",
+        "RAW_interactions.csv": "4e278d2f687b1020f5694e51003a7d6174344b51aebbdf4530de88b5c6a78ee4"
+      },
+      "all_recipe_count": 231637,
+      "training_events": 749730,
+      "training_binary_samples": 720761,
+      "validation_samples": 103733,
+      "train_cutoff": "2010-04-24",
+      "test_cutoff": "2011-09-19",
+      "epochs": 30,
+      "best_validation_loss": 0.02756163664162159,
+      "validation": {
+        "roc_auc": 0.6575680672151075,
+        "pr_auc": 0.9867752698919584,
+        "samples": 103733,
+        "positive_fraction": 0.9785988926887512,
+        "eligible_users": 180,
+        "minimum_candidates": 20,
+        "candidate_count_median": 40.0,
+        "ndcg_at_10": 0.947801480561604,
+        "recall_at_10": 0.2635800499882511,
+        "protocol": "only observed rated candidates, >=20 unique items and both labels; no sampled unknown negatives"
+      },
+      "korean_development": {
+        "queries": 479,
+        "candidates_per_query": 478,
+        "families": 230,
+        "recall_at_10": 0.5751565762004175,
+        "ndcg_at_10": 0.4160486779177771,
+        "top1_accuracy": 0.27348643006263046,
+        "relevance": "existing dish_family equality with distinct encoded titles; weak semantic proxy, not human food similarity or personal preference labels"
+      },
+      "cache_identity": {
+        "english": "9f7053c8ee22c5273a1ed2d53255119d1eeff442f02d9f5536db234a79575b89",
+        "korean": "95f73c7a3a4631340e66c4986386f8f1d81ad8d08e6986220e5d30982fe90505"
+      }
+    }
+  },
+  "selected_candidate": "title65_ko25",
+  "selection_rule": "User prioritized a working demonstration before final test: maximize validation recommendation NDCG among Korean-improving full-data models; classification AUC tradeoff accepted for demo, no fabricated data",
+  "demo_mode": true
+}

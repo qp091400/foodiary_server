@@ -1,0 +1,10 @@
+{
+  "version": "16498301425cbef78805dc3645469390faee97e6ef9ce495a42dfa448c179a0a",
+  "encoder": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  "revision": "e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
+  "representation": {
+    "name": "title65_ko25",
+    "title_weight": 0.65,
+    "korean_ratio": 0.25
+  }
+}

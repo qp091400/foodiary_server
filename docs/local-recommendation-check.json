@@ -1,0 +1,29 @@
+{
+  "scope": "isolated local API + actual app ApiClient/personalized code; native storage and UUID have CLI adapters; no browser UI assertions",
+  "api": "http://127.0.0.1:8001",
+  "user": "localdemo",
+  "model_version": "16498301425cbef78805dc3645469390faee97e6ef9ce495a42dfa448c179a0a",
+  "candidates": 300,
+  "recipe_id": "10000recipe:6983262",
+  "recipe_name": "감자채전 바삭고소고소~~",
+  "positions": {
+    "before": 150,
+    "selected": 55,
+    "five_stars": 0,
+    "one_star": 299,
+    "rating_cancelled": 55
+  },
+  "checks": {
+    "view_does_not_change_taste": true,
+    "selection_saved": true,
+    "retry_idempotent": true,
+    "five_star_saved": true,
+    "rating_update_replaces_vote": true,
+    "own_rating_excluded_from_quality": true,
+    "taste_vector_reversed": true,
+    "cancel_removes_rating": true,
+    "model_cache_reused": true,
+    "requests_local_only": true
+  },
+  "http_requests": 19
+}

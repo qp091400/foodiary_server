@@ -372,3 +372,24 @@ def test_purchases_and_summary(client, fridge):
         ("tofu", "두부", 1, 1.0, 1500),
     ]
     assert by_category["end"] is None
+
+
+def test_items_remember_their_unit(client, fridge):
+    # 단위를 안 보내면 지금까지처럼 개수다
+    eggs = add_item(client, fridge, name="계란", quantity=10)
+    assert eggs["unit"] == "개"
+    milk = add_item(client, fridge, name="서울우유 1L", quantity=2, unit="L", total_price=5960)
+    assert (milk["quantity"], milk["remaining_quantity"], milk["unit"]) == (2, 2, "L")
+    # 수정 화면에서 단위를 바꾸면 수량과 함께 바뀐다 (2 L → 2000 ml)
+    changed = client.patch(f"{fridge['url']}/items/{milk['id']}", headers=fridge["headers"],
+                           json={"quantity": 2000, "remaining_quantity": 2000, "unit": "ml"})
+    assert changed.status_code == 200, changed.text
+    assert (changed.json()["quantity"], changed.json()["unit"]) == (2000, "ml")
+    # 반만 먹어도 같은 단위로 남는다
+    half = client.post(f"{fridge['url']}/items/{milk['id']}/consume", headers=fridge["headers"], json={"quantity": 500})
+    assert (half.json()["remaining_quantity"], half.json()["unit"]) == (1500, "ml")
+    # 정해진 단위만 받는다
+    assert client.post(f"{fridge['url']}/items", headers=fridge["headers"], json={"name": "x", "unit": "봉"}).status_code == 422
+    assert client.patch(f"{fridge['url']}/items/{milk['id']}", headers=fridge["headers"], json={"unit": None}).status_code == 422
+    purchases = client.get(f"{fridge['url']}/purchases", headers=fridge["headers"]).json()
+    assert {(p["name"], p["unit"]) for p in purchases} == {("계란", "개"), ("서울우유 1L", "ml")}

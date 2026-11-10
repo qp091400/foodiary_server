@@ -20,9 +20,15 @@ def finish(client, headers, fridge_id, item, action):
     assert client.post(f"/fridges/{fridge_id}/items/{item['id']}/{action}", headers=headers, json=None).status_code == 200
 
 
-def join(client, owner, fridge_id, who, permission):
-    token = client.post(f"/fridges/{fridge_id}/share-links", headers=owner["headers"], json={"permission": permission}).json()["token"]
+def join(client, owner, fridge_id, who):
+    """who joins through the share link and becomes an editing member."""
+    token = client.post(f"/fridges/{fridge_id}/share-link", headers=owner["headers"]).json()["token"]
     assert client.post(f"/share-links/{token}/join", headers=who["headers"]).status_code == 200
+
+
+def make_public(client, owner, fridge_id, visibility="public"):
+    """Anyone may view a public fridge; that is the only view-only access."""
+    assert client.patch(f"/fridges/{fridge_id}", headers=owner["headers"], json={"visibility": visibility}).status_code == 200
 
 
 @pytest.fixture
@@ -35,8 +41,8 @@ def world(client):
     minsu = people["minsu"]
     right = client.post("/fridges", headers=minsu["headers"], json={"name": "오른쪽"}).json()["id"]
     kimchi = client.post("/fridges", headers=minsu["headers"], json={"name": "김치냉장고"}).json()["id"]
-    join(client, people["jiyeon"], people["jiyeon"]["fridge"], minsu, "editor")
-    join(client, people["haneul"], people["haneul"]["fridge"], minsu, "viewer")
+    join(client, people["jiyeon"], people["jiyeon"]["fridge"], minsu)
+    make_public(client, people["haneul"], people["haneul"]["fridge"])
 
     milk = add_item(client, minsu["headers"], minsu["fridge"], "서울우유 1L", 3000)  # 왼쪽: 버림 3000
     tofu = add_item(client, minsu["headers"], minsu["fridge"], "풀무원 두부", 2000)  # 왼쪽: 먹음 2000
@@ -125,14 +131,16 @@ def test_fridges_i_cannot_see_are_not_found(client, world):
 
 
 def test_losing_edit_rights_removes_the_fridge_from_the_default(client, world):
-    client.patch(f"/fridges/{world['jiyeon']['fridge']}/access/{world['minsu']['id']}", headers=world["jiyeon"]["headers"], json={"permission": "viewer"})
+    jiyeon = world["jiyeon"]
+    assert client.delete(f"/fridges/{jiyeon['fridge']}/members/{world['minsu']['id']}", headers=jiyeon["headers"]).status_code == 204
+    make_public(client, jiyeon, jiyeon["fridge"])
     stats = monthly(client, world["minsu"]).json()
     assert world["jiyeon"]["fridge"] not in [entry["fridge_id"] for entry in stats["fridges"]]
     assert stats["food_spent"] == 20000
     later = monthly(client, world["minsu"], ("fridge_ids", world["jiyeon"]["fridge"])).json()
     assert later["fridges"] == [] and len(later["excluded"]) == 1  # 고르면 '보기만'으로 알려 준다
-    client.patch(f"/fridges/{world['jiyeon']['fridge']}/access/{world['minsu']['id']}", headers=world["jiyeon"]["headers"], json={"permission": "none"})
-    assert monthly(client, world["minsu"], ("fridge_ids", world["jiyeon"]["fridge"])).status_code == 404  # '없음'이면 있는지도 모른다
+    make_public(client, jiyeon, jiyeon["fridge"], "private")
+    assert monthly(client, world["minsu"], ("fridge_ids", jiyeon["fridge"])).status_code == 404  # 볼 수 없으면 있는지도 모른다
 
 
 def test_too_many_picks_are_refused(client, world):

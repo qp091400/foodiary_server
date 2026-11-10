@@ -15,7 +15,7 @@ def test_release_excludes_secrets_and_preserves_dockerignore(tmp_path, monkeypat
     (tmp_path / "app" / "main.py").write_text("# public source", encoding="utf-8")
     for name in (".env.production", "app/.env", "app/private.key", "app/private.pem", "deploy/client.secrets.json"):
         (tmp_path / name).write_text("SECRET CANARY", encoding="utf-8")
-    (tmp_path / "deploy" / ".env.production.example").write_text("JWT_SECRET=", encoding="utf-8")
+    (tmp_path / "deploy" / "cloudbuild.trigger.yaml").write_text("steps: []", encoding="utf-8")
     private = tmp_path / "app" / ".cloudrun" / "secrets"
     private.mkdir(parents=True)
     (private / "DATABASE_URL").write_text("SECRET CANARY", encoding="utf-8")
@@ -24,7 +24,7 @@ def test_release_excludes_secrets_and_preserves_dockerignore(tmp_path, monkeypat
     package_release.main()
     with tarfile.open(output) as archive:
         names = set(archive.getnames())
-        assert {".dockerignore", "app/main.py", "deploy/.env.production.example", "recipe-package.json"} <= names
+        assert {".dockerignore", "app/main.py", "deploy/cloudbuild.trigger.yaml", "recipe-package.json"} <= names
         assert not {".env.production", "app/.env", "app/private.key", "app/private.pem"} & names
         assert "deploy/client.secrets.json" not in names
         assert "app/.cloudrun/secrets/DATABASE_URL" not in names

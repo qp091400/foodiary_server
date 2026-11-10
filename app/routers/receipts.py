@@ -9,7 +9,7 @@ import uuid
 from collections import deque
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
 from typing import Any, Literal
@@ -17,7 +17,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
 from PIL import Image, ImageOps
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -25,7 +25,7 @@ from app.config import settings
 from app.database import get_db
 from app.deps import FridgeAccess, get_fridge_access
 from app.middleware import extra_ocr_request
-from app.models import FoodItem, Fridge, Receipt, ReceiptItem
+from app.models import ConsumptionLog, FoodItem, Fridge, Receipt, ReceiptItem
 from app.schemas import (
     BatchUploadResult,
     ConfirmItem,
@@ -39,13 +39,14 @@ from app.schemas import (
     ReceiptSummary,
 )
 from app.services import barcode as barcode_service
+from app.services import learned_names
 from app.services.expiry import OTHER, classify, estimate
 from app.services.foodsafety import ProductInfo, lookup_barcode
-from app.services.friends import explicit_permission
+from app.services.fridge_access import fridge_permission
 from app.services.ocr import OcrEngine, get_ocr_engine
 from app.services.ocr.base import OcrBox, OcrBusyError, next_ticket
 from app.services.ocr.paddle import Verdict
-from app.services.receipt_parser import ParsedReceipt, parse_receipt
+from app.services.receipt_parser import ParsedReceipt, merge_same_name, parse_receipt
 from app.timeutil import today, utcnow
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ WARN_SUM_MISMATCH = "일부 품목을 못 읽었을 수 있어요"
 WARN_NO_ITEMS = "품목을 찾지 못했어요. 직접 추가해 주세요"
 WARN_NO_TOTAL = "영수증 총액을 찾지 못했어요. 빠진 품목이 없는지 확인해 주세요"
 WARN_NAME_CUT = "상품 이름이 화면에서 잘려 있어요. 이름을 확인해 주세요"
+WARN_NAME_UNSURE = "이름이 흐릿하게 읽힌 품목이 있어요. 이름을 확인해 주세요"
 OCR_BUSY = "다른 영수증을 분석 중입니다. 잠시 후 다시 시도해 주세요."
 TOO_MANY_REQUESTS = "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."
 BATCH_TIME_UP = "사진이 많아 정해진 시간 안에 읽지 못했어요. 이 사진부터 다시 올려 주세요."
@@ -116,10 +118,13 @@ def _remove_file(relative_path: str | None) -> None:
         (Path(settings.upload_dir) / relative_path).unlink(missing_ok=True)
 
 
-def build_draft(db: Session, parsed: ParsedReceipt, purchased_on: date) -> list[dict]:
+def build_draft(db: Session, parsed: ParsedReceipt, purchased_on: date, user_id: int | None = None) -> list[dict]:
     lookup = _ProductLookup(db)
+    # 사용자들이 고쳐 둔 이름이 있으면 먼저 바꾼다 (같은 이름이 하나로 합쳐지도록 합치기 전에)
+    learned = learned_names.load(db, user_id, (item.name for item in parsed.items))
+    items = [replace(item, name=fixed, read_name=item.name, name_unsure=False) if (fixed := learned.fix(item.name)) else item for item in parsed.items]
     draft = []
-    for item in parsed.items:
+    for item in merge_same_name(items):
         product = lookup.get(item.barcode)
         guess = estimate(item.name, purchased_on, product)
         # 쇼핑몰 주문에는 옷·생활용품이 많이 섞여 있다. 식품으로 알아본 것만 넣고 모르는 것은 제외로 둔다(사용자가 켠다).
@@ -143,6 +148,9 @@ def build_draft(db: Session, parsed: ParsedReceipt, purchased_on: date) -> list[
                 product_name=product.name if product else None,
                 confidence=item.confidence,
                 name_cut=item.name_cut,
+                discount_estimated=item.discount_estimated,
+                name_unsure=item.name_unsure,
+                read_name=item.read_name,
             ).model_dump(mode="json")
         )
     return draft
@@ -194,7 +202,7 @@ def read_receipt(
     )
 
 
-def draft_warnings(item_count: int, items_sum: int, total_amount: int | None, *, name_cut: bool = False) -> list[str]:
+def draft_warnings(item_count: int, items_sum: int, total_amount: int | None, *, name_cut: bool = False, discount_estimated: bool = False, name_unsure: bool = False) -> list[str]:
     if item_count == 0:
         return [WARN_NO_ITEMS]
     warnings = []
@@ -204,6 +212,10 @@ def draft_warnings(item_count: int, items_sum: int, total_amount: int | None, *,
         warnings.append(WARN_SUM_MISMATCH)
     if name_cut:
         warnings.append(WARN_NAME_CUT)
+    if name_unsure:
+        warnings.append(WARN_NAME_UNSURE)
+    if discount_estimated:
+        warnings.append("전체 할인을 품목 금액에 비례해 나눴어요. 실제 품목별 할인은 확정 전에 확인해주세요.")
     return warnings
 
 
@@ -236,6 +248,8 @@ def _detail(db: Session, receipt: Receipt) -> ReceiptDetail:
         warnings=draft_warnings(
             count, items_sum, receipt.total_amount,
             name_cut=receipt.status == "pending" and any(item.name_cut for item in draft_items),
+            discount_estimated=receipt.status == "pending" and any(item.discount_estimated for item in draft_items),
+            name_unsure=receipt.status == "pending" and any(item.name_unsure for item in draft_items),
         ),
         raw_lines=receipt.raw_lines or [],
     )
@@ -514,7 +528,7 @@ def _finish_draft(photo: DraftPhoto, boxes: list[OcrBox], access: FridgeAccess, 
         receipt_barcode=photo.receipt_barcode,
         image_path=photo.relative_path,
         raw_lines=parsed.lines,
-        draft_items=build_draft(db, parsed, purchased_on or today()),
+        draft_items=build_draft(db, parsed, purchased_on or today(), access.user.id),
     )
     db.add(receipt)
     try:
@@ -611,11 +625,12 @@ def confirm_receipt(
     if receipt.status != "pending":
         raise HTTPException(status_code=409, detail="이미 확정된 영수증입니다.")
 
-    # 품목마다 넣을 냉장고. 하나라도 못 넣는 곳이면 아무것도 만들지 않고 거절한다.
+    # Target fridge per line. If any target is not writable, create nothing and refuse.
     targets = {receipt.fridge_id}
     for line in payload.items:
         if line.include and line.fridge_id is not None and line.fridge_id not in targets:
-            permission = explicit_permission(db, access.user.id, line.fridge_id) if db.get(Fridge, line.fridge_id) else None
+            fridge = db.get(Fridge, line.fridge_id)
+            permission = fridge_permission(db, access.user.id, fridge) if fridge else None
             if permission is None:
                 raise HTTPException(status_code=404, detail="넣을 냉장고를 찾을 수 없어요.")
             if permission == "viewer":
@@ -628,6 +643,7 @@ def confirm_receipt(
     lookup = _ProductLookup(db)
 
     created: list[FoodItem] = []
+    edits: list[tuple[str, str, str]] = []  # (OCR이 읽은 이름, 초안에 보여 준 이름, 확정한 이름)
     for line_no, line in enumerate(payload.items, start=1):
         category = line.category or classify(line.name)
         record = ReceiptItem(
@@ -636,6 +652,7 @@ def confirm_receipt(
             name=line.name,
             barcode=line.barcode,
             quantity=line.quantity,
+            unit=line.unit,
             unit_price=line.unit_price,
             amount=line.amount,
             discount=line.discount,
@@ -649,6 +666,11 @@ def confirm_receipt(
         # 소비기한을 비웠거나 초안의 추정값을 그대로 돌려보냈으면 자동 추정으로 본다.
         # (확정하면서 구매일이나 카테고리를 고쳤다면 그 값으로 다시 계산된다)
         draft = match_draft(line)
+        if draft is not None and draft.get("name"):
+            shown = draft["name"]
+            read = draft.get("read_name") or shown
+            if line.name != shown or line.name != read:  # 이름을 고쳤거나, 보정된 이름을 되돌렸거나, 보정된 이름을 그대로 받아들였다
+                edits.append((read, shown, line.name))
         untouched = draft is not None and draft.get("expiry_date") == (
             line.expiry_date.isoformat() if line.expiry_date else None
         )
@@ -661,7 +683,7 @@ def confirm_receipt(
 
         total_price = line.amount - line.discount
         food = FoodItem(
-            fridge_id=line.fridge_id or receipt.fridge_id,  # 영수증은 올린 냉장고에 남고, 품목은 고른 냉장고로 간다
+            fridge_id=line.fridge_id or receipt.fridge_id,  # the receipt stays in the upload fridge, items go where chosen
             receipt_id=receipt.id,
             name=line.name,
             category=category,
@@ -669,7 +691,10 @@ def confirm_receipt(
             barcode=line.barcode,
             quantity=line.quantity,
             remaining_quantity=line.quantity,
-            unit_price=line.unit_price if line.unit_price is not None else math.floor(total_price / line.quantity + 0.5),
+            unit=line.unit,
+            # 영수증 단가는 한 개(한 팩) 값이라 g·ml로 센 수량과는 맞지 않는다. 그때는 비워 둔다.
+            unit_price=None if line.unit != "개"
+            else line.unit_price if line.unit_price is not None else math.floor(total_price / line.quantity + 0.5),
             total_price=total_price,
             purchased_on=purchased_on,
             expiry_date=expiry_date,
@@ -687,19 +712,32 @@ def confirm_receipt(
     if payload.store_name:
         receipt.store_name = payload.store_name
     db.commit()
-    return ReceiptConfirmResponse(
+    response = ReceiptConfirmResponse(
         receipt_id=receipt.id,
         created_items=[ItemOut.model_validate(food) for food in created],
         skipped=len(payload.items) - len(created),
     )
+    learned_names.learn(db, access.user.id, edits)
+    return response
 
 
-@router.delete("/{receipt_id}", status_code=204, summary="초안(pending) 영수증 삭제")
+@router.delete(
+    "/{receipt_id}",
+    status_code=204,
+    summary="영수증 기록 삭제 (확정된 것은 그 영수증으로 넣은 식품·구매 기록·먹음/버림 기록까지). 같은 영수증을 다시 찍을 수 있게 된다",
+)
 def delete_receipt(receipt_id: int, access: FridgeAccess = Depends(get_fridge_access), db: Session = Depends(get_db)):
-    receipt = _get_receipt(db, access.fridge.id, receipt_id)
-    if receipt.status != "pending":
-        raise HTTPException(status_code=409, detail="확정된 영수증은 삭제할 수 없습니다.")
+    receipt = _get_receipt(db, access.fridge.id, receipt_id, lock=True)
     image_path = receipt.image_path
+    if receipt.status == "confirmed":
+        # 영수증을 찍기 전으로 되돌린다. 외래키 규칙(SET NULL·CASCADE)에 기대지 않고 직접 지워 DB 종류와 상관없이 같게 한다.
+        item_ids = list(db.scalars(select(FoodItem.id).where(FoodItem.receipt_id == receipt.id)))
+        if item_ids:
+            db.execute(delete(ConsumptionLog).where(ConsumptionLog.food_item_id.in_(item_ids)))
+        db.execute(delete(ReceiptItem).where(ReceiptItem.receipt_id == receipt.id))
+        if item_ids:
+            db.execute(delete(FoodItem).where(FoodItem.id.in_(item_ids)))
+    # 영수증 줄이 사라지면 바코드(중복 등록 방지 키)도 함께 사라져, 같은 영수증을 다시 올릴 수 있다.
     db.delete(receipt)
     db.commit()
     _remove_file(image_path)

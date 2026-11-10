@@ -121,3 +121,33 @@ def test_failed_full_import_preserves_catalogue(catalog, monkeypatch):
     with pytest.raises(RuntimeError, match="누락"):
         import_recipes.run(False)
     assert (catalog / "catalogue.json").read_bytes() == before
+
+
+def test_step_text_is_cleaned_and_step_photos_are_kept_in_order():
+    from app.services.recipes import presentable
+    row = normalize({"RCP_SEQ": "7", "RCP_NM": "달걀찜", "RCP_PARTS_DTLS": "달걀 2개, 물 100ml",
+                     "MANUAL01": "1. 달걀을 푼다.a", "MANUAL_IMG01": "http://www.foodsafetykorea.go.kr/uploadimg/cook/20_00007_1.png",
+                     "MANUAL02": "2. 찜기에 10분 찐다.b", "MANUAL03": "",
+                     "ATT_FILE_NO_MAIN": "http://www.foodsafetykorea.go.kr/uploadimg/cook/10_00007_2.png"})
+    assert row["steps"] == ["달걀을 푼다.", "찜기에 10분 찐다."]
+    assert row["step_images"] == ["https://www.foodsafetykorea.go.kr/uploadimg/cook/20_00007_1.png", ""]
+    assert row["image"] == "https://www.foodsafetykorea.go.kr/uploadimg/cook/10_00007_2.png"
+    # 사진 없이 예전에 들어온 자료도 상세에서 같은 모양이 되고, 끝 글자가 정리된다
+    old = {"id": "8", "name": "x", "steps": ["손질한다.c", "익힌다."]}
+    assert presentable(old)["steps"] == ["손질한다.", "익힌다."]
+    assert presentable(old)["step_images"] == ["", ""] and presentable(old)["image"] == ""
+    # 영어 단어로 끝나는 정상 문장은 건드리지 않는다
+    assert presentable({"steps": ["소스는 BBQ"]})["steps"] == ["소스는 BBQ"]
+    # 원문 문장 중간의 줄바꿈은 이어 붙인다
+    assert presentable({"steps": ["매실청 및\n다진 마늘을 넣는다."]})["steps"] == ["매실청 및 다진 마늘을 넣는다."]
+
+
+def test_fewest_missing_first_then_recipes_with_steps(monkeypatch):
+    from app.services import recipes
+    link_short = {**recipe("link-short", "달걀 1개, 양파 1개"), "steps": []}
+    steps_short = recipe("steps-short", "달걀 2개, 양파 2개")
+    steps_long = recipe("steps-long", "달걀 1개, 양파 1개, 당근 1개")
+    monkeypatch.setattr(recipes.random, "shuffle", lambda values: None)
+    ids = [r["id"] for r in rank([steps_long, link_short, steps_short], [SimpleNamespace(name="계란")])]
+    # 부족한 재료가 적은 것이 먼저이고, 같으면 조리 순서가 있는 공공 레시피가 먼저다
+    assert ids == ["steps-short", "link-short", "steps-long"]

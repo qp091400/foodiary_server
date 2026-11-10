@@ -1,18 +1,15 @@
-from datetime import timedelta
-
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from app.database import SessionLocal
-from app.models import FoodItem, FridgeInvite, FridgeMember
-from app.security import INVITE_ALPHABET
-from app.timeutil import utcnow
+from app.models import FoodItem, FridgeMember
 from tests.helpers import auth, default_fridge_id, signup
 
 
-def _invite(client, tokens, fridge_id) -> str:
-    response = client.post(f"/fridges/{fridge_id}/invites", headers=auth(tokens))
-    assert response.status_code == 201, response.text
-    return response.json()["code"]
+def _join(client, owner, guest, fridge_id) -> None:
+    """주인이 공유 링크를 받아 보내고, guest가 그 링크로 들어온다. (자세한 규칙은 test_fridge_sharing.py)"""
+    token = client.post(f"/fridges/{fridge_id}/share-link", headers=auth(owner)).json()["token"]
+    response = client.post(f"/share-links/{token}/join", headers=auth(guest))
+    assert response.status_code == 200, response.text
 
 
 def test_signup_creates_default_fridge(client):
@@ -25,33 +22,16 @@ def test_signup_creates_default_fridge(client):
     assert fridges[0]["owner_id"] == tokens["user"]["id"]
 
 
-def test_join_with_invite_code(client):
+def test_join_with_share_link(client):
     owner = signup(client, "owner")
     guest = signup(client, "guest", nickname="손님")
     fridge_id = default_fridge_id(client, owner)
-
-    code = _invite(client, owner, fridge_id)
-    assert len(code) == 8 and set(code) <= set(INVITE_ALPHABET)
-    assert not set(code) & set("0O1IL")
-
-    # 소문자로 입력해도 된다
-    response = client.post("/fridges/join", headers=auth(guest), json={"code": code.lower()})
-    assert response.status_code == 200
-    assert response.json()["my_role"] == "member"
-    assert response.json()["member_count"] == 2
+    _join(client, owner, guest, fridge_id)
 
     detail = client.get(f"/fridges/{fridge_id}", headers=auth(guest)).json()
+    assert detail["my_role"] == "member" and detail["member_count"] == 2
     assert [(m["nickname"], m["role"]) for m in detail["members"]] == [("owner", "owner"), ("손님", "member")]
     assert len(client.get("/fridges", headers=auth(guest)).json()) == 2  # 자기 냉장고 + 참여한 냉장고
-
-    # 이미 멤버면 409, 없는 코드·만료된 코드는 404
-    assert client.post("/fridges/join", headers=auth(guest), json={"code": code}).status_code == 409
-    assert client.post("/fridges/join", headers=auth(guest), json={"code": "ZZZZ9999"}).status_code == 404
-    third = signup(client, "third")
-    with SessionLocal() as db:
-        db.execute(update(FridgeInvite).values(expires_at=utcnow() - timedelta(seconds=1)))
-        db.commit()
-    assert client.post("/fridges/join", headers=auth(third), json={"code": code}).status_code == 404
 
 
 def test_non_member_gets_404(client):
@@ -63,7 +43,7 @@ def test_non_member_gets_404(client):
     assert client.get(f"/fridges/{fridge_id}", headers=headers).status_code == 404
     assert client.patch(f"/fridges/{fridge_id}", headers=headers, json={"name": "뺏기"}).status_code == 404
     assert client.delete(f"/fridges/{fridge_id}", headers=headers).status_code == 404
-    assert client.post(f"/fridges/{fridge_id}/invites", headers=headers).status_code == 404
+    assert client.post(f"/fridges/{fridge_id}/share-link", headers=headers).status_code == 404
     assert client.get(f"/fridges/{fridge_id}/items", headers=headers).status_code == 404
     assert client.get(f"/fridges/{fridge_id}/receipts", headers=headers).status_code == 404
     assert client.get(f"/fridges/{fridge_id}/stats/monthly", headers=headers).status_code == 404
@@ -80,9 +60,8 @@ def test_leave_and_kick(client):
     guest = signup(client, "guest")
     other = signup(client, "other")
     fridge_id = default_fridge_id(client, owner)
-    code = _invite(client, owner, fridge_id)
     for tokens in (guest, other):
-        assert client.post("/fridges/join", headers=auth(tokens), json={"code": code}).status_code == 200
+        _join(client, owner, tokens, fridge_id)
     owner_id, guest_id, other_id = (tokens["user"]["id"] for tokens in (owner, guest, other))
 
     # owner 본인은 나갈 수 없다
@@ -105,8 +84,7 @@ def test_owner_only_actions_and_cascade_delete(client):
     owner = signup(client, "owner")
     guest = signup(client, "guest")
     fridge_id = default_fridge_id(client, owner)
-    code = _invite(client, owner, fridge_id)
-    client.post("/fridges/join", headers=auth(guest), json={"code": code})
+    _join(client, owner, guest, fridge_id)
 
     assert client.patch(f"/fridges/{fridge_id}", headers=auth(guest), json={"name": "x"}).status_code == 403
     assert client.delete(f"/fridges/{fridge_id}", headers=auth(guest)).status_code == 403
@@ -121,7 +99,6 @@ def test_owner_only_actions_and_cascade_delete(client):
     with SessionLocal() as db:
         assert db.scalars(select(FoodItem).where(FoodItem.fridge_id == fridge_id)).all() == []
         assert db.scalars(select(FridgeMember).where(FridgeMember.fridge_id == fridge_id)).all() == []
-        assert db.scalars(select(FridgeInvite).where(FridgeInvite.fridge_id == fridge_id)).all() == []
 
 
 def test_create_second_fridge(client):

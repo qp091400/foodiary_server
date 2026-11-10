@@ -1,12 +1,20 @@
 """Read-only indexed catalogue; each request opens the current atomic snapshot."""
 import json
+import hashlib
+import secrets
 import sqlite3
 from contextlib import closing
 from pathlib import Path
 
 from app.config import settings
 from app.services.recipe_names import with_display_name
-from app.services.recipes import PARENTS, STAPLES, catalogue, ingredient_key, rank
+from app.services.recipes import PARENTS, STAPLES, catalogue, ingredient_key, presentable, rank
+
+def matches_search(recipe, query):
+    text = ' '.join(str(recipe.get(key) or '') for key in ('name', 'display_name', 'dish_name', 'category', 'method'))
+    text += ' ' + ' '.join(p.get('name', '') for p in recipe.get('ingredients', []))
+    normalize = lambda value: ''.join(value.lower().split()).replace('계란', '달걀').replace('쇠고기', '소고기')
+    return all(normalize(term) in normalize(text) for term in query.split())
 
 
 def store_path():
@@ -17,12 +25,25 @@ def connect():
     return sqlite3.connect(store_path().resolve().as_uri() + '?mode=ro', uri=True)
 
 
-def recommendations(foods):
+def recommendations(foods, offset=0, seed=None, limit=30, query='', profile=None):
+    seed = secrets.randbits(31) if seed is None else seed
+    personalized = profile is not None
+    rank_key = lambda recipe: (-(profile.score(recipe) if profile else 0),)
+    def page(rows, metadata, has_more=None):
+        return dict(metadata, recipes=rows[:limit], seed=seed,
+                    next_offset=offset + limit if (len(rows) > limit if has_more is None else has_more) else None)
     if not store_path().exists():
         data = catalogue()
-        return dict(recipes=rank(data['recipes'], foods), catalogue_count=len(data['recipes']),
-                    source_total=data['source_total'], sample=data['sample'], imported_at=data['imported_at'])
+        candidates = [recipe for recipe in data['recipes'] if not query or matches_search(recipe, query)]
+        rows = rank(candidates, foods, limit=offset + limit + 1, seed=seed, rank_key=rank_key if personalized else None, allow_empty=bool(query))[offset:]
+        return page(rows, dict(catalogue_count=len(data['recipes']), source_total=data['source_total'],
+                              sample=data['sample'], imported_at=data['imported_at']))
     with closing(connect()) as db:
+        # A stable session shuffle makes page boundaries repeatable, including the
+        # chosen variant of each dish. A new selection gets a fresh seed.
+        db.create_function('recipe_order', 1, lambda rid: hashlib.sha256(f'{seed}:{rid}'.encode()).hexdigest(), deterministic=True)
+        db.create_function('recipe_preference', 1, lambda payload: profile.score(json.loads(payload)) if profile else 0, deterministic=True)
+        db.create_function('recipe_matches', 1, lambda payload: int(matches_search(json.loads(payload), query)), deterministic=True)
         metadata = json.loads(db.execute('SELECT value FROM metadata').fetchone()[0])
         required = []
         for food in foods:
@@ -31,7 +52,7 @@ def recommendations(foods):
         rows = []
         available = set().union(*required) if required else set()
         main = available - STAPLES
-        if main:
+        if main or query:
             clauses, params = [], []
             # Older snapshots remain usable until the first screened import is complete.
             columns = {r[1] for r in db.execute('PRAGMA table_info(recipes)')}
@@ -39,30 +60,38 @@ def recommendations(foods):
                 clauses.append('r.recommendable=1')
             if 'combination_count' in columns:
                 clauses.append('r.combination_count>=2')
+            if query:
+                clauses.append('recipe_matches(r.payload)=1')
             for options in required:
                 marks = ','.join('?' for _ in options)
                 clauses.append(f'r.id IN (SELECT recipe_id FROM ingredients WHERE key IN ({marks}))')
                 params.extend(sorted(options))
             marks = ','.join('?' for _ in main)
-            clauses.append(f'r.id IN (SELECT recipe_id FROM ingredients WHERE key IN ({marks}))')
-            params.extend(sorted(main))
+            if main:
+                clauses.append(f'r.id IN (SELECT recipe_id FROM ingredients WHERE key IN ({marks}))')
+                params.extend(sorted(main))
             available_marks = ','.join('?' for _ in available)
             family = 'r.dish_family' if 'dish_family' in columns else 'r.id'
-            query = (f'WITH scored AS (SELECT r.payload, {family} AS family, '
+            # Fewest missing ingredients first; among equals, recipes the app can show step by step
+            # (public sources) come before link-only ones.
+            no_steps = '(r.has_steps=0)' if 'has_steps' in columns else '0'
+            extra = ", recipe_preference(r.payload) AS preference" if personalized else ''
+            ordering = 'missing,no_steps,preference DESC,recipe_order(id),id' if personalized else 'missing,no_steps,recipe_order(id),id'
+            statement = (f'WITH scored AS (SELECT r.id, r.payload, {family} AS family, {no_steps} AS no_steps{extra}, '
                      f'r.ingredient_count - (SELECT COUNT(*) FROM ingredients i '
                      f'WHERE i.recipe_id=r.id AND i.key IN ({available_marks})) AS missing '
                      'FROM recipes r WHERE ' + ' AND '.join(clauses) + '), '
-                     'variants AS (SELECT payload,missing,ROW_NUMBER() OVER '
-                     '(PARTITION BY family ORDER BY missing,RANDOM()) AS choice FROM scored) '
-                     'SELECT payload FROM variants WHERE choice=1 ORDER BY missing,RANDOM() LIMIT 30')
-            rows = [json.loads(row[0]) for row in db.execute(query, [*sorted(available), *params])]
+                     'variants AS (SELECT *,ROW_NUMBER() OVER '
+                     f'(PARTITION BY family ORDER BY {ordering}) AS choice FROM scored) '
+                     f'SELECT payload FROM variants WHERE choice=1 ORDER BY {ordering} LIMIT ? OFFSET ?')
+            rows = [json.loads(row[0]) for row in db.execute(statement, [*sorted(available), *params, limit + 1, offset])]
         # Reuse the same strict all-selected rule and response contract as the legacy catalogue.
-        return dict(metadata, recipes=rank(rows, foods))
+        return page(rank(rows[:limit], foods, limit=limit, seed=seed, rank_key=rank_key if personalized else None, allow_empty=bool(query)), metadata, len(rows) > limit)
 
 
 def detail(recipe_id):
     if not store_path().exists():
-        return with_display_name(next((r for r in catalogue()['recipes'] if r['id'] == recipe_id), None))
+        return presentable(with_display_name(next((r for r in catalogue()['recipes'] if r['id'] == recipe_id), None)))
     with closing(connect()) as db:
         row = db.execute('SELECT payload FROM recipes WHERE id=?', (recipe_id,)).fetchone()
-        return with_display_name(json.loads(row[0])) if row else None
+        return presentable(with_display_name(json.loads(row[0]))) if row else None

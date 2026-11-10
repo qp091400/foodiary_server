@@ -65,10 +65,11 @@ class SecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         retry_after = 0
         if settings.rate_limit_enabled and request.method == "POST":
-            path = request.url.path
-            group = "auth" if path.startswith("/auth/") else "ocr" if _OCR_PATH.fullmatch(path) else None
+            path = request.scope["path"]
+            # 테스트 계정 만들기는 따로 센다: 이 경로를 마구 불러도 진짜 로그인·가입의 한도를 쓰지 않게
+            group = "test" if path == "/auth/test-account" else "auth" if path.startswith("/auth/") else "ocr" if _OCR_PATH.fullmatch(path) else None
             if group:
-                limit = settings.auth_requests_per_minute if group == "auth" else settings.ocr_requests_per_minute
+                limit = {"auth": settings.auth_requests_per_minute, "test": settings.test_account_requests_per_minute}.get(group, settings.ocr_requests_per_minute)
                 retry_after = request_limiter.check((_identity(request), group), limit)
         if retry_after:
             response = JSONResponse(
@@ -79,10 +80,11 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         else:
             response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"  # 검색에 보이는 것은 웹 앱 주소다. API 서버와 /receipt-test는 색인하지 않는다
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
         if settings.app_env == "production":
             response.headers["Strict-Transport-Security"] = "max-age=31536000"
-        if request.url.path.startswith(("/auth/", "/users/", "/fridges", "/receipt-test", "/dev/")):
+        if request.scope["path"].startswith(("/auth/", "/users/", "/fridges", "/receipt-test", "/dev/")):
             response.headers["Cache-Control"] = "no-store"
         return response

@@ -20,8 +20,8 @@ from app.schemas import (
     OverviewPurchaseSummary,
     PublicUser,
 )
-from app.services.friends import fridge_permission
-from app.services.groups import group_fridges, visible_group
+from app.services.fridge_access import fridge_permission
+from app.services.groups import group_fridges, my_group
 from app.timeutil import today
 
 router = APIRouter(prefix="/stats", tags=["구매 기록·통계"])
@@ -54,7 +54,7 @@ def resolve_scope(db: Session, me: User, fridge_ids: list[int], group_ids: list[
             raise HTTPException(status_code=404, detail=FRIDGE_NOT_FOUND)
         chosen[fridge.id] = fridge
     for group_id in dict.fromkeys(group_ids):
-        group = visible_group(db, me.id, group_id)
+        group = my_group(db, me.id, group_id)
         if group is None:
             raise HTTPException(status_code=404, detail=GROUP_NOT_FOUND)
         for fridge in group_fridges(db, group):

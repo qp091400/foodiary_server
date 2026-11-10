@@ -5,6 +5,7 @@ Secret values are read from private files, never passed as command arguments.
 """
 
 import argparse
+import functools
 import getpass
 import json
 import os
@@ -23,6 +24,14 @@ ROOT = Path(__file__).resolve().parents[1]
 SECRET_KEYS = ("DATABASE_URL", "JWT_SECRET", "SMTP_PASSWORD")
 # Optional: when a version is recorded, the password-protected /receipt-test page is deployed.
 TEST_PASSWORD_KEY = "RECEIPT_TEST_PASSWORD"
+# publish verifies the private service before it opens it, so a separate verify step would only repeat that.
+RELEASE_STEPS = ("build", "migrate", "deploy", "publish")
+# The recipe database lives in the build bucket, uploaded once per recipe version instead of with every build's source.
+# The database goes first: manifest.json marks the upload as complete.
+RECIPE_SEED_FILES = ("recipes.sqlite3", "manifest.json")
+IMAGE_TAG = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]{0,127}")
+EMAIL = re.compile(r"[^@\s<>\"]+@[^@\s<>\"]+\.[A-Za-z]{2,}")
+HOSTNAME = re.compile(r"(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}")
 APIS = ("run.googleapis.com", "cloudbuild.googleapis.com", "artifactregistry.googleapis.com",
         "secretmanager.googleapis.com", "iam.googleapis.com", "storage.googleapis.com")
 
@@ -65,9 +74,28 @@ def validate_config(config: dict) -> None:
         url = urlsplit(origin)
         if url.scheme != "https" or not url.hostname or url.username or url.password or url.query or url.fragment or url.path:
             raise ValueError("Frontend origins must be HTTPS origins without paths or credentials")
+    for host in config.get("hosts", []):
+        if not isinstance(host, str) or not HOSTNAME.fullmatch(host):
+            raise ValueError("hosts must be plain lowercase host names such as api.example.com (no https://, path or *)")
+    if config.get("share_link_base"):
+        url = urlsplit(config["share_link_base"])
+        if url.scheme != "https" or not url.hostname or url.username or url.password or url.query or url.fragment or not url.path.endswith("/"):
+            raise ValueError("share_link_base must be an HTTPS address ending in / such as https://foodiary.kr/share/")
     for key in ("smtp_host", "smtp_user", "mail_from"):
         if not config.get(key) or any(c in config[key] for c in "\r\n\x00"):
             raise ValueError(f"Invalid or missing {key}")
+    if config.get("push_web_public_key") and not re.fullmatch(r"[A-Za-z0-9_-]{87}", config["push_web_public_key"]):
+        raise ValueError("push_web_public_key must be the base64url VAPID public key")
+    if "push_expo_enabled" in config and not isinstance(config["push_expo_enabled"], bool):
+        raise ValueError("push_expo_enabled must be a boolean")
+    if "push_immediate_enabled" in config and not isinstance(config["push_immediate_enabled"], bool):
+        raise ValueError("push_immediate_enabled must be a boolean")
+    if config.get("push_immediate_enabled"):
+        if not config.get("push_web_public_key") or not re.fullmatch(r"[a-zA-Z0-9_-]+:[0-9]+", config.get("push_vapid_secret", "")):
+            raise ValueError("Immediate web push needs the existing public key and push_vapid_secret as SECRET:VERSION")
+        subject = urlsplit(config.get("push_vapid_subject", ""))
+        if not (subject.scheme == "https" and subject.hostname or subject.scheme == "mailto" and "@" in subject.path):
+            raise ValueError("push_vapid_subject must be a contact HTTPS or mailto address")
 
 
 def save_private(path: Path, value: str, *, exclusive: bool = False) -> None:
@@ -88,9 +116,12 @@ def service_url(config: dict) -> str:
 
 
 def environment(config: dict) -> dict[str, str]:
+    hosts = [urlsplit(service_url(config)).hostname, 'localhost', '127.0.0.1']
+    hosts += config.get("hosts", [])  # a domain mapped to this service, e.g. api.foodiary.kr. Without it the server answers that name with 400
     return dict(
         APP_ENV="production", DEV_TOOLS="false", AUTO_CREATE_TABLES="false",
-        TRUSTED_HOSTS=f"{urlsplit(service_url(config)).hostname},localhost,127.0.0.1",
+        TRUSTED_HOSTS=",".join(dict.fromkeys(hosts)),
+        SHARE_LINK_BASE=config.get("share_link_base", ""),  # the app page share links and QR codes open. Without it the server cannot make QR codes
         CORS_ORIGINS=",".join(config["origins"]), UPLOAD_DIR="/app/uploads", MAX_UPLOAD_MB="10",
         OCR_ENGINE="paddle", OCR_LANG="korean", OCR_DET_MAX_SIDE="1280", OCR_CPU_THREADS="4", OCR_ENGINES="2",
         OCR_ORIENTATION_MODEL="PP-LCNet_x1_0_doc_ori",
@@ -98,11 +129,26 @@ def environment(config: dict) -> dict[str, str]:
         AUTH_REQUESTS_PER_MINUTE="30", OCR_REQUESTS_PER_MINUTE="30", EMAIL_BACKEND="smtp",
         SMTP_HOST=config["smtp_host"], SMTP_PORT="587", SMTP_USER=config["smtp_user"], MAIL_FROM=config["mail_from"],
         TIMEZONE="Asia/Seoul",
+        PUSH_WEB_PUBLIC_KEY=config.get("push_web_public_key", ""),
+        PUSH_EXPO_ENABLED="true" if config.get("push_expo_enabled", False) else "false",
+        PUSH_IMMEDIATE_ENABLED="true" if config.get("push_immediate_enabled", False) else "false",
+        **({"PUSH_VAPID_SUBJECT": config["push_vapid_subject"]} if config.get("push_immediate_enabled") else {}),
     )
 
 
+def recipe_pin() -> str:
+    """The SHA-256 of the pinned recipe package. It names the folder the database is kept in."""
+    try:
+        pinned = json.loads((ROOT / "recipe-package.json").read_text(encoding="utf-8"))["sha256"]
+    except (OSError, KeyError, ValueError):
+        pinned = None
+    if not isinstance(pinned, str) or not re.fullmatch(r"[a-f0-9]{64}", pinned):
+        raise RuntimeError("recipe-package.json is missing or has no valid sha256")
+    return pinned
+
+
 def check_recipe_seed() -> None:
-    """The Cloud Run image carries the recipe database. Stop before the upload instead of deep inside the Docker build."""
+    """The Cloud Run image carries the recipe database. Stop before uploading it instead of deep inside the Docker build."""
     seed = ROOT / "recipe_data" / "image-seed"
     try:
         pinned = json.loads((ROOT / "recipe-package.json").read_text(encoding="utf-8"))["sha256"]
@@ -129,7 +175,7 @@ class Deployment:
                                 cwd=ROOT, text=True, capture_output=capture or missing_ok)
         if result.returncode:
             error = result.stderr or ""
-            if missing_ok and ("NOT_FOUND" in error or "does not exist" in error or "not found" in error):
+            if missing_ok and any(text in error for text in ("NOT_FOUND", "does not exist", "not found", "matched no objects", "No URLs matched")):
                 return None
             # None of the arguments contains a secret value.
             if error:
@@ -229,7 +275,10 @@ class Deployment:
         versions = self.versions()
         if any(not str(versions.get(key, "")).isdigit() for key in keys):
             raise ValueError("Upload secrets before deploying")
-        return ",".join(f"{key}={self.secret_name(key)}:{versions[key]}" for key in keys)
+        bindings = [f"{key}={self.secret_name(key)}:{versions[key]}" for key in keys]
+        if "JWT_SECRET" in keys and self.config.get("push_immediate_enabled"):
+            bindings.append(f"PUSH_VAPID_PRIVATE_KEY={self.config['push_vapid_secret']}")
+        return ",".join(bindings)
 
     def set_test_password(self, *, disable: bool = False) -> None:
         versions = self.versions()
@@ -257,12 +306,47 @@ class Deployment:
         save_private(self.folder / "versions.json", json.dumps(versions))
         print("Stored the test password as a new secret version without printing it. Run deploy, verify and publish.")
 
-    def build(self) -> None:
+    def recipe_seed_location(self) -> str:
+        return f"gs://{self.build_bucket}/recipe-seed/{recipe_pin()}"
+
+    def recipe_seed_uploaded(self, location: str) -> bool:
+        try:
+            listing = self.gcloud("storage", "ls", f"{location}/*", capture=True, missing_ok=True)
+        except RuntimeError:
+            return False  # Cannot tell. Uploading again reports the real problem if there is one.
+        return listing is not None and all(f"{location}/{name}" in listing.split() for name in RECIPE_SEED_FILES)
+
+    def ensure_recipe_seed(self) -> str:
+        """Keep the recipe database in the build bucket so each build uploads only the small source. Returns its gs:// folder."""
+        location = self.recipe_seed_location()
+        if self.recipe_seed_uploaded(location):
+            print(f"Recipe data is already in {location}. Not uploading it again.", flush=True)
+            return location
         check_recipe_seed()
+        print(f"Uploading the recipe data to {location} (once per recipe version)", flush=True)
+        for name in RECIPE_SEED_FILES:
+            self.gcloud("storage", "cp", str(ROOT / "recipe_data" / "image-seed" / name), f"{location}/{name}")
+        return location
+
+    def ensure_recommendation_seed(self) -> str:
+        """Stage the data-repository Release once per pinned model package."""
+        if not (ROOT / 'recommendation-package.json').exists():return ''
+        from scripts.prepare_recommendation_model import config,prepare,FILES
+        pin=config(ROOT)
+        location=f"gs://{self.build_bucket}/recommendation-seed/{pin['sha256']}"
+        listing=self.gcloud('storage','ls',f'{location}/*',capture=True,missing_ok=True)
+        if listing is not None and all(f'{location}/{name}' in listing.split() for name in FILES):return location
+        seed=prepare(ROOT)
+        for name in FILES:self.gcloud('storage','cp',str(seed/name),f'{location}/{name}')
+        return location
+
+    def build(self) -> None:
+        seed = self.ensure_recipe_seed()
+        recommendation_seed = self.ensure_recommendation_seed()
         tag = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         image = f"{self.region}-docker.pkg.dev/{self.project}/{self.config['repository']}/{self.service}:{tag}"
         self.gcloud("builds", "submit", str(ROOT), f"--config={ROOT / 'deploy/cloudbuild.cloudrun.yaml'}",
-                    f"--ignore-file={ROOT / '.gcloudignore'}", f"--substitutions=_IMAGE={image}",
+                    f"--ignore-file={ROOT / '.gcloudignore'}", f"--substitutions=_IMAGE={image},_RECIPE_SEED={seed},_RECOMMENDATION_SEED={recommendation_seed}",
                     f"--region={self.region}", "--machine-type=e2-standard-2",
                     f"--gcs-source-staging-dir=gs://{self.build_bucket}/source",
                     f"--service-account=projects/{self.project}/serviceAccounts/{self.account('build')}")
@@ -306,6 +390,8 @@ class Deployment:
                     f"--add-volume=name=receipts,type=cloud-storage,bucket={self.config['bucket']},mount-options=uid=10001;gid=10001;file-mode=0600;dir-mode=0700",
                     "--add-volume-mount=volume=receipts,mount-path=/app/uploads",
                     "--startup-probe=tcpSocket.port=8080,periodSeconds=5,timeoutSeconds=5,failureThreshold=48")
+        if self.config.get("push_web_public_key") or self.config.get("push_expo_enabled"):
+            self.gcloud("run", "jobs", "update", f"{self.service}-push", f"--region={self.region}", f"--image={self.image()}")
 
     def verify(self, *, private: bool = True) -> None:
         token = self.gcloud("auth", "print-identity-token", capture=True) if private else None
@@ -341,6 +427,56 @@ class Deployment:
         self.verify(private=False)
         print(service_url(self.config))
 
+    def previous_revision(self) -> str | None:
+        """The revision serving traffic now, noted before anything changes so a failed release can go back to it."""
+        try:
+            return self.gcloud("run", "services", "describe", self.service, f"--region={self.region}",
+                               "--format=value(status.latestReadyRevisionName)", capture=True, missing_ok=True) or None
+        except RuntimeError:
+            return None
+
+    def use_image(self, tag: str) -> None:
+        """Deploy an image Cloud Build already made (the GitHub trigger tags it with the 7-character commit id and latest)."""
+        if not IMAGE_TAG.fullmatch(tag):
+            raise ValueError("An image tag may only contain letters, digits, dots, dashes and underscores")
+        repository = f"{self.region}-docker.pkg.dev/{self.project}/{self.config['repository']}/{self.service}"
+        digest = self.gcloud("artifacts", "docker", "images", "describe", f"{repository}:{tag}",
+                             "--format=value(image_summary.digest)", capture=True, missing_ok=True)
+        if not re.fullmatch(r"sha256:[a-f0-9]{64}", digest or ""):
+            raise RuntimeError(f"No image tagged {tag} in {repository}. Wait until the GitHub build has finished "
+                               "(Cloud Build > History) and check the commit id.")
+        save_private(self.folder / "image.txt", f"{repository}@{digest}")
+        print(f"Using {repository}:{tag} ({digest})", flush=True)
+
+    def release(self, image: str | None = None) -> None:
+        """Ship in one go: build, migrate, deploy, verify and publish. Stops at the first failure.
+
+        With image, use the image the GitHub trigger already built for that tag instead of building here."""
+        steps = RELEASE_STEPS if image is None else ("use_image", *RELEASE_STEPS[1:])
+        previous = self.previous_revision()
+        print("The service is private from deploy until publish finishes."
+              + (f" Revision serving now: {previous}" if previous else ""), flush=True)
+        for number, step in enumerate(steps, 1):
+            print(f"\n[{number}/{len(steps)}] {step}", flush=True)
+            action = functools.partial(self.use_image, image) if step == "use_image" else getattr(self, step)
+            try:
+                action()
+            except Exception:
+                print(self.failure_hint(step, previous), file=sys.stderr)
+                raise
+
+    def failure_hint(self, step: str, previous: str | None) -> str:
+        if step in ("build", "use_image", "migrate"):
+            return f"Stopped at {step}. The running service was not changed. Fix the error and run release again."
+        hint = (f"Stopped at {step}. The service may be private now. Fix the error, then run deploy (if it did not finish) "
+                "and publish, one at a time, so the image is not built again.")
+        if previous:
+            hint += (f"\nTo go back to the previous revision:\n  gcloud run services update-traffic {self.service} "
+                     f"--region={self.region} --to-revisions={previous}=100\nIf the service is private, open it again:\n"
+                     f"  gcloud run services add-iam-policy-binding {self.service} --region={self.region} "
+                     "--member=allUsers --role=roles/run.invoker")
+        return hint
+
 
 def initialize(args, config_path: Path) -> None:
     if config_path.exists() or any((config_path.parent / "secrets" / key).exists() for key in SECRET_KEYS):
@@ -363,6 +499,53 @@ def initialize(args, config_path: Path) -> None:
     print(f"Prepared private configuration at {config_path}. No cloud resources were created.")
 
 
+def add_origins(config_path: Path, origins: list[str]) -> list[str]:
+    """Allow more HTTPS frontend origins (CORS) without touching anything else in the private config."""
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    merged = list(dict.fromkeys([*config.get("origins", []), *(origin.strip().rstrip("/").lower() for origin in origins)]))
+    validate_config({**config, "origins": merged})
+    config["origins"] = merged
+    save_private(config_path, json.dumps(config, indent=2) + "\n")
+    return merged
+
+
+def add_hosts(config_path: Path, hosts: list[str]) -> list[str]:
+    """Let the service answer for more host names (a domain mapped to it) without touching the rest of the private config."""
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    merged = list(dict.fromkeys([*config.get("hosts", []), *(host.strip().lower().rstrip(".") for host in hosts)]))
+    validate_config({**config, "hosts": merged})
+    config["hosts"] = merged
+    save_private(config_path, json.dumps(config, indent=2) + "\n")
+    return merged
+
+
+def set_share_link_base(config_path: Path, address: str) -> str:
+    """Set the web address fridge share links and QR codes open (the app's /share/<token> page) without touching the rest of the private config."""
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    base = address.strip()
+    base = base if base.endswith("/") else base + "/"
+    validate_config({**config, "share_link_base": base})
+    config["share_link_base"] = base
+    save_private(config_path, json.dumps(config, indent=2) + "\n")
+    return base
+
+
+def set_mail_account(config_path: Path, address: str, password: str) -> str:
+    """Send verification mail from another account: the SMTP login and the From address change together and its app password replaces the old one."""
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    address = address.strip().lower()
+    password = "".join(password.split())  # Gmail shows app passwords in groups of four letters
+    if not EMAIL.fullmatch(address):
+        raise ValueError("Use a plain email address such as foodiarynoreply@gmail.com")
+    if not password or (config.get("smtp_host") == "smtp.gmail.com" and not re.fullmatch(r"[A-Za-z]{16}", password)):
+        raise ValueError("A Gmail app password is 16 letters (spaces are ignored). Create one under Google Account > Security > 2-Step Verification > App passwords")
+    updated = {**config, "smtp_user": address, "mail_from": address}
+    validate_config(updated)
+    save_private(config_path.parent / "secrets" / "SMTP_PASSWORD", password)
+    save_private(config_path, json.dumps(updated, indent=2) + "\n")
+    return address
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=ROOT / ".cloudrun" / "config.json")
@@ -375,6 +558,17 @@ def main() -> None:
     init.add_argument("--origin", action="append", help="Frontend HTTPS origin; can be specified multiple times")
     for action in ("plan", "setup", "secrets", "build", "migrate", "deploy", "verify", "publish"):
         commands.add_parser(action)
+    add_origin = commands.add_parser("add-origin", help="Allow another HTTPS frontend origin (CORS), e.g. https://foodiary.kr. Run deploy or release afterwards")
+    add_origin.add_argument("origins", nargs="+", help="HTTPS origins without a path")
+    add_host = commands.add_parser("add-host", help="Let the service answer for another host name, e.g. api.foodiary.kr (a domain mapped to it). Run deploy and publish afterwards")
+    add_host.add_argument("hosts", nargs="+", help="host names only: no https:// and no path")
+    share_base = commands.add_parser("set-share-link-base", help="Set the web address fridge share links and QR codes open, e.g. https://foodiary.kr/share/. Run deploy and publish afterwards")
+    share_base.add_argument("address", help="HTTPS address of the app's /share/ page")
+    mail = commands.add_parser("set-mail-account", help="Send verification mail from another Gmail account; asks for its app password. Run secrets, deploy and publish afterwards")
+    mail.add_argument("address", help="the account's email address, e.g. foodiarynoreply@gmail.com")
+    release = commands.add_parser("release", help="build, migrate, deploy and publish in one go (private from deploy until publish ends)")
+    release.add_argument("--image", metavar="TAG", help="deploy the image the GitHub trigger already built for this tag "
+                                                        "(the 7-character commit id, or latest) instead of building here")
     test_password = commands.add_parser("test-password", help="Set (or --disable) the /receipt-test page password")
     test_password.add_argument("--disable", action="store_true", help="Turn the test page off at the next deploy")
     args = parser.parse_args()
@@ -382,9 +576,27 @@ def main() -> None:
         if args.action == "init":
             initialize(args, args.config)
             return
+        if args.action == "add-origin":
+            origins = add_origins(args.config, args.origins)
+            print("Allowed frontend origins: " + ", ".join(origins) + "\nRun deploy or release to apply. No cloud resources were changed.")
+            return
+        if args.action == "add-host":
+            hosts = add_hosts(args.config, args.hosts)
+            print("The service answers for these extra host names: " + ", ".join(hosts) + "\nRun deploy and publish to apply. No cloud resources were changed.")
+            return
+        if args.action == "set-mail-account":
+            address = set_mail_account(args.config, args.address, getpass.getpass("App password of that account (hidden, 16 letters): "))
+            print(f"Verification mail will be sent from {address}.\nRun secrets, deploy and publish to apply. No cloud resources were changed.")
+            return
+        if args.action == "set-share-link-base":
+            base = set_share_link_base(args.config, args.address)
+            print(f"Share links and QR codes will open {base}<token>\nRun deploy and publish to apply. No cloud resources were changed.")
+            return
         deployment = Deployment(json.loads(args.config.read_text(encoding="utf-8")), args.config.parent)
         if args.action == "plan":
             print(json.dumps(deployment.plan(), indent=2, ensure_ascii=False))
+        elif args.action == "release":
+            deployment.release(args.image)
         elif args.action == "test-password":
             deployment.set_test_password(disable=args.disable)
         else:

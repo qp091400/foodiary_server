@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from fastapi.responses import FileResponse
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -13,22 +14,29 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.deps import get_current_user
-from app.models import Comment, Post, PostLike, PostPhoto, Report, User
+from app.models import Comment, Post, PostLike, PostPhoto, RecipeReview, User
 from app.routers.receipts import load_image, read_upload
 from app.schemas import (
     CommentCreate,
     CommentList,
     CommentOut,
     LikeOut,
+    LinkPreviewOut,
     MessageResponse,
     PostCreate,
+    PostBoard,
+    PostUpdate,
+    PostReviewOut,
     PostList,
     PostOut,
     PostPhotoOut,
     PublicUser,
     ReportCreate,
 )
-from app.services.community import delete_comment, delete_post, remove_photo_file
+from app.services.community import delete_comment, delete_post, file_report, remove_photo_file
+from app.services.link_preview import build_previews
+from app.services.post_search import find_posts
+from app.services.suspension import ensure_can_write
 from app.timeutil import utcnow
 
 router = APIRouter(prefix="/posts", tags=["커뮤니티"])
@@ -44,6 +52,29 @@ def _photo_url(post_id: int, photo_id: int) -> str:
     return f"/posts/{post_id}/photos/{photo_id}"
 
 
+def _stored_previews(post: Post) -> list[dict]:
+    """글에 저장된 미리보기들. 목록 칸이 생기기 전에 쓴 글(None)은 예전 칸의 하나짜리 미리보기를 쓴다."""
+    if post.link_previews is not None:
+        return [item for item in post.link_previews if isinstance(item, dict)] if isinstance(post.link_previews, list) else []
+    return [post.link_preview] if isinstance(post.link_preview, dict) else []
+
+
+def _previews_out(post: Post) -> list[LinkPreviewOut]:
+    """저장된 미리보기를 응답 모양으로. 모양이 이상한 것(옛 형식 등)은 빼고 나머지는 보여 준다."""
+    shown = []
+    for data in _stored_previews(post):
+        try:
+            shown.append(LinkPreviewOut.model_validate(data))
+        except ValidationError:
+            continue
+    return shown
+
+
+def _save_previews(post: Post, previews: list[dict]) -> None:
+    post.link_previews = previews
+    post.link_preview = previews[0] if previews else None  # 옛 앱·옛 서버가 읽는 칸
+
+
 def _decorate(db: Session, rows: list[tuple[Post, User]], me: User) -> list[PostOut]:
     """글마다 좋아요 수, 내가 눌렀는지, 댓글 수, 사진을 한꺼번에 모아서 붙인다 (글마다 따로 묻지 않는다)."""
     ids = [post.id for post, _ in rows]
@@ -51,6 +82,8 @@ def _decorate(db: Session, rows: list[tuple[Post, User]], me: User) -> list[Post
     liked: set[int] = set()
     comments: dict[int, int] = {}
     photos: dict[int, list[PostPhotoOut]] = {}
+    review_ids = [post.review_id for post, _ in rows if post.review_id is not None]
+    reviews = {review.id: review for review in db.scalars(select(RecipeReview).where(RecipeReview.id.in_(review_ids))).all()} if review_ids else {}
     if ids:
         likes = dict(db.execute(select(PostLike.post_id, func.count()).where(PostLike.post_id.in_(ids)).group_by(PostLike.post_id)).all())
         liked = set(db.scalars(select(PostLike.post_id).where(PostLike.post_id.in_(ids), PostLike.user_id == me.id)).all())
@@ -61,12 +94,20 @@ def _decorate(db: Session, rows: list[tuple[Post, User]], me: User) -> list[Post
         )
         for photo in db.scalars(select(PostPhoto).where(PostPhoto.post_id.in_(ids)).order_by(PostPhoto.id)).all():
             photos.setdefault(photo.post_id, []).append(PostPhotoOut(id=photo.id, url=_photo_url(photo.post_id, photo.id)))
+    previews = {post.id: _previews_out(post) for post, _ in rows}
     return [
         PostOut(
             id=post.id,
             author=PublicUser.of(author),
             title=post.title,
             body=post.body,
+            board=post.board,
+            link_previews=previews[post.id],
+            link_preview=previews[post.id][0] if previews[post.id] else None,
+            review=PostReviewOut(id=review.id, recipe_id=review.recipe_id, recipe_name=review.recipe_name, rating=review.rating)
+            if (review := reviews.get(post.review_id)) else None,
+            updated_at=post.updated_at,
+            can_edit=post.author_id == me.id and post.review_id is None,
             created_at=post.created_at,
             mine=post.author_id == me.id,
             can_delete=post.author_id == me.id or me.is_admin,
@@ -109,35 +150,61 @@ def _too_many(what: str, limit: int) -> HTTPException:
 
 @router.post("", response_model=PostOut, status_code=201, summary="글쓰기 (사진은 글을 쓴 뒤 POST /posts/{id}/photos로 붙인다)")
 def create_post(payload: PostCreate, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    ensure_can_write(db, me)
     recent = db.scalar(
-        select(func.count()).select_from(Post).where(Post.author_id == me.id, Post.created_at >= utcnow() - timedelta(hours=1))
+        select(func.count()).select_from(Post).where(Post.author_id == me.id, Post.review_id.is_(None), Post.created_at >= utcnow() - timedelta(hours=1))
     )
     if recent >= POSTS_PER_HOUR:
         raise _too_many("글", POSTS_PER_HOUR)
-    post = Post(author_id=me.id, title=payload.title, body=payload.body)
+    post = Post(author_id=me.id, title=payload.title, body=payload.body, board=payload.board)
+    # 본문과 제목에 나온 링크마다 미리보기를 만든다. 못 만들어도 글은 올라간다
+    _save_previews(post, build_previews(payload.body, payload.title))
     db.add(post)
     db.commit()
     return _decorate(db, [(post, me)], me)[0]
 
 
-@router.get("", response_model=PostList, summary="글 목록 (최신순). 다음 쪽은 before_id에 next_before_id를 넣어 부른다")
+@router.get(
+    "",
+    response_model=PostList,
+    summary="글 목록·검색. 검색어가 없으면 최신순, 있으면 관련도순(키워드+임베딩). 다음 쪽도 같은 q·board를 보낸다",
+)
 def list_posts(
-    before_id: int | None = Query(None, ge=1, description="이 번호보다 오래된 글부터"),
+    q: str = Query("", max_length=100, description="검색어. 제목·본문과 키워드·의미가 맞는 글을 관련도순으로 돌려준다. 빈 값·공백이면 전체 목록(최신순)"),
+    board: PostBoard | None = Query(None, description="general: 자유게시판, recipe: 레시피게시판. 생략하면 전체"),
+    before_id: int | None = Query(
+        None, ge=1, description="다음 쪽 표시. 응답의 next_before_id를 그대로 보낸다 (검색어가 없으면 이 번호보다 오래된 글부터, 있으면 이미 받은 결과 수 다음부터)"
+    ),
     limit: int = Query(20, ge=1, le=50),
     me: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    query = select(Post, User).join(User, User.id == Post.author_id).where(Post.deleted_at.is_(None))
-    if before_id is not None:
-        query = query.where(Post.id < before_id)
-    rows = db.execute(query.order_by(Post.id.desc()).limit(limit + 1)).all()
-    page = rows[:limit]
-    return PostList(posts=_decorate(db, page, me), next_before_id=page[-1][0].id if len(rows) > limit else None)
+    page, next_cursor = find_posts(db, query=q, board=board, before_id=before_id, limit=limit)
+    return PostList(posts=_decorate(db, page, me), next_before_id=next_cursor)
 
 
 @router.get("/{post_id}", response_model=PostOut, summary="글 하나 보기")
 def get_post(post_id: int, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return _decorate(db, [_live_post(db, post_id)], me)[0]
+
+
+@router.patch("/{post_id}", response_model=PostOut, summary="내 글의 제목·본문·게시판 수정")
+def update_post(post_id: int, payload: PostUpdate, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    post, author = _live_post(db, post_id)
+    if post.author_id != me.id:
+        raise HTTPException(status_code=403, detail="내가 쓴 글만 수정할 수 있어요.")
+    if post.review_id is not None:
+        raise HTTPException(status_code=409, detail="자동 등록된 후기는 레시피의 내 후기에서 수정해 주세요.")
+    ensure_can_write(db, me)
+    changes = payload.model_dump(exclude_unset=True)
+    if any(getattr(post, key) != value for key, value in changes.items()):
+        for key, value in changes.items():
+            setattr(post, key, value)
+        # 그대로인 링크는 있던 미리보기를 쓰고(다시 접속하지 않는다), 새 링크만 만들고, 없어진 링크의 것은 뺀다
+        _save_previews(post, build_previews(post.body, post.title, reuse=_stored_previews(post)))
+        post.updated_at = utcnow()
+        db.commit()
+    return _decorate(db, [(post, author)], me)[0]
 
 
 @router.delete("/{post_id}", status_code=204, summary="글 지우기 (쓴 사람 또는 관리자). 붙인 사진도 함께 지워진다")
@@ -162,6 +229,7 @@ def add_photos(
     post, author = _live_post(db, post_id)
     if post.author_id != me.id:
         raise HTTPException(status_code=403, detail="내가 쓴 글에만 사진을 붙일 수 있어요.")
+    ensure_can_write(db, me)
     attached = db.scalar(select(func.count()).select_from(PostPhoto).where(PostPhoto.post_id == post.id))
     if attached + len(files) > MAX_PHOTOS_PER_POST:
         raise HTTPException(status_code=400, detail=f"사진은 글 하나에 {MAX_PHOTOS_PER_POST}장까지 붙일 수 있어요.")
@@ -262,7 +330,8 @@ def _comment_out(comment: Comment, author: User, me: User) -> CommentOut:
 
 @router.post("/{post_id}/comments", response_model=CommentOut, status_code=201, summary="댓글 쓰기")
 def create_comment(post_id: int, payload: CommentCreate, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    _live_post(db, post_id)
+    post, _ = _live_post(db, post_id)
+    ensure_can_write(db, me)
     recent = db.scalar(
         select(func.count()).select_from(Comment).where(Comment.author_id == me.id, Comment.created_at >= utcnow() - timedelta(hours=1))
     )
@@ -271,6 +340,9 @@ def create_comment(post_id: int, payload: CommentCreate, me: User = Depends(get_
     comment = Comment(post_id=post_id, author_id=me.id, body=payload.body)
     db.add(comment)
     db.commit()
+    if post.author_id != me.id:
+        from app.services.push import dispatch_for_user
+        dispatch_for_user(post.author_id)
     return _comment_out(comment, me, me)
 
 
@@ -306,25 +378,13 @@ def remove_comment(post_id: int, comment_id: int, me: User = Depends(get_current
 # ── 신고 ─────────────────────────────────────────────────────────────────
 
 
-def _report(db: Session, me: User, target_type: str, target_id: int, target_author_id: int, payload: ReportCreate) -> MessageResponse:
-    if target_author_id == me.id:
-        raise HTTPException(status_code=400, detail="내가 쓴 것은 신고할 수 없어요.")
-    db.add(Report(reporter_id=me.id, target_type=target_type, target_id=target_id, reason=payload.reason, detail=payload.detail))
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="이미 신고했어요.") from None
-    return MessageResponse(message="신고했어요. 관리자가 확인할게요.")
-
-
 @router.post("/{post_id}/report", response_model=MessageResponse, status_code=201, summary="글 신고하기")
 def report_post(post_id: int, payload: ReportCreate, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
     post, _ = _live_post(db, post_id)
-    return _report(db, me, "post", post.id, post.author_id, payload)
+    return file_report(db, me, "post", post.id, post.author_id, payload)
 
 
 @router.post("/{post_id}/comments/{comment_id}/report", response_model=MessageResponse, status_code=201, summary="댓글 신고하기")
 def report_comment(post_id: int, comment_id: int, payload: ReportCreate, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
     comment, _ = _live_comment(db, post_id, comment_id)
-    return _report(db, me, "comment", comment.id, comment.author_id, payload)
+    return file_report(db, me, "comment", comment.id, comment.author_id, payload)

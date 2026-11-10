@@ -1,0 +1,10 @@
+{
+  "source": "actual Metro-transformed ApiClient and virtual .env module",
+  "app_url": "http://localhost:8082",
+  "api_url": "http://127.0.0.1:8001",
+  "environment": "development",
+  "login_success": true,
+  "username": "localdemo",
+  "fridge_loaded": true,
+  "model_version": "16498301425cbef78805dc3645469390faee97e6ef9ce495a42dfa448c179a0a"
+}

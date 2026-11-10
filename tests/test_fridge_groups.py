@@ -9,7 +9,7 @@ from tests.helpers import auth, default_fridge_id, signup
 
 @pytest.fixture
 def world(client):
-    """alice: 집(기본), 주방, 별장 냉장고 셋. bob은 alice의 친구(권한 없음)이고 자기 냉장고가 있다. alice는 bob의 냉장고를 볼 수 있다. dave는 모르는 사람."""
+    """alice: 집(기본), 주방, 별장 냉장고 셋. bob은 자기 냉장고를 모두에게 공개해서 alice가 볼 수 있다. dave는 모르는 사람."""
     people = {}
     for username, name in (("alice", "alice"), ("bob_kim", "bob"), ("dave", "dave")):
         tokens = signup(client, username, nickname=name)
@@ -17,11 +17,7 @@ def world(client):
     alice, bob = people["alice"], people["bob"]
     alice["kitchen"] = client.post("/fridges", headers=alice["headers"], json={"name": "주방"}).json()["id"]
     alice["cabin"] = client.post("/fridges", headers=alice["headers"], json={"name": "별장"}).json()["id"]
-    link = client.post(f"/fridges/{alice['fridge']}/share-links", headers=alice["headers"], json={}).json()["token"]
-    client.post(f"/share-links/{link}/join", headers=bob["headers"])
-    client.delete(f"/fridges/{alice['fridge']}/access/{bob['id']}", headers=alice["headers"])  # bob은 친구만 남는다
-    bob_link = client.post(f"/fridges/{bob['fridge']}/share-links", headers=bob["headers"], json={}).json()["token"]
-    client.post(f"/share-links/{bob_link}/join", headers=alice["headers"])  # alice는 bob의 냉장고를 볼 수 있다
+    assert client.patch(f"/fridges/{bob['fridge']}", headers=bob["headers"], json={"visibility": "public"}).status_code == 200
     return people
 
 
@@ -52,8 +48,7 @@ def test_create_rename_list_and_delete(client, world):
     alice = world["alice"]
     group_id = make_group(client, alice, "  우리집  ")
     group = get_group(client, alice, group_id)
-    assert (group["name"], group["mine"], group["my_share"], group["fridges"], group["shares"]) == ("우리집", True, None, [], [])
-    assert group["owner"]["id"] == alice["id"]
+    assert (group["name"], group["fridges"]) == ("우리집", [])
     renamed = client.patch(f"/fridge-groups/{group_id}", headers=alice["headers"], json={"name": "본가"})
     assert renamed.status_code == 200 and renamed.json()["name"] == "본가"
     assert [g["name"] for g in client.get("/fridge-groups", headers=alice["headers"]).json()] == ["본가"]
@@ -137,7 +132,7 @@ def test_fridges_i_can_no_longer_see_drop_out_of_the_view(client, world):
     put(client, alice, group_id, alice["fridge"])
     put(client, alice, group_id, bob["fridge"])
     assert fridge_ids(get_group(client, alice, group_id)) == sorted([alice["fridge"], bob["fridge"]])
-    client.patch(f"/fridges/{bob['fridge']}/access/{alice['id']}", headers=bob["headers"], json={"permission": "none"})
+    client.patch(f"/fridges/{bob['fridge']}", headers=bob["headers"], json={"visibility": "private"})
     assert fridge_ids(get_group(client, alice, group_id)) == [alice["fridge"]]  # 못 보게 되면 묶음 안에서도 안 보인다
 
 

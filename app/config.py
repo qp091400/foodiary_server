@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     ocr_orientation_model: str = "PP-LCNet_x1_0_doc_ori"
     ocr_models_dir: str = ""  # Cloud Run: 검증한 모델을 이미지에 포함한 디렉터리
     ocr_cpu_threads: int = Field(2, ge=1, le=16)
-    # 공유 링크의 앞부분. 비어 있으면 서버는 토큰만 돌려주고 링크는 앱이 만든다. 예: https://example.com/join/
+    # 공유 링크의 앞부분(끝에 토큰을 붙인다). 비어 있으면 서버는 토큰만 돌려주고 링크는 앱이 만들며, QR은 만들 수 없다. 예: https://foodiary.kr/share/
     share_link_base: str = ""
     ocr_engines: int = Field(1, ge=1, le=8)  # 사진을 동시에 읽는 OCR 엔진 수. 엔진마다 메모리를 약 2GB 쓴다
     # 인텔 CPU 가속(oneDNN). 실제 영수증 6장에서 결과는 줄 단위로 같고 한 장 18~29초 → 1.4~2.8초, 최대 메모리 6.9GB → 1.9GB
@@ -53,6 +53,12 @@ class Settings(BaseSettings):
     rate_limit_scope: Literal["ip", "global"] = "ip"
     auth_requests_per_minute: int = Field(30, ge=1, le=1000)
     ocr_requests_per_minute: int = Field(10, ge=1, le=100)
+    # 테스트용 계정 만들기(POST /auth/test-account): 이메일 인증 없이 바로 쓸 계정을 만든다. 누구나 부를 수 있어서 기본은 꺼 둔다.
+    # 운영에서는 시험이 필요한 동안만 TEST_ACCOUNTS_ENABLED=true로 켠다. 하루(24시간) 전체 한도와 분당 한도는 따로 둔다
+    # (분당 한도를 로그인과 나눠야, 이 경로를 마구 불러도 진짜 로그인·가입이 막히지 않는다).
+    test_accounts_enabled: bool = False
+    test_accounts_per_day: int = Field(50, ge=1, le=1000)
+    test_account_requests_per_minute: int = Field(5, ge=1, le=100)
     # OCR는 한 번에 한 장이라 여러 사람이 동시에 올리면 줄을 선다. 줄에서 기다리는 한도와 기다리는 사진 수의 한도
     ocr_queue_wait_seconds: int = Field(100, ge=0, le=600)  # TODO: balance
     ocr_queue_max: int = Field(40, ge=0, le=200)  # TODO: balance
@@ -61,6 +67,8 @@ class Settings(BaseSettings):
 
     foodsafety_api_key: str = ""  # 비우면 바코드 조회 비활성
     recipe_data_dir: str = "recipe_data"  # 별도 볼륨; 원본/색인은 Git에 넣지 않는다
+    recommendation_model_dir: str = ""  # offline installed immutable bundle; empty disables AI
+    recommendation_weights: str = "0.6,0.3,0.1"
     mafra_api_key: str = ""
     mafra_api_base: str = "http://211.237.50.150:7080/openapi"
     cors_origins: str = "*"
@@ -69,6 +77,24 @@ class Settings(BaseSettings):
     dev_tools: bool = False  # true면 로그인 없는 테스트 페이지(/dev/receipt-test)를 연다. 운영에서는 끈다
     # 설정하면 운영에서도 /receipt-test 페이지가 열린다. 인식 요청마다 이 비밀번호가 있어야 한다. 비우면 404
     receipt_test_password: str = ""
+    push_web_public_key: str = ""
+    push_vapid_private_key: str = ""  # Secret Manager; never expose to clients
+    push_vapid_subject: str = ""
+    push_expo_access_token: str = ""
+    push_expo_enabled: bool = False
+    push_immediate_enabled: bool = False
+    # 게시판 검색의 의미 점수(임베딩). local: 서버 안에서 계산(키·네트워크 불필요, docs/post-search.md)
+    # none: 끈다 → 키워드 점수만으로 검색한다. 문제가 생기면 이 값만 바꿔 다시 시작하면 된다
+    embedding_provider: Literal["local", "none"] = "local"
+    # 커뮤니티 글의 링크 미리보기(제목·대표 이미지). 글을 쓸 때 서버가 그 주소에 한 번 접속한다(app/services/link_preview.py).
+    # false면 미리보기를 만들지 않는다 (이미 만든 것은 그대로 보인다)
+    link_preview_enabled: bool = True
+    # 영수증 상품 이름 보정. 사용자가 초안의 이름을 고친 기록(name_corrections)을 모아 다음 영수증에 적용한다(app/services/learned_names.py).
+    # 고친 본인에게는 바로 적용하고, 다른 사람에게는 서로 다른 사용자가 이 수 이상 같게 고쳤을 때만 적용한다.
+    name_learning_enabled: bool = True
+    name_learning_min_users: int = 2
+    # 줄의 OCR 신뢰도가 이 값보다 낮으면 이름 보정을 넓게 하고, 아는 낱말이 하나도 없으면 "이름을 확인해 주세요"로 알린다
+    name_unsure_below: float = 0.85
 
     @property
     def cors_origin_list(self) -> list[str]:
