@@ -20,6 +20,9 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
+# `python3 scripts/cloudrun.py` puts scripts/ (not the repository) on sys.path; build imports scripts.* modules.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 ROOT = Path(__file__).resolve().parents[1]
 SECRET_KEYS = ("DATABASE_URL", "JWT_SECRET", "SMTP_PASSWORD")
 # Optional: when a version is recorded, the password-protected /receipt-test page is deployed.
