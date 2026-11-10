@@ -115,6 +115,23 @@ def service_url(config: dict) -> str:
     return f"https://{config['service']}-{config['project_number']}.{config['region']}.run.app"
 
 
+def ocr_service(config: dict) -> str:
+    """The private OCR service. Same image as the API, started with scripts/cloudrun_ocr_entrypoint.py."""
+    return f"{config['service']}-ocr"
+
+
+def ocr_service_url(config: dict) -> str:
+    return f"https://{ocr_service(config)}-{config['project_number']}.{config['region']}.run.app"
+
+
+def ocr_environment(config: dict) -> dict[str, str]:
+    """The OCR server reads photos only: no database, mail or user secrets."""
+    return dict(
+        APP_ENV="production", OCR_ENGINE="paddle", OCR_LANG="korean", OCR_DET_MAX_SIDE="1280", OCR_CPU_THREADS="4",
+        OCR_ENGINES="2", OCR_ORIENTATION_MODEL="PP-LCNet_x1_0_doc_ori", OCR_WARMUP="true", TIMEZONE="Asia/Seoul",
+    )
+
+
 def environment(config: dict) -> dict[str, str]:
     hosts = [urlsplit(service_url(config)).hostname, 'localhost', '127.0.0.1']
     hosts += config.get("hosts", [])  # a domain mapped to this service, e.g. api.foodiary.kr. Without it the server answers that name with 400
@@ -123,8 +140,8 @@ def environment(config: dict) -> dict[str, str]:
         TRUSTED_HOSTS=",".join(dict.fromkeys(hosts)),
         SHARE_LINK_BASE=config.get("share_link_base", ""),  # the app page share links and QR codes open. Without it the server cannot make QR codes
         CORS_ORIGINS=",".join(config["origins"]), UPLOAD_DIR="/app/uploads", MAX_UPLOAD_MB="10",
-        OCR_ENGINE="paddle", OCR_LANG="korean", OCR_DET_MAX_SIDE="1280", OCR_CPU_THREADS="4", OCR_ENGINES="2",
-        OCR_ORIENTATION_MODEL="PP-LCNet_x1_0_doc_ori",
+        # Photos are read by the private OCR service; this service signs its calls with its Google identity.
+        OCR_ENGINE="remote", OCR_SERVICE_URL=ocr_service_url(config), OCR_SERVICE_AUTH="google", OCR_REMOTE_ENGINES="2",
         OCR_WARMUP="true", OCR_FAIL_CLOSED="true", RATE_LIMIT_ENABLED="true", RATE_LIMIT_SCOPE="global",
         AUTH_REQUESTS_PER_MINUTE="30", OCR_REQUESTS_PER_MINUTE="30", EMAIL_BACKEND="smtp",
         SMTP_HOST=config["smtp_host"], SMTP_PORT="587", SMTP_USER=config["smtp_user"], MAIL_FROM=config["mail_from"],
@@ -191,7 +208,9 @@ class Deployment:
 
     def plan(self) -> dict:
         return dict(project=self.project, region=self.region, service=self.service, url=service_url(self.config),
-                    cpu=8, memory="8Gi", min_instances=0, max_instances=1, concurrency=20,
+                    cpu=2, memory="2Gi", min_instances=0, max_instances=1, concurrency=40,
+                    ocr=dict(service=ocr_service(self.config), cpu=8, memory="8Gi", min_instances=0, max_instances=1,
+                             concurrency=20, access="private; only the API service account may invoke it"),
                     billing="request-based", database="external PostgreSQL over TLS (Neon Free recommended)",
                     uploads=f"private gs://{self.config['bucket']} mounted at /app/uploads",
                     secrets=list(SECRET_KEYS), initial_access="IAM private; publish after verification",
@@ -379,11 +398,13 @@ class Deployment:
         migrated = self.folder / "migration.json"
         if not migrated.exists() or json.loads(migrated.read_text(encoding="utf-8")) != self.migration_signature():
             raise ValueError("Run the migration job successfully for this image before deploying")
+        self.deploy_ocr()
         env_file = self.folder / "env.json"
         save_private(env_file, json.dumps(environment(self.config)))
+        # The API no longer loads OCR models, so it needs far less. TODO: balance after measuring memory on Cloud Run
         self.gcloud("run", "deploy", self.service, f"--region={self.region}", f"--image={self.image()}",
                     f"--service-account={self.account('run')}", "--execution-environment=gen2", "--port=8080",
-                    "--cpu=8", "--memory=8Gi", "--cpu-throttling", "--cpu-boost", "--concurrency=20",
+                    "--cpu=2", "--memory=2Gi", "--cpu-throttling", "--cpu-boost", "--concurrency=40",
                     "--min=0", "--max=1", "--min-instances=0", "--max-instances=1", "--timeout=180s",
                     "--no-allow-unauthenticated", f"--env-vars-file={env_file.resolve()}",
                     f"--set-secrets={self.secret_bindings(self.runtime_secret_keys())}",
@@ -392,6 +413,22 @@ class Deployment:
                     "--startup-probe=tcpSocket.port=8080,periodSeconds=5,timeoutSeconds=5,failureThreshold=48")
         if self.config.get("push_web_public_key") or self.config.get("push_expo_enabled"):
             self.gcloud("run", "jobs", "update", f"{self.service}-push", f"--region={self.region}", f"--image={self.image()}")
+
+    def deploy_ocr(self) -> None:
+        """The OCR service: private, invoked only by the API's account. Never published."""
+        name = ocr_service(self.config)
+        env_file = self.folder / "ocr-env.json"
+        save_private(env_file, json.dumps(ocr_environment(self.config)))
+        # shortcut: shares the API's service account (it can read the API's secrets); give it its own account if that matters
+        self.gcloud("run", "deploy", name, f"--region={self.region}", f"--image={self.image()}",
+                    f"--service-account={self.account('run')}", "--execution-environment=gen2", "--port=8080",
+                    "--cpu=8", "--memory=8Gi", "--cpu-throttling", "--cpu-boost", "--concurrency=20",
+                    "--min=0", "--max=1", "--min-instances=0", "--max-instances=1", "--timeout=180s",
+                    "--no-allow-unauthenticated", f"--env-vars-file={env_file.resolve()}",
+                    "--command=python", "--args=/app/scripts/cloudrun_ocr_entrypoint.py",
+                    "--startup-probe=tcpSocket.port=8080,periodSeconds=5,timeoutSeconds=5,failureThreshold=48")
+        self.gcloud("run", "services", "add-iam-policy-binding", name, f"--region={self.region}",
+                    f"--member=serviceAccount:{self.account('run')}", "--role=roles/run.invoker")
 
     def verify(self, *, private: bool = True) -> None:
         token = self.gcloud("auth", "print-identity-token", capture=True) if private else None

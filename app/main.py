@@ -50,7 +50,7 @@ async def lifespan(_app: FastAPI):
     if settings.auto_create_tables:
         Base.metadata.create_all(bind=engine)
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
-    if settings.ocr_warmup:
+    if settings.ocr_warmup and settings.ocr_engine.strip().lower() != "remote":  # remote: the OCR server warms itself up
         from app.services.ocr.paddle import get_paddle_engine
 
         logger.info("OCR 시작 검사: 모델 로딩 및 시험 추론")
@@ -99,7 +99,12 @@ def ready():
             connection.execute(text("SELECT 1"))
     except Exception:
         return JSONResponse(status_code=503, content={"status": "unavailable", "database": "unavailable"})
-    if settings.ocr_warmup:
+    if settings.ocr_warmup and settings.ocr_engine.strip().lower() == "remote":
+        from app.services.ocr.remote import get_remote_engine
+
+        if not get_remote_engine().ready():
+            return JSONResponse(status_code=503, content={"status": "unavailable", "ocr": "unavailable"})
+    elif settings.ocr_warmup:
         from app.services.ocr.paddle import get_paddle_engine
 
         if not get_paddle_engine().ready:

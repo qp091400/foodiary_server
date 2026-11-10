@@ -1,13 +1,18 @@
-# GitHub 푸시로 이미지 자동 빌드
+# GitHub 푸시로 자동 빌드·배포
 
-`main`에 푸시하면 Cloud Build가 Cloud Run 이미지를 자동으로 만든다. 압축본을 만들고 올리고 푸는 단계와 Cloud Shell의 빌드 대기가 없어진다.
-**배포(`migrate` → `deploy` → `publish`)는 자동으로 하지 않는다.** `deploy`부터 `publish`가 끝날 때까지 서비스가 비공개라서, 푸시마다 접속이 끊기지 않도록 사람이 시점을 정해 실행한다.
+`main`에 푸시하면 Cloud Build가 Cloud Run 이미지를 만들고 **바로 배포까지 한다** (2026-11-10~, `deploy/auto_deploy.sh`).
+
+- 자동 배포는 **이미지만 바꾼다**: 마이그레이션 잡 → `foodiary-ocr` → `foodiary` 순서로 `gcloud run ... update --image`. 환경 변수·비밀값·사진 버킷·공개 여부는 그대로라서 **배포 중에도 API는 공개 상태 그대로**다(`cloudrun.py deploy`처럼 비공개가 되지 않는다).
+- 끝나면 API의 `/ready`(DB + OCR 서비스)를 3번까지 확인하고, 실패하면 두 서비스를 **바로 전 리비전으로 되돌리고** 빌드를 실패로 표시한다. 마이그레이션은 되돌리지 않으니, 마이그레이션은 이전 코드에서도 돌아가게 만든다.
+- **설정을 바꿀 때**(CPU·메모리·환경 변수·`add-origin` 등)는 예전처럼 Cloud Shell에서 `deploy` → `publish`. 자동 배포는 설정을 건드리지 않는다.
+- **`main`에 누가 푸시하든 배포된다.** 다른 사람의 푸시도 마찬가지다. 잠시 끄려면 트리거의 대체 변수 `_AUTO_DEPLOY`를 `false`로 바꾼다(빌드만 한다).
+- `foodiary-ocr` 서비스가 아직 없으면(서버 분리 전) 아무것도 바꾸지 않고 멈춘다. 처음 한 번은 Cloud Shell에서 `release --image 커밋번호`로 두 서비스를 만든다.
 
 | | 지금(압축본) | 자동 빌드 |
 |---|---|---|
 | 코드 전달 | 압축본 만들기 → Cloud Shell 업로드 → 풀기 | GitHub에 푸시 |
 | 이미지 빌드 | `release`가 Cloud Shell에서 빌드까지 | 푸시하면 Cloud Build가 자동으로 |
-| 배포 | `release` | `git pull` 후 `release --image 커밋번호` |
+| 배포 | `release` | 자동 (설정 변경만 `deploy` → `publish`) |
 
 이미지에는 푸시한 커밋의 앞 7글자(`$SHORT_SHA`)와 `latest` 이름표가 붙는다. 옛 압축본 방식(`release`만 실행)도 그대로 쓸 수 있다.
 
@@ -66,7 +71,19 @@ git init -q && git remote add origin https://github.com/qp091400/foodiary_server
 git fetch -q origin main && git checkout -f -B main origin/main
 ```
 
-### 5. (권장) 오래된 이미지 자동 정리
+### 5. 자동 배포 권한 (한 번)
+빌드 계정이 Cloud Run 서비스·잡의 이미지를 바꾸고 마이그레이션 잡을 실행할 수 있게 한다. 실행 계정(`-run`, `-migrate`)으로 돌게 하려면 그 계정을 "대신 쓸" 권한도 필요하다.
+```sh
+PROJECT=$(gcloud config get-value project)
+BUILD=foodiary-build@$PROJECT.iam.gserviceaccount.com
+gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:$BUILD --role=roles/run.developer --condition=None
+for ACCOUNT in foodiary-run foodiary-migrate; do
+  gcloud iam service-accounts add-iam-policy-binding $ACCOUNT@$PROJECT.iam.gserviceaccount.com     --member=serviceAccount:$BUILD --role=roles/iam.serviceAccountUser
+done
+```
+이미 만든 트리거는 그대로 둔다(`deploy/cloudbuild.trigger.yaml`을 다시 읽는다). 설명만 바꾸려면 콘솔에서 고친다.
+
+### 6. (권장) 오래된 이미지 자동 정리
 푸시마다 이미지가 하나씩 쌓이고, 이미지는 모델과 레시피 DB 때문에 크다. 최근 5개는 남기고 14일이 지난 것은 지운다. `policy.json`:
 ```json
 [
@@ -82,8 +99,8 @@ gcloud artifacts repositories set-cleanup-policies foodiary --location=asia-nort
 Keep 정책이 Delete 정책보다 우선한다. 정책은 하루 안팎에 적용된다. **지워진 이미지를 쓰는 옛 Cloud Run 리비전은 새로 시작할 수 없다.** 되돌리기는 최근 리비전까지만 믿고, 오래된 리비전으로 되돌릴 일을 위해 필요한 이미지는 남겨 둔다.
 
 ## 평소 쓰는 법
-1. GitHub Desktop에서 **Push**하면 빌드가 자동으로 시작된다. Cloud Build 기록에서 `SUCCESS`가 될 때까지 기다린다(약 7분).
-2. Cloud Shell에서 같은 커밋을 받아 그 이미지로 배포한다. 창을 닫아도 계속되게 `nohup`을 쓴다.
+1. GitHub Desktop에서 **Push**하면 빌드와 배포가 자동으로 시작된다. Cloud Build 기록(리전 `asia-northeast1`)에서 `SUCCESS`가 되면 반영된 것이다(약 10분). `FAILURE`면 로그 끝부분을 본다: 빌드에서 멈췄으면 서비스는 그대로이고, `/ready`에서 멈췄으면 이전 리비전으로 돌아가 있다.
+2. 자동 배포를 껐거나 손으로 다시 배포하고 싶을 때는 Cloud Shell에서 같은 커밋을 받아 그 이미지로 배포한다. 창을 닫아도 계속되게 `nohup`을 쓴다.
 ```sh
 cd ~/foodiary-cloudrun && git pull -q origin main
 nohup python3 scripts/cloudrun.py release --image $(git rev-parse HEAD | cut -c1-7) > ~/release.log 2>&1 &
@@ -101,4 +118,5 @@ tail -f ~/release.log
 ## 비용과 한계
 - 푸시마다 Cloud Build 시간이 쓰인다. 이 구성의 월 요금은 계산하지 못했으니 빌드 횟수가 많아지면 청구 콘솔에서 확인한다.
 - 푸시마다 쌓이는 이미지 저장 요금은 위 5번의 정리 정책으로 줄인다.
-- 자동 배포는 하지 않는다. 필요해지면 배포 시간대를 정하는 방법(수동 승인 등)과 함께 따로 설계한다.
+- 자동 배포에는 승인 단계가 없다. 푸시가 곧 배포다. 배포 시점을 고르고 싶어지면 `_AUTO_DEPLOY=false`로 두고 위 2번처럼 손으로 배포한다.
+- 이 자동 배포는 Google Cloud에서 아직 실행해 보지 않았다. 로컬에서는 가짜 `gcloud`·`curl`로 순서·되돌리기·멈춤을 시험했다(`tests/test_auto_deploy.py`). 첫 푸시 때 Cloud Build 로그를 지켜본다.

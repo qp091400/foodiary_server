@@ -28,15 +28,36 @@ services:
       UPLOAD_DIR: /app/uploads
       RECIPE_DATA_DIR: /app/recipe_data
       RECOMMENDATION_MODEL_DIR: /opt/recommendation-model
+      # 영수증 사진은 ocr 서비스가 읽는다 (아래). API 컨테이너는 OCR 모델을 올리지 않는다
+      OCR_ENGINE: remote
+      OCR_SERVICE_URL: http://ocr:8001
     depends_on:
       db:
         condition: service_healthy
+      ocr:
+        condition: service_started
     ports:
       - "8000:8000"
     volumes:
       - uploads:/app/uploads
       - recipe_data:/app/recipe_data
       - ./recipe_data/recommendation-seed:/opt/recommendation-model:ro
+
+  # OCR server (app/ocr_server.py): reads receipt photos for the api service. Not published to the host.
+  ocr:
+    build:
+      context: .
+      target: development
+      additional_contexts:
+        recipe_seed: ./recipe_data/image-seed
+    entrypoint: []  # no recipe data or database here
+    command: ["uvicorn", "app.ocr_server:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "1"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      OCR_ENGINE: paddle
+    volumes:
       # PaddleOCR 모델 캐시: 재시작할 때 다시 내려받지 않는다
       - paddle_models:/root/.paddlex
 

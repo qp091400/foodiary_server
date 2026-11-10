@@ -40,6 +40,7 @@ docker compose up --build -d
 - 데이터 버전은 저장소 루트의 [recipe-package.json](recipe-package.json) 한 파일에서 관리합니다. 갱신 시 이 파일을 변경하고 `python3 -m scripts.prepare_recipes` → `docker compose up --build -d`를 실행합니다. 빌드는 준비된 DB가 이 설정과 맞는지 오프라인으로 검사합니다.
 - 서버 시작 시 레시피가 같으면 유지하고, 다르면 기존 레시피 DB만 백업 후 교체합니다. 이전 이미지로 돌아가면 레시피도 그 이미지 버전으로 돌아갑니다.
 - API: <http://localhost:8000>, Swagger: <http://localhost:8000/docs>
+- **서버가 둘입니다.** `api`(로그인·냉장고·통계 등 전부)와 `ocr`(영수증 사진 읽기, `app/ocr_server.py`). `api`는 사진을 받으면 `OCR_ENGINE=remote`로 `ocr`에 보내고 글자 상자를 받아 초안을 만듭니다. `ocr`은 호스트에 포트를 열지 않습니다. 하나로 돌리려면 `api`에 `OCR_ENGINE=paddle`을 주면 예전처럼 API가 직접 읽습니다.
 - 첫 빌드는 PaddleOCR 설치 때문에 5~10분 걸립니다.
 - **첫 영수증 업로드는 모델을 내려받느라 느립니다** (인터넷 필요, Hugging Face에서 받습니다). 모델은 `paddle_models` 볼륨에 남아 재시작해도 다시 받지 않습니다.
 - 볼륨: `pgdata`(사용자 DB), `uploads`(영수증 이미지), `paddle_models`(OCR 모델 캐시), `recipe_data`(레시피 DB)

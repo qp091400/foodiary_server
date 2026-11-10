@@ -49,16 +49,19 @@ def test_invalid_connection_errors_do_not_echo_secret(value):
 def test_plan_is_offline_and_contains_no_secret_values(tmp_path, monkeypatch):
     monkeypatch.setattr(cloudrun.subprocess, "run", lambda *a, **kw: pytest.fail("Plan must not run commands"))
     plan = cloudrun.Deployment(config(), tmp_path).plan()
-    assert (plan["cpu"], plan["memory"], plan["min_instances"], plan["max_instances"]) == (8, "8Gi", 0, 1)
-    assert plan["concurrency"] == 20
+    assert (plan["cpu"], plan["memory"], plan["min_instances"], plan["max_instances"]) == (2, "2Gi", 0, 1)
+    ocr = plan["ocr"]
+    assert (ocr["service"], ocr["cpu"], ocr["memory"], ocr["concurrency"]) == ("foodiary-ocr", 8, "8Gi", 20)
     env = cloudrun.environment(config())
     assert not set(cloudrun.SECRET_KEYS) & env.keys()
     assert "*" not in env["TRUSTED_HOSTS"] and env["RATE_LIMIT_SCOPE"] == "global"
-    assert env["OCR_ORIENTATION_MODEL"] == "PP-LCNet_x1_0_doc_ori"
     assert env["OCR_REQUESTS_PER_MINUTE"] == "30"  # 한도는 사진 한 장을 한 번으로 센다. OCR이 빨라져서 올렸다
+    ocr_env = cloudrun.ocr_environment(config())
+    assert ocr_env["OCR_ORIENTATION_MODEL"] == "PP-LCNet_x1_0_doc_ori"
+    assert int(env["OCR_REMOTE_ENGINES"]) == int(ocr_env["OCR_ENGINES"])  # the API sends photos ahead for each engine
     # 엔진 수 x 엔진당 스레드 수 = 서버 CPU 개수 (적으면 CPU가 놀고, 많으면 서로 기다린다). 엔진마다 메모리를 1~2GB 쓴다
-    assert int(env["OCR_ENGINES"]) * int(env["OCR_CPU_THREADS"]) == plan["cpu"]
-    assert int(env["OCR_ENGINES"]) * 2.5 <= int(plan["memory"].removesuffix("Gi"))
+    assert int(ocr_env["OCR_ENGINES"]) * int(ocr_env["OCR_CPU_THREADS"]) == ocr["cpu"]
+    assert int(ocr_env["OCR_ENGINES"]) * 2.5 <= int(ocr["memory"].removesuffix("Gi"))
 
 
 def test_setup_checks_project_number_before_any_mutation(tmp_path, monkeypatch):
@@ -88,15 +91,30 @@ def test_migrate_and_deploy_use_pinned_secrets_and_separate_identities(tmp_path,
     assert calls[1][:4] == ("run", "jobs", "execute", "foodiary-migrate")
     assert json.loads((tmp_path / "migration.json").read_text())["image"] == image
     deployment.deploy()
-    command = calls[-1]
+    ocr, invoker, command = calls[-3:]
+    # OCR service first: same image, own entrypoint, the big machine, private, no secrets and no uploads volume
+    assert ocr[:3] == ("run", "deploy", "foodiary-ocr") and "--image=" + image in ocr
+    assert "--cpu=8" in ocr and "--memory=8Gi" in ocr and "--cpu-boost" in ocr and "--concurrency=20" in ocr
+    assert "--args=/app/scripts/cloudrun_ocr_entrypoint.py" in ocr and "--no-allow-unauthenticated" in ocr
+    assert not any(argument.startswith(("--set-secrets", "--add-volume")) for argument in ocr)
+    assert invoker[:4] == ("run", "services", "add-iam-policy-binding", "foodiary-ocr")
+    assert "--member=serviceAccount:foodiary-run@example-project.iam.gserviceaccount.com" in invoker
+    assert "--role=roles/run.invoker" in invoker
+    # then the API, which no longer loads OCR models
+    assert command[:3] == ("run", "deploy", "foodiary")
     assert "--image=" + image in command
     assert "--no-allow-unauthenticated" in command and "--cpu-throttling" in command
-    assert "--cpu=8" in command
-    assert "--cpu-boost" in command  # 잠든 서버가 깨어날 때(모델 로딩) CPU를 더 받는다
-    assert "--concurrency=20" in command  # 줄 서서 기다리는 업로드가 가벼운 요청을 막지 않게
-    assert "--memory=8Gi" in command and "--max=1" in command and "--min=0" in command
+    assert "--cpu=2" in command and "--memory=2Gi" in command
+    assert "--cpu-boost" in command
+    assert "--max=1" in command and "--min=0" in command  # one instance: the request limiter is per instance
     assert "--service-account=foodiary-run@example-project.iam.gserviceaccount.com" in command
     assert any("mount-options=uid=10001;gid=10001" in argument for argument in command)
+    api_env = json.loads((tmp_path / "env.json").read_text())
+    assert api_env["OCR_ENGINE"] == "remote" and api_env["OCR_SERVICE_AUTH"] == "google"
+    assert api_env["OCR_SERVICE_URL"] == "https://foodiary-ocr-123456789012.asia-northeast1.run.app"
+    ocr_env = json.loads((tmp_path / "ocr-env.json").read_text())
+    assert ocr_env["OCR_ENGINE"] == "paddle" and ocr_env["OCR_WARMUP"] == "true"
+    assert not any(key in ocr_env for key in ("DATABASE_URL", "SMTP_USER", "JWT_SECRET"))
 
 
 def test_failed_migration_never_marks_image_as_migrated(tmp_path, monkeypatch):
@@ -656,25 +674,27 @@ def trigger_build():
     return yaml.safe_load(text), text
 
 
-def test_trigger_build_tags_the_image_with_the_commit_and_latest_and_deploys_nothing():
+def test_trigger_build_tags_the_image_with_the_commit_and_latest_then_deploys_it():
     build, _ = trigger_build()
     assert build["images"] == [
         "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE}:${SHORT_SHA}",
         "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE}:latest",
     ]
-    docker_build = build["steps"][-1]
+    docker_build, push, deploy = build["steps"][-3:]
     assert docker_build["args"][:4] == ["build", "--target", "cloudrun", "--tag"] and docker_build["args"][-1] == "."
     assert [arg for arg in docker_build["args"] if "docker.pkg.dev" in arg] == build["images"]
+    assert push["args"][:2] == ["push", "--all-tags"]  # `images` are pushed only after all steps; the deploy needs them now
+    assert deploy["args"] == ["deploy/auto_deploy.sh"]
+    assert "IMAGE=" + build["images"][0] in deploy["env"]  # the commit's own image, never `latest`
     assert build["options"]["logging"] == "CLOUD_LOGGING_ONLY"  # 사용자 지정 서비스 계정으로 돌리는 빌드에 필요하다
-    steps_text = str(build["steps"])
-    assert "run deploy" not in steps_text and "migrate" not in steps_text  # 배포는 사람이 cloudrun.py로 한다
-    assert set(build["substitutions"]) == {"_REGION", "_REPOSITORY", "_SERVICE"}  # 트리거가 따로 넣어야 하는 값은 없다
+    assert "run deploy" not in str(build["steps"])  # settings stay with cloudrun.py deploy; the trigger swaps images only
+    assert build["substitutions"] == {"_REGION": "asia-northeast1", "_REPOSITORY": "foodiary", "_SERVICE": "foodiary", "_AUTO_DEPLOY": "true"}
 
 
 def test_trigger_build_downloads_the_recipe_database_before_docker_builds_it():
     build, text = trigger_build()
     names = [step["name"].rsplit("/", 1)[-1] for step in build["steps"]]
-    assert names == ["docker", "cloud-sdk:slim", "cloud-sdk:slim", "docker"]
+    assert names == ["docker", "cloud-sdk:slim", "cloud-sdk:slim", "docker", "docker", "cloud-sdk:slim"]
     script = build["steps"][1]["args"][-1]
     recommendation_script = build["steps"][2]["args"][-1]
     assert 'recommendation-package.json' in recommendation_script

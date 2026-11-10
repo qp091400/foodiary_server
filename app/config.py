@@ -30,7 +30,13 @@ class Settings(BaseSettings):
     upload_dir: str = "uploads"
     max_upload_mb: int = 10
 
-    ocr_engine: str = "paddle"  # paddle | none
+    ocr_engine: str = "paddle"  # paddle | remote | none. remote: send photos to the OCR server (app/ocr_server.py)
+    # OCR server address for OCR_ENGINE=remote, e.g. http://ocr:8001 locally or the private Cloud Run URL
+    ocr_service_url: str = ""
+    # google: call the OCR server with this service's Google ID token (Cloud Run IAM). none: plain calls (local compose)
+    ocr_service_auth: Literal["none", "google"] = "none"
+    ocr_remote_engines: int = Field(2, ge=1, le=8)  # OCR engines on the OCR server; sets how many photos are sent ahead
+    ocr_remote_timeout_seconds: int = Field(60, ge=5, le=600)  # one photo's reading time on the OCR server, on top of the queue wait
     ocr_lang: str = "korean"
     # 글자 위치 검출에 쓰는 해상도(긴 변 px). 0이면 줄이지 않는다. 1280이면 휴대폰 사진에서 2배쯤 빨라진다.
     ocr_det_max_side: int = 0
@@ -106,8 +112,10 @@ class Settings(BaseSettings):
 
     def validate_for_startup(self) -> None:
         """운영에서는 개발 기본값으로 서버를 공개하지 않는다. 비밀값은 오류에 넣지 않는다."""
-        if self.ocr_engine.strip().lower() not in {"paddle", "none"}:
-            raise ValueError("OCR_ENGINE must be paddle or none")
+        if self.ocr_engine.strip().lower() not in {"paddle", "remote", "none"}:
+            raise ValueError("OCR_ENGINE must be paddle, remote or none")
+        if self.ocr_engine.strip().lower() == "remote" and not re.fullmatch(r"https?://\S+", self.ocr_service_url):
+            raise ValueError("OCR_ENGINE=remote needs OCR_SERVICE_URL (http:// or https://)")
         if self.app_env != "production":
             return
 
@@ -127,8 +135,10 @@ class Settings(BaseSettings):
             errors.append("CORS_ORIGINS must name explicit origins")
         if any("*" in host for host in self.trusted_host_list):
             errors.append("TRUSTED_HOSTS must name explicit hosts")
-        if self.ocr_engine.strip().lower() != "paddle" or not self.ocr_warmup or not self.ocr_fail_closed:
-            errors.append("production requires OCR_ENGINE=paddle, OCR_WARMUP=true, OCR_FAIL_CLOSED=true")
+        if self.ocr_engine.strip().lower() not in {"paddle", "remote"} or not self.ocr_warmup or not self.ocr_fail_closed:
+            errors.append("production requires OCR_ENGINE=paddle or remote, OCR_WARMUP=true, OCR_FAIL_CLOSED=true")
+        if self.ocr_engine.strip().lower() == "remote" and not self.ocr_service_url.startswith("https://"):
+            errors.append("OCR_SERVICE_URL must use https in production")
         if not self.rate_limit_enabled:
             errors.append("RATE_LIMIT_ENABLED must be true")
         try:

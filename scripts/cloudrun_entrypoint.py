@@ -15,9 +15,10 @@ def check_runtime() -> None:
     if settings.app_env != "production" or settings.rate_limit_scope != "global":
         raise RuntimeError("Cloud Run requires production mode and global request limiting")
     settings.validate_for_startup()
-    if not settings.ocr_models_dir:
-        raise RuntimeError("Cloud Run requires baked OCR models")
-    verify_model_files()
+    if settings.ocr_engine.strip().lower() != "remote":  # remote: the OCR service checks its own models
+        if not settings.ocr_models_dir:
+            raise RuntimeError("Cloud Run requires baked OCR models")
+        verify_model_files()
     root = Path(settings.upload_dir)
     # Prevent an accidentally omitted volume from silently losing receipts on restart.
     if not root.is_mount():
