@@ -689,7 +689,14 @@ def test_trigger_build_tags_the_image_with_the_commit_and_latest_then_deploys_it
     assert "IMAGE=" + build["images"][0] in deploy["env"]  # the commit's own image, never `latest`
     assert build["options"]["logging"] == "CLOUD_LOGGING_ONLY"  # 사용자 지정 서비스 계정으로 돌리는 빌드에 필요하다
     assert "run deploy" not in str(build["steps"])  # settings stay with cloudrun.py deploy; the trigger swaps images only
-    assert build["substitutions"] == {"_REGION": "asia-northeast1", "_REPOSITORY": "foodiary", "_SERVICE": "foodiary", "_AUTO_DEPLOY": "true"}
+    assert build["substitutions"] == {"_REGION": "asia-northeast1", "_REPOSITORY": "foodiary", "_SERVICE": "foodiary", "_AUTO_DEPLOY": "true",
+                                      "_TEST_ACCOUNTS": "true"}
+    assert "TEST_ACCOUNTS=${_TEST_ACCOUNTS}" in deploy["env"]
+
+
+def test_manual_deploys_follow_the_same_test_account_switch_as_the_trigger():
+    build, _ = trigger_build()
+    assert cloudrun.environment(config())["TEST_ACCOUNTS_ENABLED"] == build["substitutions"]["_TEST_ACCOUNTS"]
 
 
 def test_trigger_build_downloads_the_recipe_database_before_docker_builds_it():

@@ -118,6 +118,14 @@ def service_url(config: dict) -> str:
     return f"https://{config['service']}-{config['project_number']}.{config['region']}.run.app"
 
 
+def test_accounts_enabled() -> str:
+    """The login screen's test-account button. One switch for manual and automatic deploys: _TEST_ACCOUNTS in the trigger file."""
+    found = re.search(r"^\s*_TEST_ACCOUNTS: '(true|false)'$", (ROOT / "deploy" / "cloudbuild.trigger.yaml").read_text(encoding="utf-8"), re.M)
+    if found is None:
+        raise ValueError("deploy/cloudbuild.trigger.yaml must set _TEST_ACCOUNTS to 'true' or 'false'")
+    return found.group(1)
+
+
 def ocr_service(config: dict) -> str:
     """The private OCR service. Same image as the API, started with scripts/cloudrun_ocr_entrypoint.py."""
     return f"{config['service']}-ocr"
@@ -151,6 +159,7 @@ def environment(config: dict) -> dict[str, str]:
         TIMEZONE="Asia/Seoul",
         PUSH_WEB_PUBLIC_KEY=config.get("push_web_public_key", ""),
         PUSH_EXPO_ENABLED="true" if config.get("push_expo_enabled", False) else "false",
+        TEST_ACCOUNTS_ENABLED=test_accounts_enabled(),
         PUSH_IMMEDIATE_ENABLED="true" if config.get("push_immediate_enabled", False) else "false",
         **({"PUSH_VAPID_SUBJECT": config["push_vapid_subject"]} if config.get("push_immediate_enabled") else {}),
     )

@@ -5,7 +5,7 @@
 # Order: migrate -> OCR service -> API service -> /ready check. A failed check puts both services back on the previous revision
 # (a migration is not undone: migrations must keep working with the previous code).
 set -euo pipefail
-: "${IMAGE:?}" "${REGION:?}" "${SERVICE:?}"
+: "${IMAGE:?}" "${REGION:?}" "${SERVICE:?}" "${TEST_ACCOUNTS:?}"
 
 if [ "${AUTO_DEPLOY:-true}" != "true" ]; then
     echo "Automatic deploy is off (_AUTO_DEPLOY=${AUTO_DEPLOY}). The image was built only."
@@ -28,8 +28,10 @@ echo "Serving now: $SERVICE=$previous_api, $OCR=$previous_ocr"
 run run jobs update "$SERVICE-migrate" --image="$IMAGE"
 run run jobs execute "$SERVICE-migrate" --wait
 
+run run services update "$OCR" --image="$IMAGE"
+# The one setting that follows the repository: _TEST_ACCOUNTS in the trigger file (cloudrun.py deploy reads it too).
+run run services update "$SERVICE" --image="$IMAGE" --update-env-vars="TEST_ACCOUNTS_ENABLED=$TEST_ACCOUNTS"
 for name in "$OCR" "$SERVICE"; do
-    run run services update "$name" --image="$IMAGE"
     run run services update-traffic "$name" --to-latest  # undo a pin left by an earlier rollback
 done
 if run run jobs describe "$SERVICE-push" --format='value(metadata.name)' >/dev/null 2>&1; then

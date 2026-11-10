@@ -7,6 +7,9 @@ substitutions:
   _REPOSITORY: foodiary
   _SERVICE: foodiary
   _AUTO_DEPLOY: 'true'
+  # Login screen test-account button (anyone may then make an account without email; daily and per-minute limits apply).
+  # Also read by scripts/cloudrun.py deploy, so this line is the only switch. 'false' turns it off at the next deploy.
+  _TEST_ACCOUNTS: 'true'
 steps:
   # .dockerignore keeps the 800+ MB recipe database out of local builds. The Cloud Run image needs exactly that one folder.
   - name: gcr.io/cloud-builders/docker
@@ -55,6 +58,7 @@ steps:
       - 'REGION=${_REGION}'
       - 'SERVICE=${_SERVICE}'
       - 'AUTO_DEPLOY=${_AUTO_DEPLOY}'
+      - 'TEST_ACCOUNTS=${_TEST_ACCOUNTS}'
 images:
   - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE}:${SHORT_SHA}'
   - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE}:latest'

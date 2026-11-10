@@ -39,7 +39,7 @@ def deploy(tmp_path, *, ocr_exists="yes", migration="ok", ready="ok", auto="true
     log.write_text("")
     env = {
         **os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "LOG": str(log),
-        "IMAGE": "registry/foodiary:abc1234", "REGION": "asia-northeast1", "SERVICE": "foodiary", "AUTO_DEPLOY": auto,
+        "IMAGE": "registry/foodiary:abc1234", "REGION": "asia-northeast1", "SERVICE": "foodiary", "AUTO_DEPLOY": auto, "TEST_ACCOUNTS": "true",
         "OCR_EXISTS": ocr_exists, "MIGRATION": migration, "READY": ready,
     }
     # bash needs a POSIX path to the script on Windows too
@@ -57,8 +57,8 @@ def test_a_push_migrates_then_swaps_the_image_of_ocr_then_api(tmp_path):
         "gcloud run jobs update foodiary-migrate --image=registry/foodiary:abc1234",
         "gcloud run jobs execute foodiary-migrate --wait",
         "gcloud run services update foodiary-ocr --image=registry/foodiary:abc1234",
+        "gcloud run services update foodiary --image=registry/foodiary:abc1234 --update-env-vars=TEST_ACCOUNTS_ENABLED=true",
         "gcloud run services update-traffic foodiary-ocr --to-latest",
-        "gcloud run services update foodiary --image=registry/foodiary:abc1234",
         "gcloud run services update-traffic foodiary --to-latest",
         "curl -fsS --max-time 180 https://api.example/ready",
     ]
